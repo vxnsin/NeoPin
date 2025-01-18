@@ -3,11 +3,20 @@ const bodyParser = require("body-parser");
 const fs = require("fs");
 const basicAuth = require('express-basic-auth');
 const os = require('os');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = 3000;
 
 app.use(bodyParser.json());
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 100, 
+    message: 'Too many requests, please try again later.'
+});
+
+app.use(limiter);
 
 app.use(basicAuth({
     users: { "admin": process.env.AUTH_PASSWORD },
@@ -127,4 +136,3 @@ app.listen(PORT, () => {
     console.log("MAde by Vensin")
     console.log(`Server is running on http://${serverIp}:${PORT}`);
 });
-
