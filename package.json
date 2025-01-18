@@ -1,0 +1,28 @@
+{
+  "name": "neopin",
+  "version": "1.0.0",
+  "description": "NeoPin Backend Server",
+  "keywords": [
+    "neopin"
+  ],
+  "homepage": "https://github.com/vxnsin/NeoPin#readme",
+  "bugs": {
+    "url": "https://github.com/vxnsin/NeoPin/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vxnsin/NeoPin.git"
+  },
+  "license": "ISC",
+  "author": "Vensin",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "express": "^4.21.2",
+    "express-basic-auth": "^1.2.1"
+  }
+}
