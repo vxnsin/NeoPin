@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = 3000;
+const devicesFile = 'devices.json';
 
 app.use(bodyParser.json());
 
@@ -19,7 +20,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 app.use(basicAuth({
-    users: { "admin": process.env.AUTH_PASSWORD },
+    users: { "admin": "test" },
     challenge: true,
     realm: "Restricted Area",
     unauthorizedResponse: 'Password required to access this resource'
@@ -28,20 +29,35 @@ app.use(basicAuth({
 let locations = [];
 let devices = [];
 
+const ensureDevicesFileExists = () => {
+    if (!fs.existsSync(devicesFile)) {
+        fs.writeFileSync(devicesFile, JSON.stringify([], null, 2)); 
+    }
+};
+
 const getDevices = () => {
     try {
-        const data = fs.readFileSync('devices.json');
+        ensureDevicesFileExists(); 
+        const data = fs.readFileSync(devicesFile);
         devices = JSON.parse(data);
     } catch (error) {
         console.error("Error reading devices: " + error);
     }
 };
 
+const updateDevicesFile = () => {
+    try {
+        fs.writeFileSync(devicesFile, JSON.stringify(devices, null, 2));
+    } catch (error) {
+        console.error("Error writing devices to file: " + error);
+    }
+};
+
 app.post('/checkLogin', (req, res) => {
-    const { serverIp, password } = req.body;
+    const { password } = req.body;
     
-    if (!serverIp || !password) {
-        return res.status(400).json({ error: "Server IP and Password are required" });
+    if (!password) {
+        return res.status(400).json({ error: "Password is required" });
     }
     
     if (password === process.env.AUTH_PASSWORD) {
@@ -52,10 +68,10 @@ app.post('/checkLogin', (req, res) => {
 });
 
 app.post('/register-device', (req, res) => {
-    const { ip, port, password, id, name } = req.body;
+    const { id, name } = req.body;
 
-    if (!ip || !port || !password || !id || !name) {
-        return res.status(400).json({ error: "IP, Port, Password, ID, and Name are required" });
+    if ( !id || !name) {
+        return res.status(400).json({ error: "ID (Name), and Name are required" });
     }
 
     getDevices();
@@ -65,10 +81,10 @@ app.post('/register-device', (req, res) => {
         return res.status(400).json({ error: "Device with this ID already exists" });
     }
 
-    const newDevice = { id, name, ip, port, password };
+    const newDevice = { id: name }; 
     devices.push(newDevice);
 
-    fs.writeFileSync('devices.json', JSON.stringify(devices, null, 2));
+    updateDevicesFile(); 
 
     res.status(201).json({ message: "Device registered successfully", device: newDevice });
 });
@@ -132,7 +148,7 @@ const getServerIp = () => {
 const serverIp = getServerIp();
 
 app.listen(PORT, () => {
-    console.log("NeoPin Backend - v0.1")
-    console.log("MAde by Vensin")
+    console.log("NeoPin Backend - v0.5");
+    console.log("Made by Vensin");
     console.log(`Server is running on http://${serverIp}:${PORT}`);
 });
