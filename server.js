@@ -20,7 +20,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 app.use(basicAuth({
-    users: { "admin": "test" },
+    users: { "admin": process.env.AUTH_PASSWORD },
     challenge: true,
     realm: "Restricted Area",
     unauthorizedResponse: 'Password required to access this resource'
