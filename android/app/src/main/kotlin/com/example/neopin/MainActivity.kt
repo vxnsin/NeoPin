@@ -1,4 +1,4 @@
-package com.example.neopin
+package net.neopin
 
 import io.flutter.embedding.android.FlutterActivity
 

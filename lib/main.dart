@@ -1,8 +1,13 @@
+import 'dart:developer';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:location/location.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'map.dart'; 
+import 'package:location/location.dart';
+import 'background_service.dart';  
+import 'login.dart';
+import 'map.dart';
 
 void main() {
   runApp(const MyApp());
@@ -14,58 +19,61 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'NeoPin',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 100, 11, 255)),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'NeoPin'),
+      initialRoute: '/', 
+      routes: {
+        '/': (context) => const SplashScreen(),
+        '/login': (context) => const LoginPage(),
+        '/map': (context) => const MapPage(), 
+      },
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-  final String title;
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  _SplashScreenState createState() => _SplashScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _SplashScreenState extends State<SplashScreen> {
   LocationData? _currentLocation;
-  bool _isServerIPEntered = false;
-  bool _isUserNameEntered = false;
-//
-  TextEditingController _serverIPController = TextEditingController();
-  TextEditingController _serverPasswordController = TextEditingController();
-  TextEditingController _userNameController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _checkForStoredData();
-    _getLocationPermission();
+    _requestLocationPermission();
+    initializeService();
   }
 
-  Future<void> _checkForStoredData() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String? storedServerIP = prefs.getString('server_ip');
-    String? storedUserName = prefs.getString('user_name');
-    if (storedServerIP != null && storedUserName != null) {
-      setState(() {
-        _isServerIPEntered = true;
-        _isUserNameEntered = true;
-      });
-    }
+  void initializeService() {
+    FlutterBackgroundService().configure(
+      androidConfiguration: AndroidConfiguration(
+        onStart: onBackgroundService,
+        autoStart: true,
+        autoStartOnBoot: true,
+        isForegroundMode: true,
+        initialNotificationContent: 'Service is running in the background',
+        initialNotificationTitle: 'NeoPin Background Service',
+      ),
+      iosConfiguration: IosConfiguration(autoStart: true),
+    );
+    FlutterBackgroundService().startService();
+    
+  
   }
 
-  Future<void> _getLocationPermission() async {
+  Future<void> _requestLocationPermission() async {
     final permissionStatus = await Permission.location.request();
     if (permissionStatus.isGranted) {
       _getCurrentLocation();
     } else {
-      // Fehleranzeige
+      print("Location permission denied");
     }
   }
 
@@ -73,119 +81,34 @@ class _MyHomePageState extends State<MyHomePage> {
     Location location = Location();
     try {
       _currentLocation = await location.getLocation();
-      setState(() {});
+      if (_currentLocation != null) {
+        _checkForStoredData();
+      }
     } catch (e) {
       print("Error getting location: $e");
     }
   }
 
-  Future<void> _saveServerData() async {
-    String serverIP = _serverIPController.text;
-    String serverPassword = _serverPasswordController.text;
-
+  Future<void> _checkForStoredData() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server_ip', serverIP);
-    await prefs.setString('server_password', serverPassword);
+    String? storedServerIP = prefs.getString('server_ip');
+    String? storedUserName = prefs.getString('user_name');
 
-    setState(() {
-      _isServerIPEntered = true;
-    });
-  }
-
-  Future<void> _saveUserName() async {
-    String userName = _userNameController.text;
-
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_name', userName);
-
-    setState(() {
-      _isUserNameEntered = true;
-    });
+    if (storedServerIP != null && storedUserName != null) {
+      Navigator.pushReplacementNamed(
+        context,
+        '/map',
+        arguments: _currentLocation, 
+      );
+    } else {
+      Navigator.pushReplacementNamed(context, '/login');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_currentLocation == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: Stack(
-        children: [
-          if (_isServerIPEntered && _isUserNameEntered)
-            MapPage(currentLocation: _currentLocation!),
-          
-          if (!_isServerIPEntered)
-            _buildServerIPForm(),
-          if (_isServerIPEntered && !_isUserNameEntered)
-            _buildUserNameForm(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildServerIPForm() {
-    return Positioned(
-      top: 100,
-      left: 16,
-      right: 16,
-      child: Card(
-        elevation: 10,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _serverIPController,
-                decoration: const InputDecoration(labelText: 'Enter Server IP'),
-              ),
-              SizedBox(height: 16),
-              TextField(
-                controller: _serverPasswordController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Enter Server Password'),
-              ),
-              SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _saveServerData,
-                child: const Text('Connect to Server'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUserNameForm() {
-    return Positioned(
-      top: 200,
-      left: 16,
-      right: 16,
-      child: Card(
-        elevation: 10,
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _userNameController,
-                decoration: const InputDecoration(labelText: 'Enter Your Name'),
-              ),
-              SizedBox(height: 16),
-              ElevatedButton(
-                onPressed: _saveUserName,
-                child: const Text('Save User Name'),
-              ),
-            ],
-          ),
-        ),
-      ),
+      body: Center(child: CircularProgressIndicator()), 
     );
   }
 }
