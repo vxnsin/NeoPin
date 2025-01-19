@@ -5,7 +5,7 @@ import 'package:location/location.dart';
 
 class MapPage extends StatelessWidget {
   final LocationData currentLocation;
-
+//
   const MapPage({super.key, required this.currentLocation});
 
   @override

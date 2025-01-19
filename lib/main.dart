@@ -36,7 +36,7 @@ class _MyHomePageState extends State<MyHomePage> {
   LocationData? _currentLocation;
   bool _isServerIPEntered = false;
   bool _isUserNameEntered = false;
-
+//
   TextEditingController _serverIPController = TextEditingController();
   TextEditingController _serverPasswordController = TextEditingController();
   TextEditingController _userNameController = TextEditingController();
