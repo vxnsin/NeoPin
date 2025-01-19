@@ -1,154 +1,152 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const fs = require("fs");
+const express = require('express');
+const WebSocket = require('ws');
 const basicAuth = require('express-basic-auth');
-const os = require('os');
 const rateLimit = require('express-rate-limit');
-
+const bodyParser = require('body-parser');
+const os = require('os');
+const { default: chalk } = require("@stagas/chalk")
+const readline = require("readline")
 const app = express();
-const PORT = 3000;
-const devicesFile = 'devices.json';
+const PORT = 3012;
+
+const wss = new WebSocket.Server({ noServer: true });
+
+const connectedDevices = new Map();
 
 app.use(bodyParser.json());
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, 
-    max: 100, 
-    message: 'Too many requests, please try again later.'
+    max: 100,
+    message: 'Too many requests, please try again later.',
 });
 
 app.use(limiter);
 
 app.use(basicAuth({
-    users: { "admin": process.env.AUTH_PASSWORD },
+    users: { "admin": "test" },
     challenge: true,
     realm: "Restricted Area",
     unauthorizedResponse: 'Password required to access this resource'
 }));
 
-let locations = [];
-let devices = [];
+wss.on('connection', (ws) => {
+    let deviceId;
+    let password;
+    let authenticated = false; 
 
-const ensureDevicesFileExists = () => {
-    if (!fs.existsSync(devicesFile)) {
-        fs.writeFileSync(devicesFile, JSON.stringify([], null, 2)); 
-    }
-};
+    ws.on('message', (message) => {
+        try {
+            const parsedMessage = JSON.parse(message);
 
-const getDevices = () => {
-    try {
-        ensureDevicesFileExists(); 
-        const data = fs.readFileSync(devicesFile);
-        devices = JSON.parse(data);
-    } catch (error) {
-        console.error("Error reading devices: " + error);
-    }
-};
+            console.log(parsedMessage)
 
-const updateDevicesFile = () => {
-    try {
-        fs.writeFileSync(devicesFile, JSON.stringify(devices, null, 2));
-    } catch (error) {
-        console.error("Error writing devices to file: " + error);
-    }
-};
+            if (!authenticated) {
+                deviceId = parsedMessage.deviceId;
+                password = parsedMessage.password;
 
-app.post('/checkLogin', (req, res) => {
-    const { password } = req.body;
-    
-    if (!password) {
-        return res.status(400).json({ error: "Password is required" });
-    }
-    
-    if (password === process.env.AUTH_PASSWORD) {
-        res.status(200).json({ message: "Login successful" });
-    } else {
-        res.status(401).json({ error: "Invalid password" });
-    }
-});
+                if (!deviceId || !password || password !== 'test') {
+                    ws.close(4000, 'Unauthorized');
+                    return;
+                }
 
-app.post('/register-device', (req, res) => {
-    const { id, name } = req.body;
-
-    if ( !id || !name) {
-        return res.status(400).json({ error: "ID (Name), and Name are required" });
-    }
-
-    getDevices();
-
-    const existingDevice = devices.find(dev => dev.id === id);
-    if (existingDevice) {
-        return res.status(400).json({ error: "Device with this ID already exists" });
-    }
-
-    const newDevice = { id: name }; 
-    devices.push(newDevice);
-
-    updateDevicesFile(); 
-
-    res.status(201).json({ message: "Device registered successfully", device: newDevice });
-});
-
-app.post('/location', (req, res) => {
-    const { id, latitude, longitude } = req.body;
-
-    if (!id || latitude === undefined || longitude === undefined) {
-        return res.status(400).json({ error: "ID, Latitude, and Longitude are required" });
-    }
-
-    const existingDevice = devices.find(dev => dev.id === id);
-    if (!existingDevice) {
-        return res.status(400).json({ error: "Device not found" });
-    }
-
-    const existingLocation = locations.findIndex(loc => loc.id === id);
-    const timestamp = new Date().toISOString();
-    const newLocation = { id, latitude, longitude, timestamp };
-
-    if (existingLocation !== -1) {
-        locations[existingLocation] = newLocation;
-        res.status(202).json(newLocation);
-    } else {
-        locations.push(newLocation);
-        res.status(202).json(newLocation);
-    }
-});
-
-app.get('/locations', (req, res) => {
-    if (locations.length === 0) {
-        return res.status(400).json({ error: "There are no locations" });
-    }
-
-    res.status(200).json(locations);
-});
-
-app.get('/location/:id', (req, res) => {
-    const { id } = req.params;
-    const location = locations.find(loc => loc.id === id);
-
-    if (!location) {
-        return res.status(400).json({ error: "Location not found" });
-    }
-
-    res.status(200).json(location);
-});
-
-const getServerIp = () => {
-    const networkInterfaces = os.networkInterfaces();
-    for (let interfaceName in networkInterfaces) {
-        for (let networkInterface of networkInterfaces[interfaceName]) {
-            if (networkInterface.family === 'IPv4' && !networkInterface.internal) {
-                return networkInterface.address;
+                authenticated = true;
+                connectedDevices.set(deviceId, ws);
+                console.log(chalk.bold.greenBright(`[+] Device ${chalk.whiteBright(deviceId)} connected`));
+                return;
             }
+
+            if (parsedMessage.ping) {
+                ws.send(JSON.stringify({ successful: 'Connected' }));
+            }
+
+            if(parsedMessage.latitude && parsedMessage.longitude) {
+                const deviceData = connectedDevices.get(deviceId);
+                if(deviceData) {
+                    deviceData.position = {
+                    latitude: parsedMessage.latitude,
+                    longitude: parsedMessage.longitude,
+                }
+                console.log(`Device ${deviceId} position updated:`, deviceData.position);
+                }
+            }
+        } catch (error) {
+            console.error('Error parsing message:', error);
+        }
+    });
+
+    ws.on('close', () => {
+        connectedDevices.delete(deviceId);
+        console.log(chalk.bold.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected`));
+    });
+});
+
+const server = app.listen(PORT, () => {
+    console.log(chalk.blue(`Server running at http://localhost:${PORT}`));
+});
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+})
+
+rl.on('line', (input) => {
+    if(input.trim() === "help") {
+        console.log("sendPing > Sends a ping message to all connected devices")
+        console.log("device-list > Shows a list of all connected devices")
+    }
+
+    if(input.trim() === "sendPing") {
+        if(connectedDevices.size === 0) {
+            console.log(chalk.yellow("No devices connected."))
+        } else {
+            connectedDevices.forEach((ws, deviceId) => {
+                const pingMessage = { ping: true };
+                ws.send(JSON.stringify(pingMessage), (err) => {
+                    if(err) { 
+                        console.error(`Error sending ping to device ${deviceId}:`, err)
+                    } else {
+                        console.log(`Ping sent to device ${deviceId}`)
+                    }
+                })
+            })
         }
     }
-    return 'localhost';
-};
+    if(input.trim() === "device-list") {
+        if(connectedDevices.size === 0) {
+            console.log(chalk.yellow("No devices connected."))
+        } else {
+            const devicesArray = Array.from(connectedDevices.keys());
+            devicesArray.forEach((_, index) => {
+                const content = `Device ID: ${_} - Position: ${connectedDevices.get(_).position ? `${connectedDevices.get(_).position.latitude} | ${connectedDevices.get(_).position.longitude}` : 'No position'}`;
+                const prefix = index === 0 ? '┏' : index === devicesArray.length - 0 ? '┗' : '┣';
+                console.log(chalk.greenBright(`${prefix} ${chalk.whiteBright(content)}`));
+            })
+        }
+    }
+})
 
-const serverIp = getServerIp();
+app.post("/sendPing", (req, res) => {
+    if(connectedDevices.size === 0) {
+        return res.status(400).json({message: "No devices connected"});
+    }
 
-app.listen(PORT, () => {
-    console.log("NeoPin Backend - v0.5");
-    console.log("Made by Vensin");
-    console.log(`Server is running on http://${serverIp}:${PORT}`);
+    connectedDevices.forEach((ws, deviceId) => {
+        const pingMessage = { ping: true };
+        ws.send(JSON.stringify(pingMessage), (err) => {
+            if(err) { 
+                console.error(`Error sending ping to device ${deviceId}:`, err)
+            } else {
+                console.log(`Ping sent to device ${deviceId}`)
+            }
+        })
+    })
+
+    res.status(200).json({message: "Ping sent to all devices"});
+})
+
+server.on('upgrade', (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+    });
 });
