@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3012:3012"
+    environment:
+      - PORT=3012
+      - PASSWORD=neopin123
+      - GITHUB_TOKEN=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
+      - GITHUB_REPO=https://api.github.com/repos/vxnsin/NeoPin
+      - GITHUB_BRANCH=server
+    volumes:
+      - .:/app
+    command: ["node", "server.js"]
