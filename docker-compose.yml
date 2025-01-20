@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: node:22
     ports:
       - "3012:3012"
     environment:
@@ -10,4 +8,5 @@ services:
       - PASSWORD=neopin123
     volumes:
       - .:/app
+    working_dir: /app
     command: ["node", "server.js"]
