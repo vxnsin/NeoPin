@@ -1,7 +1,7 @@
 services:
   app:
     image: node:22
-    command: sh -c "npm install && node server.js"
+    command: sh -c "npm install && node server.js >> /home/docker/neopin.log 2>&1"
     working_dir: /app
     ports:
       - "3012:3012"
