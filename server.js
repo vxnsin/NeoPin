@@ -10,14 +10,6 @@ const app = express();
 const PORT = process.env.PORT || 3012;
 const PASSWORD = process.env.PASSWORD || 'neopin123';
 
-
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const GITHUB_REPO = process.env.GITHUB_REPO || 'https://api.github.com/repos/vxnsin/NeoPin';
-const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main';
-const LAST_COMMIT_FILE = './last_commit.txt';
-
-const CHECK_INTERVAL = 5 * 60 * 1000;
-
 const wss = new WebSocket.Server({ noServer: true });
 
 const connectedDevices = new Map();
