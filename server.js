@@ -163,9 +163,9 @@ app.post("/sendPing", (req, res) => {
         const pingMessage = { ping: true };
         ws.send(JSON.stringify(pingMessage), (err) => {
             if(err) { 
-                console.error(`Error sending ping to device ${deviceId}:`, err)
+                console.error(chalk.red(`[-] Error sending ping to device ${deviceId}:`, err))
             } else {
-                console.log(`Ping sent to device ${deviceId}`)
+                console.log(chalk.green(`[+] Ping sent to device ${deviceId}`))
             }
         })
     })
