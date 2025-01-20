@@ -7,6 +7,6 @@ services:
       - PORT=3012
       - PASSWORD=neopin123
     volumes:
-      - /home/docker/neopin
+      - ./:/home/docker/neopin
     working_dir: /home/docker/neopin
     command: sh -c "npm install && node server.js"
