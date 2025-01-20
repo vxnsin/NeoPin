@@ -1,12 +1,12 @@
 services:
   app:
     image: node:22
+    command: sh -c "npm install && node server.js"
+    working_dir: /app
     ports:
       - "3012:3012"
+    volumes:
+      - ./:/app
     environment:
       - PORT=3012
       - PASSWORD=neopin123
-    volumes:
-      - ./:/home/docker/neopin
-    working_dir: /home/docker/neopin
-    command: sh -c "npm install && node server.js"
