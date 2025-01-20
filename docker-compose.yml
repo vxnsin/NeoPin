@@ -7,6 +7,6 @@ services:
       - PORT=3012
       - PASSWORD=neopin123
     volumes:
-      - .:/app
-    working_dir: /app
+      - .:/app:rw
+    working_dir: /app:rw
     command: sh -c "npm install && node server.js"
