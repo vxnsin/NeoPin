@@ -9,4 +9,4 @@ services:
     volumes:
       - .:/app
     working_dir: /app
-    command: ["node", "server.js"]
+    command: sh -c "npm install && node server.js"
