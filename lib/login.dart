@@ -12,11 +12,10 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  TextEditingController _serverIPController = TextEditingController();
-  TextEditingController _serverPasswordController = TextEditingController();
-  TextEditingController _userNameController = TextEditingController();
+  final TextEditingController _serverIPController = TextEditingController();
+  final TextEditingController _serverPasswordController = TextEditingController();
+  final TextEditingController _userNameController = TextEditingController();
   final WebSocketService _webSocketService = WebSocketService();
-  LocationData? _currentLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -60,8 +59,6 @@ class _LoginPageState extends State<LoginPage> {
     await prefs.setString('server_password', serverPassword);
     await prefs.setString('user_name', userName);
 
-    await _getCurrentLocation();
-
     await _webSocketService.connectToServer(
       serverIP,
       serverPassword,
@@ -73,8 +70,7 @@ class _LoginPageState extends State<LoginPage> {
         if (response['successful'] == true) {
           Navigator.pushReplacementNamed(
             context,
-            '/map',
-            arguments: _currentLocation,
+            '/map'
           );
         } else if (message.contains('Unauthorized')) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid Data')));
@@ -83,14 +79,5 @@ class _LoginPageState extends State<LoginPage> {
         }
       },
     );
-  }
-
-  Future<void> _getCurrentLocation() async {
-    Location location = Location();
-    try {
-      _currentLocation = await location.getLocation();
-    } catch (e) {
-      print("Error getting location: $e");
-    }
   }
 }
