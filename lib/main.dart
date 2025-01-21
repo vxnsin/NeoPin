@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:neopin/theme/theme.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:location/location.dart';
-import 'background_service.dart';  
+import 'background_service.dart';
 import 'login.dart';
 import 'map.dart';
+import 'home.dart';
 
 void main() {
   runApp(const MyApp());
@@ -17,16 +19,16 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       title: 'NeoPin',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color.fromARGB(255, 100, 11, 255)),
-        useMaterial3: true,
-      ),
-      initialRoute: '/', 
+      theme: lightMode,
+      darkTheme: darkMode,
+      initialRoute: '/splash',
       routes: {
-        '/': (context) => const SplashScreen(),
+        '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginPage(),
-        '/map': (context) => const MapPage(), 
+        '/map': (context) => const MapPage(),
+        '/home': (context) => const HomePage(),
       },
     );
   }
@@ -46,7 +48,7 @@ class _SplashScreenState extends State<SplashScreen> {
   void initState() {
     super.initState();
     _requestLocationPermission();
-    initializeService();
+    //initializeService();
   }
 
   void initializeService() {
@@ -95,7 +97,7 @@ class _SplashScreenState extends State<SplashScreen> {
     if (storedServerIP != null && storedUserName != null) {
       Navigator.pushReplacementNamed(
         context,
-        '/map',
+        '/login',
         arguments: _currentLocation, 
       );
     } else {

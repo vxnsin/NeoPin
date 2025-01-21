@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'package:flutter/material.dart';
+import 'package:neopin/components.dart';
+//import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:location/location.dart';
 import 'server.dart';
+import 'package:neopin/components.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -20,29 +23,33 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Login')),
+      backgroundColor: Theme.of(context).colorScheme.surface,
       body: Padding(
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.all(50),
         child: Column(
           children: [
-            TextField(
-              controller: _serverIPController,
-              decoration: const InputDecoration(labelText: 'Enter Server IP'),
+            Icon(
+              Icons.wifi_tethering,
+              size: 100,
+              color: Theme.of(context).colorScheme.primary
             ),
-            TextField(
-              controller: _serverPasswordController,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: 'Enter Server Password'),
-            ),
-            TextField(
-              controller: _userNameController,
-              decoration: const InputDecoration(labelText: 'Enter Your Name'),
-            ),
-            SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _connectToServer,
-              child: const Text('Login'),
-            ),
+
+            SizedBox(height: 100),
+            
+            LoginField(controller: _serverIPController, hintText: "Enter a valid Hostname", labelText: "Hostname", obscureText: false, hintIcon: Icon(Icons.storage_rounded),),
+
+            SizedBox(height: 10),
+
+            LoginField(controller: _serverPasswordController, hintText: "Enter a valid password", labelText: "Password", obscureText: true, hintIcon: Icon(Icons.password_rounded),),
+
+            SizedBox(height: 10),
+
+            LoginField(controller: _userNameController, hintText: 'How others see you', labelText: "Username",obscureText: false, hintIcon: Icon(Icons.person_pin_circle_rounded),),
+
+            SizedBox(height: 30),
+
+            //Login Button
+            MyButton(WhenPressed: null, ButtonText: 'Connect to server',),
           ],
         ),
       ),
@@ -64,13 +71,13 @@ class _LoginPageState extends State<LoginPage> {
       serverPassword,
       userName,
       (message) {
-        print("Received message: $message");
+        print('Received message: $message');
         Map<String, dynamic> response = jsonDecode(message);
 
         if (response['successful'] == true) {
           Navigator.pushReplacementNamed(
             context,
-            '/map'
+            '/home'
           );
         } else if (message.contains('Unauthorized')) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid Data')));
