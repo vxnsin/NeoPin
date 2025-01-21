@@ -1,0 +1,121 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+:root {
+    --trans-dur: 0.4s;
+    --trans-timing: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+html, body {
+    display: grid;
+    height: 100%;
+    width: 100%;
+    place-items: center;
+    background: var(--surface);
+    font-family: 'Roboto', sans-serif;
+}
+
+::selection {
+    background: var(--secondary);
+}
+
+.wrapper {
+    width: 380px;
+    border-radius: 20px;
+    padding: 40px 30px;
+    text-align: center;
+}
+
+.wrapper form .field {
+    height: 60px;
+    width: 100%;
+    margin-top: 40px;
+    margin-bottom: 20px;
+    position: relative;
+}
+
+.wrapper form .field input {
+    height: 100%;
+    width: 100%;
+    outline: none;
+    font-size: 18px;
+    padding-left: 20px;
+    border: 2px solid;
+    border-radius: 30px;
+    transition: all 0.3s ease;
+    z-index: 1111;
+    background: transparent;
+    caret-shape:auto;
+    caret-color: transparent;
+}
+
+.wrapper form .field input:focus,
+form .field input:valid {
+    outline: none;
+}
+
+.wrapper form .field label {
+    position: absolute;
+    top: 50%;
+    left: 20px;
+    font-weight: 400;
+    font-size: 18px;
+    pointer-events: none;
+    transform: translateY(-50%);
+    transition: all 0.3s ease;
+    z-index: 2;
+}
+
+form .field input:focus~label,
+form .field input:valid~label {
+    top: 0%;
+    font-size: 16px;
+    background: var(--surface); 
+    transform: translateY(-50%);
+}
+::placeholder {
+    color: RGB(44, 45, 51);
+    opacity: 0;
+}
+input:focus::placeholder {
+    opacity: 1;
+}
+
+form .field input[type="submit"] {
+    border: none;
+    padding-left: 0;
+    margin-top: 20px;
+    color: var(--on-secondary);
+    font-size: 20px;
+    font-weight: 500;
+    cursor: pointer;
+    background: rgba(255, 44, 45, 51); 
+    border-radius: 30px;
+    transition: all 0.3s ease;
+    width: 100%;
+    height: 50px;
+}
+
+form .field input[type="submit"]:active {
+    transform: scale(0.95);
+}
+
+.message {
+    position: absolute;
+    color: var(--secondary);
+    font-weight: bold;
+    margin-top: 10px;
+    display: flex;           
+    justify-content: center; 
+    align-items: center;
+    transition: 0.5s ease;
+    left: 50%;
+    top: 56.7%;
+    transform: translate(-50%, -50%); 
+}
