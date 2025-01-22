@@ -13,16 +13,17 @@ body {
 
 .container-map-by {
     position: absolute;
-    bottom: -5px;
+    bottom: 0px;
     left: -1px;
     z-index: 1000;
     color: white;
     text-align: center;
     padding: 0px;
     background-color: rgba(0, 0, 0, 0.6); 
-    border-radius: 10px;
+    border-radius: 5px;
+    padding: 0px 5px;
     max-width: 80%;
-    width: 10%;
+    width: 5%;
 }
 h1 {
     font-size: 36px;

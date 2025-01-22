@@ -19,9 +19,12 @@ const connectedDevices = new Map();
 app.use(bodyParser.json());
 app.use(cookieParser());
 
+app.set("trust proxy", true)
+
 app.use((req, res, next) => {
     res.set('X-Powered-By', 'NeoPin');
     res.set('X-Made-By', 'Vensin');
+    res.set("X-Content-Type-Options", "nosniff")
     next(); 
 });
 
@@ -35,7 +38,15 @@ app.use((req, res, next) => {
 });
 
 
-app.use(express.static(__dirname + '/public'));
+app.use(express.static(__dirname + '/public', {
+    setHeaders: (res, path) => {
+        if (path.endsWith('.js')) {
+            res.set('Content-Type', 'application/javascript');
+        }
+    }
+}));
+
+
 
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, 

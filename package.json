@@ -21,6 +21,7 @@
   "type": "commonjs",
   "main": "server.js",
   "dependencies": {
+    "@mahozad/theme-switch": "^1.5.2",
     "@stagas/chalk": "^5.0.1",
     "autoprefixer": "^10.4.20",
     "body-parser": "^1.20.3",
