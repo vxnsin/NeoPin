@@ -77,12 +77,8 @@
           [90, 180],
         ];
         map.setMaxBounds(bounds);
-
-        const layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attributionControl: false,
-          noWrap: true,
-          bounceAtZoomLimits: true,
-        }).addTo(map);
+        const layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {"attribution": "Mapbox", "detectRetina": false, "maxNativeZoom": 19, "maxZoom": 20, "minZoom": 0, "noWrap": true, "opacity": 1, "subdomains": "abc", "tms": false})
+        .addTo(map);
 
         layer.on("load", () => {
             fetchDeviceData();
