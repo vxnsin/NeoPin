@@ -39,17 +39,6 @@ app.use((req, res, next) => {
 
 app.use(express.static(__dirname + '/public'));
 
-
-
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, 
-    max: 100,
-    message: 'Too many requests, please try again later.',
-});
-
-app.use(limiter);
-
-
 function checkAuth(req, res, next) {
     const cookie = req.cookies.auth;
     if (cookie && cookie === PASSWORD) {
