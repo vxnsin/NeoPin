@@ -8,32 +8,13 @@
     <link rel="stylesheet" href="assets/styles/login.css" />
     <link rel="stylesheet" href="assets/styles/theme.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-    <script src="./assets/scripts/theme-toggle.js"></script>
+    <script src="https://unpkg.com/@mahozad/theme-switch"></script>
 </head>
 
 <body>
     <div id="spinner" class="spinner"></div>
     <div class="wrapper-body" id="content">
-        <button class="theme-toggle" id="theme-toggle" title="Toggles light & dark" aria-label="auto" aria-live="polite">
-            <svg class="sun-and-moon" aria-hidden="true" width="24" height="24" viewBox="0 0 24 24">
-              <mask class="moon" id="moon-mask">
-                <rect x="0" y="0" width="100%" height="100%" fill="white" />
-                <circle cx="24" cy="10" r="6" fill="black" />
-              </mask>
-              <circle class="sun" cx="12" cy="12" r="6" mask="url(#moon-mask)" fill="currentColor" />
-              <g class="sun-beams" stroke="currentColor">
-                <line x1="12" y1="1" x2="12" y2="3" />
-                <line x1="12" y1="21" x2="12" y2="23" />
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                <line x1="1" y1="12" x2="3" y2="12" />
-                <line x1="21" y1="12" x2="23" y2="12" />
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-               </g>
-            </svg>
-          </button>
-          
+        <theme-switch></theme-switch>
         <div class="wrapper">
             <svg xmlns="http://www.w3.org/2000/svg" height="120" viewBox="0 0 24 24" width="120">
                 <path d="M0 0h24v24H0z" fill="none" />
@@ -57,14 +38,15 @@
         
 
         <script>
-            window.addEventListener("load", () => {
+
+            window.addEventListener("load", function () {
+                const spinner = document.getElementById("spinner");
+                const content = document.getElementById("content");
                 setTimeout(() => {
-                    const spinner = document.getElementById("spinner");
-                    const content = document.getElementById("content");
                     document.body.classList.remove("loading");
                     document.body.classList.add("loaded");
                     content.classList.add("loaded");
-                    spinner.style.opacity = 0;
+                    spinner.style.opacity = 0;                    
                 }, 1500);
             });
 
@@ -118,6 +100,7 @@
                             "Ein Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.";
                     });
             };
+
         </script>
 </body>
 
