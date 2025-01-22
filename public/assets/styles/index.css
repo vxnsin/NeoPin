@@ -10,9 +10,11 @@ body {
     font-family: "Arial", sans-serif;
 }
 
-.container {
+
+.container-map-by {
     position: absolute;
-    top: 10px;
+    bottom: -5px;
+    left: -1px;
     z-index: 1000;
     color: white;
     text-align: center;
@@ -21,9 +23,7 @@ body {
     border-radius: 10px;
     max-width: 80%;
     width: 10%;
-    align-items: center;
 }
-
 h1 {
     font-size: 36px;
     margin: 0;
@@ -41,11 +41,10 @@ p {
 }
 
 a {
-    color: #D10000;
-    text-decoration: none;
     font-size: 18px;
-    margin-top: 20px;
-    display: inline-block;
+    color: #ffffff;
+    font-weight: bold;
+    display: inline-flex;
 }
 
 a:hover {
@@ -90,10 +89,10 @@ a:hover {
 /* Menü Box */
 .menu-box {
     position: fixed;
-    top: 20px;
-    right: 30.5px;
+    top: 15px;
+    right: 30px;
     border-radius: 30px;
-    width: 61px;
+    width: 62px;
     height: 150px;
     overflow: hidden;
     transition: height 0.3s ease, visibility 0.3s ease;
@@ -105,7 +104,7 @@ a:hover {
     display: block;
     background-color: var(--secondary);
     border-radius: 30px;
-    padding-top: 35px;
+    padding-top: 40px;
     padding-left: 10.9px;
     padding-right: 10.9px;
     padding-bottom: 10.9px;
@@ -121,33 +120,26 @@ a:hover {
     overflow: hidden;
 }
 
-.dropdown-menu a {
+.dropdown-menu .icon {
     display: block;
     color: white;
     text-decoration: none;
     padding: 0px 10px;
-    font-size: 18px;
+    margin-top: 20px;
+    font-size: 18px; 
+    text-align: center;
+    cursor: pointer;
 }
 
-.dropdown-menu a:hover {
-    background-color: #D10000;
-    border-radius: 5px;
-}
-
-.dropdown-menu p {
-    display: block;
-    color: white;
-    text-decoration: none;
-    font-size: 18px;
-    user-select: none;
-}
-
-.dropdown-menu p:hover {
-    background-color: #D10000;
+.dropdown-menu .icon {
     border-radius: 5px;
 }
 
 .menu-box.show-box {
     height: 200px;
     visibility: visible;
+}
+
+.leaflet-control-attribution{
+    display: none;
 }

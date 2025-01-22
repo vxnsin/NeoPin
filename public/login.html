@@ -1,82 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NeoPin - Login</title>
     <link rel="stylesheet" href="assets/styles/login.css" />
     <link rel="stylesheet" href="assets/styles/theme.css" />
-  </head>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+</head>
 
-  <body data-theme="dark">
-    <div class="wrapper">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        height="120"
-        viewBox="0 0 24 24"
-        width="120"
-      >
-        <path d="M0 0h24v24H0z" fill="none" />
-        <path
-          d="M12 11c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 2c0-3.31-2.69-6-6-6s-6 2.69-6 6c0 2.22 1.21 4.15 3 5.19l1-1.74c-1.19-.7-2-1.97-2-3.45 0-2.21 1.79-4 4-4s4 1.79 4 4c0 1.48-.81 2.75-2 3.45l1 1.74c1.79-1.04 3-2.97 3-5.19zM12 3C6.48 3 2 7.48 2 13c0 3.7 2.01 6.92 4.99 8.65l1-1.73C5.61 18.53 4 15.96 4 13c0-4.42 3.58-8 8-8s8 3.58 8 8c0 2.96-1.61 5.53-4 6.92l1 1.73c2.99-1.73 5-4.95 5-8.65 0-5.52-4.48-10-10-10z"
-          fill="currentColor"
-        />
-      </svg>
-      <form id="loginForm">
-        <div class="field">
-          <input
-            placeholder="Enter Password"
-            type="password"
-            id="password"
-            name="password"
-            required
-          />
-          <label for="password">Password</label>
+<body onload="loadTheme()">
+    <div id="spinner" class="spinner"></div>
+    <div class="wrapper-body" id="content">
+        <button id="themeToggle">Toggle Theme</button>
+        <div class="wrapper">
+            <svg xmlns="http://www.w3.org/2000/svg" height="120" viewBox="0 0 24 24" width="120">
+                <path d="M0 0h24v24H0z" fill="none" />
+                <path
+                    d="M12 11c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 2c0-3.31-2.69-6-6-6s-6 2.69-6 6c0 2.22 1.21 4.15 3 5.19l1-1.74c-1.19-.7-2-1.97-2-3.45 0-2.21 1.79-4 4-4s4 1.79 4 4c0 1.48-.81 2.75-2 3.45l1 1.74c1.79-1.04 3-2.97 3-5.19zM12 3C6.48 3 2 7.48 2 13c0 3.7 2.01 6.92 4.99 8.65l1-1.73C5.61 18.53 4 15.96 4 13c0-4.42 3.58-8 8-8s8 3.58 8 8c0 2.96-1.61 5.53-4 6.92l1 1.73c2.99-1.73 5-4.95 5-8.65 0-5.52-4.48-10-10-10z"
+                    fill="currentColor" />
+            </svg>
+            <form id="loginForm">
+                <div class="field">
+                    <input placeholder="Enter Password" type="password" id="password" name="password" required />
+                    <label for="password">Password</label>
+                    <i class="fa fa-eye toggle-password" id="togglePassword"></i>
+                </div>
+                <div id="message" class="message"></div>
+                <div class="field">
+                    <input type="submit" value="Login" />
+                </div>
+            </form>
         </div>
-        <div id="message" class="message"></div>
-        <div class="field">
-          <input type="submit" value="Login" />
-        </div>
-      </form>
-    </div>
 
-    <script>
-      document.getElementById("loginForm").onsubmit = function (event) {
-        event.preventDefault();
+        <script>
+            async function loadTheme() {
+                const savedTheme = await localStorage.getItem("theme");
+                if (savedTheme) {
+                    document.body.setAttribute("data-theme", savedTheme);
+                } else {
+                    document.body.setAttribute("data-theme", "light");
+                }
+                const spinner = document.getElementById("spinner");
+                const content = document.getElementById("content");
+                setTimeout(() => {
+                    document.body.classList.remove("loading");
+                    document.body.classList.add("loaded");
+                    content.classList.add("loaded");
+                    spinner.style.opacity = 0;                    
+                }, 1500);
+            }
 
-        var password = document.getElementById("password").value;
+            const themeToggleButton = document.getElementById("themeToggle");
 
-        var requestData = { password: password };
+            function switchTheme() {
+                const currentTheme = document.body.getAttribute("data-theme") || "light";
+                const newTheme = currentTheme === "light" ? "dark" : "light";
+                document.body.setAttribute("data-theme", newTheme);
+                localStorage.setItem("theme", newTheme);
+            }
 
-        fetch("/login", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestData),
-        })
-          .then((response) => {
-            if (response.ok) {
-              window.location.href = "/";
-            }
-            if (response.status === 401) {
-              return response.text();
-            }
-            if (response.status === 429) {
-              return "Rate Limted";
-            }
-          })
-          .then((errorMessage) => {
-            if (errorMessage) {
-              document.getElementById("message").textContent = errorMessage;
-            }
-          })
-          .catch((error) => {
-            console.error("Fehler beim Senden des Login-Requests:", error);
-            document.getElementById("message").textContent =
-              "Ein Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.";
-          });
-      };
-    </script>
-  </body>
+            themeToggleButton.addEventListener("click", () => {
+                if (!document.startViewTransition) {
+                    switchTheme();
+                } else {
+                    document.startViewTransition(switchTheme);
+                }
+            });
+
+            document.getElementById("togglePassword").onclick = function () {
+                const passwordField = document.getElementById("password");
+                if (passwordField.type === "password") {
+                    passwordField.type = "text";
+                    this.classList.add("fa-eye-slash");
+                    this.classList.remove("fa-eye");
+                } else {
+                    passwordField.type = "password";
+                    this.classList.add("fa-eye");
+                    this.classList.remove("fa-eye-slash");
+                }
+            };
+
+
+            document.getElementById("loginForm").onsubmit = function (event) {
+                event.preventDefault();
+
+                var password = document.getElementById("password").value;
+
+                var requestData = { password: password };
+
+                fetch("/login", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestData),
+                })
+                    .then((response) => {
+                        if (response.ok) {
+                            window.location.href = "/";
+                        }
+                        if (response.status === 401) {
+                            return "Invalid Password";
+                        }
+                        if (response.status === 429) {
+                            return "Too many login attempts. Please try again later.";
+                        }
+                    })
+                    .then((errorMessage) => {
+                        if (errorMessage) {
+                            document.getElementById("message").textContent = errorMessage;
+                        }
+                    })
+                    .catch((error) => {
+                        console.error("Fehler beim Senden des Login-Requests:", error);
+                        document.getElementById("message").textContent =
+                            "Ein Fehler ist aufgetreten. Bitte versuchen Sie es später erneut.";
+                    });
+            };
+
+            loadTheme();
+        </script>
+</body>
+
 </html>

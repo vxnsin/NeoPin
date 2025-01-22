@@ -1,17 +1,88 @@
 /* Light Mode */
 :root {
-    --surface: rgb(255, 255, 255); /* #FFFFFF */
-    --on-surface: rgb(208, 208, 216); /* #d0d0d8 */
-    --primary: rgb(0, 0, 0); /* #000000 */
-    --secondary: rgb(211, 23, 30); /* #d3171e */
-    --on-secondary: rgb(255, 255, 255); /* #FFFFFF */
+    --surface: rgb(255, 255, 255);
+    /* #FFFFFF */
+    --on-surface: rgb(208, 208, 216);
+    /* #d0d0d8 */
+    --primary: rgb(0, 0, 0);
+    /* #000000 */
+    --secondary: rgb(211, 23, 30);
+    /* #d3171e */
+    --on-secondary: rgb(255, 255, 255);
+    /* #FFFFFF */
 }
 
 /* Dark Mode */
 [data-theme="dark"] {
-    --surface: rgb(9, 10, 13); /* #090a0d */
-    --on-surface: rgb(44, 45, 51); /* #2c2d33 */
-    --primary: rgb(255, 255, 255); /* #FFFFFF */
-    --secondary: rgb(211, 23, 30); /* #d3171e */
-    --on-secondary: rgb(255, 255, 255); /* #FFFFFF */
+    --surface: rgb(9, 10, 13);
+    /* #090a0d */
+    --on-surface: rgb(44, 45, 51);
+    /* #2c2d33 */
+    --primary: rgb(255, 255, 255);
+    /* #FFFFFF */
+    --secondary: rgb(211, 23, 30);
+    /* #d3171e */
+    --on-secondary: rgb(255, 255, 255);
+    /* #FFFFFF */
+}
+
+
+@keyframes scale {
+    from {
+        mask-size: 0;
+    }
+
+    to {
+        mask-size: 200vmax;
+    }
+}
+
+.spinner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    width: 30px;
+    height: 30px;
+    border: 5px solid transparent;
+    border-top: 6px solid var(--secondary);
+    border-radius: 50%;
+    animation: spin 1.0s linear infinite;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    transition: opacity 0.3s ease;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+spinner.fade-out {
+    opacity: 0;
+}
+
+
+body.loading {
+    overflow: hidden;
+}
+
+body.loaded {
+    filter: blur(0);
+    overflow: visible;
+}
+
+.wrapper-body {
+    opacity: 0;
+    transition: opacity 0.5s ease;
+    z-index: 9998;
+}
+
+.wrapper-body.loaded {
+    opacity: 1;
+    z-index: 9998;
 }

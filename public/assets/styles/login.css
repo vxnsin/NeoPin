@@ -7,9 +7,8 @@
     color: var(--primary);
 }
 
-:root {
-    --trans-dur: 0.4s;
-    --trans-timing: cubic-bezier(0.65, 0, 0.35, 1);
+@view-transition {
+    navigation: auto;
 }
 
 html, body {
@@ -119,3 +118,16 @@ form .field input[type="submit"]:active {
     top: 56.7%;
     transform: translate(-50%, -50%); 
 }
+
+.toggle-password {
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    color: var(--primary);
+  }
+  
+  .toggle-password:hover {
+    color: var(--primary);
+  }

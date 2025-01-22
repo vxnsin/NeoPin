@@ -21,39 +21,77 @@
     <link rel="stylesheet" href="assets/styles/theme.css" />
   </head>
 
-  <body>
-    <div id="map"></div>
+  <body data-theme="dark">
+    <div id="spinner" class="spinner"></div>
+    <div class="wrapper-body" id="content">
+        <div class="container-map-by">
+            <p>Powered by</p> <a href="https://leafletjs.com/">Leaflet</a>
+        </div>
+        <div id="map"></div>
 
-    <div class="menu-button" id="menuButton">
-      <i class="fas fa-cog"></i>
-    </div>
+        <div class="menu-button" id="menuButton">
+        <i class="fas fa-cog"></i>
+        </div>
 
-    <div class="menu-box">
-      <div id="menu" class="dropdown-menu">
-        <a href="javascript:void(0);" id="refreshButton"
-          ><i class="fa fa-refresh"></i
-        ></a>
-        <a href="/logout"><i class="fas fa-sign-out-alt"></i></a>
-      </div>
+        <div class="menu-box">
+        <div id="menu" class="dropdown-menu">
+            <div class="icon" id="refreshButton">
+                <i class="fa fa-refresh"></i>
+            </div>
+            <div onclick="window.location.href='/logout'" class="icon">
+                <i class="fas fa-sign-out-alt"></i>
+            </div>
+        </div>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
-      var map = L.map("map").setView([50.5561, 9.6333], 6);
+        let map;
       let menuOpen = false;
 
-      var bounds = [
-        [-90, -180],
-        [90, 180],
-      ];
-      map.setMaxBounds(bounds);
+      function showLoader() {
+        const spinner = document.getElementById("spinner");
+        const content = document.getElementById("content");
+        document.body.classList.remove("loaded");
+        document.body.classList.add("loading");
+        content.classList.remove("loaded"); 
+        spinner.style.opacity = 1;  
+      }
 
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attributionControl: false,
-        noWrap: true,
-        bounceAtZoomLimits: true,
-      }).addTo(map);
-      
+      function hideLoader() {
+        const spinner = document.getElementById("spinner");
+        const content = document.getElementById("content");
+        document.body.classList.remove("loading");
+        document.body.classList.add("loaded");
+        content.classList.add("loaded");                 
+        spinner.style.opacity = 0;  
+      }
+
+    function initMap() {
+        showLoader();
+        
+        map = L.map("map").setView([50.5561, 9.6333], 6);
+        let bounds = [
+          [-90, -180],
+          [90, 180],
+        ];
+        map.setMaxBounds(bounds);
+
+        const layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attributionControl: false,
+          noWrap: true,
+          bounceAtZoomLimits: true,
+        }).addTo(map);
+
+        layer.on("load", () => {
+            fetchDeviceData();
+          setTimeout(() => {
+            hideLoader();
+          }, 1500);
+        });
+      }
+
       var markers = {};
       function fetchDeviceData() {
         fetch("/getData")
@@ -117,8 +155,7 @@
           refreshIcon.classList.remove("fa-spin");
         }, 1000);
       };
-
-      fetchDeviceData();
+      initMap();
     </script>
   </body>
 </html>
