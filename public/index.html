@@ -1,104 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NeoPin - Home</title>
-    
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-    <link rel="stylesheet" href="assets/styles/index.css">
-    <link rel="stylesheet" href="assets/styles/theme.css">
-</head>
 
-<body>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
+    />
+    <link rel="stylesheet" href="assets/styles/index.css" />
+    <link rel="stylesheet" href="assets/styles/theme.css" />
+  </head>
+
+  <body>
     <div id="map"></div>
 
-
     <div class="menu-button" id="menuButton">
-        <i class="fas fa-cog"></i> 
+      <i class="fas fa-cog"></i>
     </div>
 
     <div class="menu-box">
-        <div id="menu" class="dropdown-menu">
-            <a href="javascript:void(0);" id="refreshButton"><i class="fa fa-refresh"></i></a>
-            <a href="/logout"><i class="fas fa-sign-out-alt"></i></a>
-        </div>
+      <div id="menu" class="dropdown-menu">
+        <a href="javascript:void(0);" id="refreshButton"
+          ><i class="fa fa-refresh"></i
+        ></a>
+        <a href="/logout"><i class="fas fa-sign-out-alt"></i></a>
+      </div>
     </div>
-    
+
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
-    var map = L.map('map').setView([50.5561, 9.6333], 6);
-        let menuOpen = false;
+      var map = L.map("map").setView([50.5561, 9.6333], 6);
+      let menuOpen = false;
 
-        var bounds = [[-90, -180], [90, 180]];
-        map.setMaxBounds(bounds);
+      var bounds = [
+        [-90, -180],
+        [90, 180],
+      ];
+      map.setMaxBounds(bounds);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attributionControl: false, noWrap: true, bounceAtZoomLimits: true}).addTo(map);
-        var markers =  {};
-        function fetchDeviceData() {
-    fetch('/getData')
-        .then(response => {
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attributionControl: false,
+        noWrap: true,
+        bounceAtZoomLimits: true,
+      }).addTo(map);
+      
+      var markers = {};
+      function fetchDeviceData() {
+        fetch("/getData")
+          .then((response) => {
             if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
+              throw new Error(`HTTP error! Status: ${response.status}`);
             }
             return response.json();
-        })
-        .then(data => {
-            const devices = data.devices || []; 
+          })
+          .then((data) => {
+            const devices = data.devices || [];
 
             for (const deviceId in markers) {
-                map.removeLayer(markers[deviceId]);
+              map.removeLayer(markers[deviceId]);
             }
 
-            devices.forEach(device => {
-                const { latitude, longitude } = device.position || {};
-                if (latitude != null && longitude != null) {
-                    const marker = L.marker([latitude, longitude]).addTo(map);
-                    marker.bindPopup(`<b>${device.deviceId}</b><br>${latitude}, ${longitude}`);
-                    markers[device.deviceId] = marker;
-                }
+            devices.forEach((device) => {
+              const { latitude, longitude } = device.position || {};
+              if (latitude != null && longitude != null) {
+                const marker = L.marker([latitude, longitude]).addTo(map);
+                marker.bindPopup(
+                  `<b>${device.deviceId}</b><br>${latitude}, ${longitude}`
+                );
+                markers[device.deviceId] = marker;
+              }
             });
-        })
-        .catch(error => {
+          })
+          .catch((error) => {
             console.error("Error fetching device data:", error);
-        });
-}
+          });
+      }
 
+      document.getElementById("menuButton").onclick = function () {
+        const menu = document.getElementById("menu");
+        menu.classList.toggle("show");
+        this.classList.toggle("rotate");
+        menuOpen = !menuOpen;
+      };
 
-        document.getElementById("menuButton").onclick = function() {
-            const menu = document.getElementById("menu");
-                menu.classList.toggle("show");
-                this.classList.toggle("rotate");
-                menuOpen = !menuOpen;
-            };
+      document.addEventListener("click", function (event) {
+        const menu = document.getElementById("menu");
+        const menuButton = document.getElementById("menuButton");
 
-        
-            document.addEventListener("click", function(event) {
-            const menu = document.getElementById("menu");
-            const menuButton = document.getElementById("menuButton");
+        if (
+          !menu.contains(event.target) &&
+          event.target !== menuButton &&
+          menuOpen
+        ) {
+          menu.classList.remove("show");
+          menuButton.classList.remove("rotate");
+          menuOpen = false;
+        }
+      });
 
-    
-            if (!menu.contains(event.target) && event.target !== menuButton && menuOpen) {
-                menu.classList.remove("show");
-                menuButton.classList.remove("rotate");
-                menuOpen = false;
-            }
-        });
+      document.getElementById("refreshButton").onclick = async function () {
+        const refreshIcon = this.querySelector("i");
+        refreshIcon.classList.add("fa-spin");
 
-        document.getElementById("refreshButton").onclick = async function() {
-            const refreshIcon = this.querySelector('i');
-            refreshIcon.classList.add('fa-spin');
+        await fetchDeviceData();
+        setTimeout(() => {
+          refreshIcon.classList.remove("fa-spin");
+        }, 1000);
+      };
 
-            
-            await fetchDeviceData();
-            setTimeout(() => {
-                refreshIcon.classList.remove('fa-spin');
-            }, 1000);
-        };
-
-        fetchDeviceData();
+      fetchDeviceData();
     </script>
-</body>
+  </body>
 </html>
