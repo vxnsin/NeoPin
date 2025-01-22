@@ -24,7 +24,6 @@ app.set("trust proxy", true)
 app.use((req, res, next) => {
     res.set('X-Powered-By', 'NeoPin');
     res.set('X-Made-By', 'Vensin');
-    res.set("X-Content-Type-Options", "nosniff")
     next(); 
 });
 
@@ -38,13 +37,7 @@ app.use((req, res, next) => {
 });
 
 
-app.use(express.static(__dirname + '/public', {
-    setHeaders: (res, path) => {
-        if (path.endsWith('.js')) {
-            res.set('Content-Type', 'application/javascript');
-        }
-    }
-}));
+app.use(express.static(__dirname + '/public'));
 
 
 

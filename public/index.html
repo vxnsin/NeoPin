@@ -90,6 +90,11 @@
 
       var markers = {};
       function fetchDeviceData() {
+        fetch("/sendPing", {
+                    method: "POST"
+        })
+
+
         fetch("/getData")
           .then((response) => {
             if (!response.ok) {

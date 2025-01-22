@@ -1,33 +1,35 @@
 const WebSocket = require('ws');
 
-const ws = new WebSocket('ws://localhost:3012');
 
-ws.on('open', () => {
+const wstest = new WebSocket('ws://localhost:3012');
+const ws = new WebSocket('wss://neopin.storagevault.me/ws');
+
+wstest.on('open', () => {
   console.log('Connected to the server');
 
-  const authData = { deviceId: 'device-1', password: 'test' };
+  const authData = { deviceId: 'device-1', password: 'neopin123' };
   console.log('Sending auth data:', authData);
 
-  ws.send(JSON.stringify(authData));
+  wstest.send(JSON.stringify(authData));
 
   setTimeout(() => {
-    ws.send(JSON.stringify({ ping: 'Hello from client 1' }));
+    wstest.send(JSON.stringify({ ping: 'Hello from client 1' }));
   }, 1000); 
 });
 
-ws.on('message', (data) => {
+wstest.on('message', (data) => {
     const parsedMessage = JSON.parse(data);
   console.log('Received from server:', parsedMessage);
 
     if(parsedMessage.ping) {
-        ws.send(JSON.stringify({latitude: "50.1234", longitude: "-501.123"}))
+      wstest.send(JSON.stringify({latitude: "50.1234", longitude: "-501.123"}))
     }
 });
 
-ws.on('error', (error) => {
+wstest.on('error', (error) => {
   console.error('WebSocket error:', error);
 });
 
-ws.on('close', () => {
+wstest.on('close', () => {
   console.log('Connection closed');
 });
