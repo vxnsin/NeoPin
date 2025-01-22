@@ -1,7 +1,5 @@
 const express = require('express');
 const WebSocket = require('ws');
-const basicAuth = require('express-basic-auth');
-const rateLimit = require('express-rate-limit');
 const bodyParser = require('body-parser');
 const { default: chalk } = require("@stagas/chalk")
 const readline = require("readline")
