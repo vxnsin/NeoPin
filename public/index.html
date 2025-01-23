@@ -91,9 +91,8 @@
       var markers = {};
       function fetchDeviceData() {
         fetch("/sendPing", {
-                    method: "POST"
+            method: "POST"
         })
-
 
         fetch("/getData")
           .then((response) => {
