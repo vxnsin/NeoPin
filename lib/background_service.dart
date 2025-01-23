@@ -1,34 +1,67 @@
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'server.dart';
 
-void onBackgroundService(ServiceInstance service) async {
-  if (service is AndroidServiceInstance) {
-    service.setForegroundNotificationInfo(
-      title: "NeoPin Background Service",
-      content: "Service is running...",
-    );
-    service.on('start').listen((event) async {
-      final serverIP = event?['serverIP'];
-      final serverPassword = event?['serverPassword'];
-      final userName = event?['userName'];
-
-      if (serverIP != null && serverPassword != null && userName != null) {
-        final webSocketService = WebSocketService();
-        await webSocketService.connectToServer(
-          serverIP,
-          serverPassword,
-          userName,
-          (message) {
-            print('Background WebSocket Message: $message');
-          },
-        );
-      }
-    });
-
-    service.on('stop').listen((event) {
-      print('Background service stopped.');
-    });
-  }
+void startBackgroundService() {
+  final service = FlutterBackgroundService();
+  service.startService();
 }
 
+void stopBackgroundService() {
+  final service = FlutterBackgroundService();
+  service.invoke("stop");
+}
+
+Future<void> initializeService() async {
+  final service = FlutterBackgroundService();
+
+  await service.configure(
+    iosConfiguration: IosConfiguration(),
+    androidConfiguration: AndroidConfiguration(
+      autoStart: false,
+      onStart: onStart,
+      isForegroundMode: false,
+      autoStartOnBoot: false,
+    ),
+  );
+}
+
+
+@pragma('vm:entry-point')
+void onStart(ServiceInstance service) async {
+WebSocketService socketService = WebSocketService();
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+  String? serverIP = prefs.getString('server_ip');
+  String? serverPassword = prefs.getString('server_password');
+  String? userName = prefs.getString('user_name');
+
+  if(serverIP == null || serverPassword == null || userName == null) {
+    print("Server IP, Server Password or User Name does not exist.");
+    service.stopSelf();
+    return;
+  }
+
+  await socketService.connectToServer(
+    serverIP,
+    serverPassword,
+    userName,
+    (message) {
+      print('Message received: $message');
+    },
+  );
+
+  service.on("stop").listen((event) {
+    service.stopSelf();
+    socketService.disconnect(); 
+  });
+
+  service.on("start").listen((event) {});
+
+  Timer.periodic(const Duration(seconds: 1), (timer) {
+   // socketService.sendPing();
+    print("Background service is running ${DateTime.now().second}");
+  });
+}

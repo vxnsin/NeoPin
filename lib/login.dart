@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:neopin/background_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:location/location.dart';
 import 'server.dart';
@@ -15,7 +16,7 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _serverIPController = TextEditingController();
   final TextEditingController _serverPasswordController = TextEditingController();
   final TextEditingController _userNameController = TextEditingController();
-  final WebSocketService _webSocketService = WebSocketService();
+ final WebSocketService _socketService = WebSocketService();
 
   @override
   Widget build(BuildContext context) {
@@ -53,31 +54,43 @@ class _LoginPageState extends State<LoginPage> {
     String serverIP = _serverIPController.text;
     String serverPassword = _serverPasswordController.text;
     String userName = _userNameController.text;
+    
+    print("Server IP: $serverIP");
+    print("Server Password: $serverPassword");
+    print("User Name: $userName");
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
+    print("Saving data to SharedPreferences...");
     await prefs.setString('server_ip', serverIP);
     await prefs.setString('server_password', serverPassword);
     await prefs.setString('user_name', userName);
+    print("Data saved to SharedPreferences!");
 
-    await _webSocketService.connectToServer(
-      serverIP,
-      serverPassword,
-      userName,
-      (message) {
-        print("Received message: $message");
-        Map<String, dynamic> response = jsonDecode(message);
+    try {
+      print("Connecting to server...");
+      await _socketService.connectToServer(
+        serverIP,
+        serverPassword,
+        userName,
+        (message) {
+          print("Received message: $message");
+          Map<String, dynamic> response = jsonDecode(message);
 
-        if (response['successful'] == true) {
-          Navigator.pushReplacementNamed(
-            context,
-            '/map'
-          );
-        } else if (message.contains('Unauthorized')) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid Data')));
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unexpected error occurred')));
-        }
-      },
-    );
+          if (response['successful'] == true) {
+            print("Successful login!");
+            Navigator.pushReplacementNamed(context, '/map');
+          } else if (message.contains('Unauthorized')) {
+            print("Unauthorized: Invalid data");
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid Data')));
+          } else {
+            print("Unexpected error occurred");
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unexpected error occurred')));
+          }
+        },
+      );
+    } catch (e) {
+      print("Error connecting to server: $e");
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to connect to server')));
+    }
   }
 }
