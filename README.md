@@ -23,7 +23,6 @@
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
 [![project_license][license-shield]][license-url]
-[![LinkedIn][linkedin-shield]][linkedin-url]
 
 
 
@@ -31,7 +30,7 @@
 <br />
 <div align="center">
   <a href="https://github.com/vxnsin/NeoPin">
-    <img src="android/app/src/main/res/Logo.png" alt="Logo" width="80" height="80">
+    <img src="images/logo.png" alt="Logo" width=150>
   </a>
 
 <h3 align="center">NeoPin</h3>
@@ -78,11 +77,11 @@
 
 
 <!-- ABOUT THE PROJECT -->
-## About The Project
-
-[![Product Name Screen Shot][product-screenshot]](https://example.com)
-
-Here's a blank template to get started. To avoid retyping too much info, do a search and replace with your text editor for the following: `github_username`, `repo_name`, `twitter_handle`, `linkedin_username`, `email_client`, `email`, `project_title`, `project_description`, `project_license`
+## Screenshots
+  <a>
+    <img src="images/browser_login.png" alt="Login Page">
+    <img src="images/browser_map.png" alt="Browser Map">
+  </a>
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -99,14 +98,14 @@ Install Docker by following the Official documentation
   https://docs.docker.com/engine/install/
   ```
 
-### Installation
+### Docker Installation
 
 - Using Docker-Compose
    ```yaml
       services:
         neopin_server:
           image: node:22
-          command: sh -c "apt-get update && apt-get install -y git && [ ! -d /app/neopin/.git ] && git clone -b server https://vxnsin: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@github.com/vxnsin/NeoPin.git /app/neopin || (cd /app/neopin && git pull) && cd /app/neopin && npm install && node server.js"
+          command: sh -c "apt-get update && apt-get install -y git && [ ! -d /app/neopin/.git ] && git clone -b server https://github.com/vxnsin/NeoPin.git /app/neopin || (cd /app/neopin && git pull) && cd /app/neopin && npm install && node server.js"
           working_dir: /app/neopin
           ports:
             - "3012:3012"
@@ -120,6 +119,12 @@ Install Docker by following the Official documentation
    ```sh
    sh run Dockerfile
    ```
+
+### Apps
+
+- Playstore
+- APK
+- F-Droid
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
@@ -132,21 +137,6 @@ Use this space to show useful examples of how a project can be used. Additional 
 _For more examples, please refer to the [Documentation](https://example.com)_
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-
-<!-- ROADMAP -->
-## Roadmap
-
-- [ ] Feature 1
-- [ ] Feature 2
-- [ ] Feature 3
-    - [ ] Nested Feature
-
-See the [open issues](https://github.com/github_username/repo_name/issues) for a full list of proposed features (and known issues).
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 
 
 <!-- CONTRIBUTING -->
@@ -167,8 +157,8 @@ Don't forget to give the project a star! Thanks again!
 
 ### Top contributors:
 
-<a href="https://github.com/github_username/repo_name/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=github_username/repo_name" alt="contrib.rocks image" />
+<a href="https://github.com/vxnsin/NeoPin/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=vxnsin/NeoPin" alt="contrib.rocks image" />
 </a>
 
 
@@ -179,18 +169,6 @@ Don't forget to give the project a star! Thanks again!
 Distributed under the project_license. See `LICENSE.txt` for more information.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-
-<!-- CONTACT -->
-## Contact
-
-Your Name - [@twitter_handle](https://twitter.com/twitter_handle) - email@email_client.com
-
-Project Link: [https://github.com/github_username/repo_name](https://github.com/github_username/repo_name)
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
 
 
 <!-- ACKNOWLEDGMENTS -->
@@ -216,22 +194,3 @@ Project Link: [https://github.com/github_username/repo_name](https://github.com/
 [issues-url]: https://github.com/vxnsin/NeoPin/issues
 [license-shield]: https://img.shields.io/github/license/github_username/repo_name.svg?style=for-the-badge
 [license-url]: https://github.com/vxnsin/NeoPin/blob/master/LICENSE.txt
-[linkedin-shield]: https://img.shields.io/badge/-LinkedIn-black.svg?style=for-the-badge&logo=linkedin&colorB=555
-[linkedin-url]: https://linkedin.com/in/linkedin_username
-[product-screenshot]: images/screenshot.png
-[Next.js]: https://img.shields.io/badge/next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white
-[Next-url]: https://nextjs.org/
-[React.js]: https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB
-[React-url]: https://reactjs.org/
-[Vue.js]: https://img.shields.io/badge/Vue.js-35495E?style=for-the-badge&logo=vuedotjs&logoColor=4FC08D
-[Vue-url]: https://vuejs.org/
-[Angular.io]: https://img.shields.io/badge/Angular-DD0031?style=for-the-badge&logo=angular&logoColor=white
-[Angular-url]: https://angular.io/
-[Svelte.dev]: https://img.shields.io/badge/Svelte-4A4A55?style=for-the-badge&logo=svelte&logoColor=FF3E00
-[Svelte-url]: https://svelte.dev/
-[Laravel.com]: https://img.shields.io/badge/Laravel-FF2D20?style=for-the-badge&logo=laravel&logoColor=white
-[Laravel-url]: https://laravel.com
-[Bootstrap.com]: https://img.shields.io/badge/Bootstrap-563D7C?style=for-the-badge&logo=bootstrap&logoColor=white
-[Bootstrap-url]: https://getbootstrap.com
-[JQuery.com]: https://img.shields.io/badge/jQuery-0769AD?style=for-the-badge&logo=jquery&logoColor=white
-[JQuery-url]: https://jquery.com 
