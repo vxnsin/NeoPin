@@ -1,10 +1,11 @@
 # NeoPin
+
 NeoPin is an Open-Source Geo Tracker that aims to replace the Google Maps Location Sharing.
 ---
 ## Installation
 To install Neopin you can use Docker Compose or the Dockerfile.
 
-Docker Compose
+Docker Compose:
 ```yaml
 services:
   neopin_server:
