@@ -1,11 +1,9 @@
 import 'dart:convert';
-import 'dart:ffi';
 import 'package:flutter/material.dart';
 import 'package:neopin/components.dart';
 //import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'server.dart';
-import 'package:neopin/components.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -49,7 +47,7 @@ class _LoginPageState extends State<LoginPage> {
             SizedBox(height: 30),
 
             //Login Button
-            MyButton(WhenPressed: null, ButtonText: 'Connect to server',),
+            MyButton(WhenPressed: _connectToServer(), ButtonText: 'Connect to server',),
           ],
         ),
       ),
