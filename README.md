@@ -1,5 +1,4 @@
 # NeoPin
----
 NeoPin is an Open-Source Geo Tracker that aims to replace the Google Maps Location Sharing.
 ---
 ## Installation
