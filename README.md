@@ -98,7 +98,7 @@ Install Docker by following the Official documentation
   https://docs.docker.com/engine/install/
   ```
 
-### Docker Installation
+### Installation
 
 - Using Docker-Compose
    ```yaml
