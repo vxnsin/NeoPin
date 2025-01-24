@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:neopin/theme/theme.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:location/location.dart';
-import 'background_service.dart';
 import 'login.dart';
 import 'map.dart';
 import 'home.dart';
@@ -49,23 +47,6 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
     _requestLocationPermission();
     //initializeService();
-  }
-
-  void initializeService() {
-    FlutterBackgroundService().configure(
-      androidConfiguration: AndroidConfiguration(
-        onStart: onBackgroundService,
-        autoStart: true,
-        autoStartOnBoot: true,
-        isForegroundMode: true,
-        initialNotificationContent: 'Service is running in the background',
-        initialNotificationTitle: 'NeoPin Background Service',
-      ),
-      iosConfiguration: IosConfiguration(autoStart: true),
-    );
-    FlutterBackgroundService().startService();
-    
-  
   }
 
   Future<void> _requestLocationPermission() async {

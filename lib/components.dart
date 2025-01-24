@@ -20,7 +20,11 @@ class MyButton extends StatelessWidget {
         backgroundColor: WidgetStateProperty.all(Theme.of(context).colorScheme.secondary),
         foregroundColor: WidgetStateProperty.all(Theme.of(context).colorScheme.onSecondary),
       ),
-      onPressed: WhenPressed,
+      onPressed: WhenPressed != null
+          ? () async {
+        await WhenPressed!();
+      }
+          : null,
       child: Text(ButtonText),
     );
   }
