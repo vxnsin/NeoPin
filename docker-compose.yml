@@ -1,3 +1,0 @@
-services:
-  neopin:
-    build: https://raw.githubusercontent.com/vxnsin/neopin_docker_file/refs/heads/main/docker-compose.yml?token=GHSAT0AAAAAAC4ZX5DNTHS3E464SJDCXNRWZ4OWQLQ

@@ -19,6 +19,8 @@
     />
     <link rel="stylesheet" href="assets/styles/index.css" />
     <link rel="stylesheet" href="assets/styles/theme.css" />
+
+    <link rel="icon" type="image/x-icon" href="assets/images/favicon.ico">
   </head>
 
   <body data-theme="dark">
@@ -49,6 +51,8 @@
     <script>
         let map;
       let menuOpen = false;
+      let loaded = false;
+      let layer;
 
       function showLoader() {
         const spinner = document.getElementById("spinner");
@@ -77,24 +81,28 @@
           [90, 180],
         ];
         map.setMaxBounds(bounds);
-        const layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {"attribution": "Mapbox", "detectRetina": false, "maxNativeZoom": 19, "maxZoom": 20, "minZoom": 0, "noWrap": true, "opacity": 1, "subdomains": "abc", "tms": false})
+        layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {"attribution": "Mapbox", "detectRetina": false, "maxNativeZoom": 19, "maxZoom": 20, "minZoom": 0, "noWrap": true, "opacity": 1, "subdomains": "abc", "tms": false})
         .addTo(map);
-
-        layer.on("load", () => {
-            fetchDeviceData();
-          setTimeout(() => {
-            hideLoader();
-          }, 1500);
-        });
       }
+      setTimeout(() => {
+        if(!loaded) {
+              fetchDeviceData();
+              hideLoader();
+              loaded = true;
+        }
+      }, 1000);
 
       var markers = {};
       function fetchDeviceData() {
-        fetch("/sendPing", {
-            method: "POST"
+        fetch("/api/sendPing", {
+            method: "POST",
+            credentials: "include"
         })
 
-        fetch("/getData")
+        fetch("/api/getData", {
+        method: "GET",
+        credentials: "include", 
+       })
           .then((response) => {
             if (!response.ok) {
               throw new Error(`HTTP error! Status: ${response.status}`);

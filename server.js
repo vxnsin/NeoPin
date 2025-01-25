@@ -1,287 +1,280 @@
-const express = require('express');
-const WebSocket = require('ws');
-const bodyParser = require('body-parser');
-const { default: chalk } = require("@stagas/chalk")
-const readline = require("readline")
+import express from 'express';
+import { WebSocketServer } from "ws"
+import bodyParser from 'body-parser';
+import chalk from 'chalk';
+import readline from 'readline';
+import cookieParser from 'cookie-parser';
+import path from 'path';
+import os from 'os';
+import fs from  'fs'
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 const app = express();
-const moment = require('moment');
-const cookieParser = require('cookie-parser');
-
 const PORT = process.env.PORT || 3012;
-const PASSWORD  = 'neopin123';
+const PASSWORD = process.env.PASSWORD || "neopin123";
 
-const wss = new WebSocket.Server({ noServer: true });
+const wss = new WebSocketServer({ noServer: true });
 
 const connectedDevices = new Map();
 
+dotenv.config();
+
+// Middleware
 app.use(bodyParser.json());
 app.use(cookieParser());
+app.use(express.static(path.join(__dirname, 'public')));
+app.set('trust proxy', true);
 
-app.set("trust proxy", true)
-
+// Request logging and auth check
 app.use((req, res, next) => {
-    res.set('X-Powered-By', 'NeoPin');
-    res.set('X-Made-By', 'Vensin');
-    next(); 
+  console.log(`Request URL: ${req.url}`);
+  if (req.url === '/') return checkAuth(req, res, next);
+  next();
 });
 
-app.use((req, res, next) => {
-    console.log(`Request URL: ${req.url}`); 
-
-    if(req.url === "/") {
-        return checkAuth(req, res, next);  
-    }
-    next();
-});
-
-
-app.use(express.static(__dirname + '/public'));
-
+// Authentication Check
 function checkAuth(req, res, next) {
-    const cookie = req.cookies.auth;
-    if (cookie && cookie === PASSWORD) {
-        return next();
-    } else {
-        res.redirect('/login.html');
-    }
+  const cookie = req.cookies.auth;
+  if (cookie && cookie === PASSWORD) {
+    return next();
+  }
+  res.redirect('/login.html');
 }
 
-
+// Login Route
 app.get('/login', (req, res) => {
-    res.sendFile(__dirname + '/login.html');
+  res.sendFile(path.join(__dirname, 'login.html'));
 });
 
+// Login POST Request
 app.post('/login', (req, res) => {
-    const { password } = req.body; 
-    if (password === PASSWORD) {
-        res.cookie('auth', PASSWORD, { maxAge: 5 * 60 * 60 * 1000, httpOnly: true });
-        res.status(200).json({ message: 'Login successful' }); 
-    } else {
-        console.log(password)
-        res.status(401).send('Invalid password');
-    }
+  const { password } = req.body;
+  if (password === PASSWORD) {
+    res.cookie('auth', PASSWORD, { maxAge: 5 * 60 * 60 * 1000, httpOnly: true });
+    res.status(200).json({ message: 'Login successful' });
+  } else {
+    res.status(401).send('Invalid password');
+  }
 });
 
+// Logout Route
 app.get('/logout', (req, res) => {
-    res.clearCookie('auth');
-    res.redirect('/login.html');
+  res.clearCookie('auth');
+  res.redirect('/login.html');
 });
 
-app.get('/', checkAuth, (req, res) => {
-    res.send("test")
-});
-
-
-
+// WebSocket connection handling
 wss.on('connection', (ws) => {
-    let deviceId;
-    let password;
-    let authenticated = false; 
+  let deviceId;
+  let password;
+  let authenticated = false;
 
-    ws.on('message', (message) => {
-        try {
-            const parsedMessage = JSON.parse(message);
-
-            if (!authenticated) {
-                deviceId = parsedMessage.deviceId;
-                password = parsedMessage.password;
-
-                if (!deviceId || !password || password !== PASSWORD) {
-                    ws.close(4000, 'Unauthorized');
-                    return;
-                }
-
-                authenticated = true;
-                connectedDevices.set(deviceId, ws);
-                console.log(chalk.bold.greenBright(`[+] Device ${chalk.whiteBright(deviceId)} connected`));
-                ws.send(JSON.stringify({ successful: true }));
-                return;
-            }
-
-            if(parsedMessage.latitude && parsedMessage.longitude) {
-                const timestamp = new Date().toISOString(); 
-                const deviceData = connectedDevices.get(deviceId);
-                if(deviceData) {
-                    deviceData.lastPing = timestamp;
-                    deviceData.position = {
-                    latitude: parsedMessage.latitude,
-                    longitude: parsedMessage.longitude,
-                }
-                console.log(`Device ${deviceId} position updated:`, deviceData.position);
-                }
-            }
-        } catch (error) {
-            console.error('Error parsing message:', error);
+  ws.on('message', async (message) => {
+    try {
+      const parsedMessage = JSON.parse(message);
+      
+      if (!authenticated) {
+        deviceId = parsedMessage.deviceId;
+        password = parsedMessage.password;
+        
+        if (!deviceId || password !== PASSWORD) {
+          ws.close(4000, 'Unauthorized');
+          return;
         }
-    });
 
-    ws.on('close', () => {
-        connectedDevices.delete(deviceId);
-        console.log(chalk.bold.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected`));
-    });
+        authenticated = true;
+        connectedDevices.set(deviceId, ws);
+        console.log(chalk.bold.greenBright(`[+] Device ${chalk.whiteBright(deviceId)} connected`));
+        ws.send(JSON.stringify({ successful: true }));
+        return;
+      }
+
+      handleMessage(parsedMessage, deviceId, ws);
+
+    } catch (error) {
+      console.error('Error parsing message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    connectedDevices.delete(deviceId);
+    console.log(chalk.bold.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected`));
+  });
 });
 
-const server = app.listen(PORT, () => {
-    console.log(chalk.blue(`Server running at http://localhost:${PORT}`));
-    console.log(chalk.blue(`Type '${chalk.bold("help")}' to see available commands`));
+async function handleMessage(parsedMessage, deviceId, ws) {
+  switch (parsedMessage.type) {
+    case 'ping':
+      console.log(chalk.blue(`[Ping] Device ${chalk.whiteBright(deviceId)} triggered a location update.`));
+      connectedDevices.forEach((deviceWs, otherDeviceId) => {
+        if (otherDeviceId !== deviceId) {
+          deviceWs.send(JSON.stringify({ type: 'requestLocation', from: deviceId }));
+        }
+      });
+      break;
+    case 'updatePosition':
+      if (parsedMessage.latitude && parsedMessage.longitude) {
+        const timestamp = new Date().toISOString();
+        ws.lastPing = timestamp;
+        ws.position = {
+          latitude: parsedMessage.latitude,
+          longitude: parsedMessage.longitude,
+        };
+        console.log(`[Response] Device ${chalk.whiteBright(deviceId)} position updated:`, ws.position);
+      }
+      break;
+    default:
+      console.log(`Unknown message type from device ${deviceId}:`, parsedMessage);
+      break;
+  }
+}
+
+const server = app.listen(PORT, async () => {
+  console.clear();
+  console.log(chalk.red("    _   __           ") + chalk.whiteBright("____  _ "));
+  console.log(chalk.red("   / | / /__  ____  ") + chalk.whiteBright("/ __ \\(_)___"));
+  console.log(chalk.red("  /  |/ / _ \\/ __ \\" ) + chalk.whiteBright("/ /_/ / / __ \\"));
+  console.log(chalk.red(" / /|  /  __/ /_/ ") + chalk.whiteBright("/ ____/ / / / /"));
+  console.log(chalk.red("/_/ |_/\___/\\____/") +chalk.whiteBright("_/    /_/_/ /_/ v0.5"));
+  console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://${getNetworkIp()}:${PORT}`)}`));
+  console.log(chalk.whiteBright(`Type '${chalk.red.bold("help")}' to see available commands`));
 });
 
-
-const commands = {
-    help: () => {
-        console.log(chalk.bold("Available commands:"));
-        console.log(chalk.blue(`${chalk.bold("sendPing [deviceId]")} 🡒 Sends a ping message to all connected devices or a specific device if deviceId is provided`));
-        console.log(chalk.blue(`${chalk.bold("device-list")} 🡒 Lists all connected devices`));
-    },
-    sendPing: (deviceId) => {
-        if (connectedDevices.size === 0) {
-            console.log(chalk.yellow("No devices connected."));
-        } else if (deviceId) {
-            const ws = connectedDevices.get(deviceId);
-            if (ws) {
-                const pingMessage = { ping: true };
-                ws.send(JSON.stringify(pingMessage), (err) => {
-                    if (err) {
-                        console.error(`Error sending ping to device ${deviceId}:`, err);
-                    } else {
-                        console.log(`Ping sent to device ${deviceId}`);
-                    }
-                });
-            } else {
-                console.log(chalk.red(`Device ${deviceId} not found.`));
-            }
-        } else {
-            connectedDevices.forEach((ws, deviceId) => {
-                const pingMessage = { ping: true };
-                ws.send(JSON.stringify(pingMessage), (err) => {
-                    if (err) {
-                        console.error(`Error sending ping to device ${deviceId}:`, err);
-                    } else {
-                        console.log(`Ping sent to device ${deviceId}`);
-                    }
-                });
-            });
-        }
-    },
-    'device-list': () => {
-        if (connectedDevices.size === 0) {
-            console.log(chalk.yellow("No devices connected."));
-        } else {
-            const devicesArray = Array.from(connectedDevices.entries());
-            devicesArray.forEach(([deviceId, ws], index) => {
-                const positionText = ws.position
-                    ? `${ws.position.latitude} | ${ws.position.longitude}`
-                    : 'No position';
-
-                const lastPingText = ws.lastPing
-                    ? `- Last Ping: ${timeAgo(ws.lastPing)}`
-                    : '';
-
-                const content = `Device ID: ${deviceId} - Position: ${positionText} ${lastPingText}`;
-                const prefix = index === 0 ? '┏' : index === devicesArray.length - 1 ? '┗' : '┣';
-                console.log(chalk.greenBright(`${prefix} ${chalk.whiteBright(content)}`));
-            });
-        }
-    }    
-};
+function getNetworkIp() {
+  const networkInterfaces = os.networkInterfaces();
+  for (let interfaceName in networkInterfaces) {
+    const interfaces = networkInterfaces[interfaceName];
+    for (let interfaceDetails of interfaces) {
+      if (interfaceDetails.family === 'IPv4' && !interfaceDetails.internal) {
+        return interfaceDetails.address;
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 
 const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    completer: (line) => {
-        const completions = Object.keys(commands);
-        const hits = completions.filter((c) => c.startsWith(line));
-        return [hits.length ? hits : completions, line];
-    }
+  input: process.stdin,
+  output: process.stdout,
+  completer: (line) => {
+    const completions = Object.keys(commands);
+    const hits = completions.filter((c) => c.startsWith(line));
+    return [hits.length ? hits : completions, line];
+  },
 });
+
+const commands = {
+  help: () => {
+    console.log(chalk.bold("Available commands:"));
+    console.log(chalk.whiteBright(`${chalk.red.bold("sendPing [deviceId]")} 🡒 Sends a ping message to all connected devices or a specific device if deviceId is provided`));
+    console.log(chalk.whiteBright(`${chalk.red.bold("device-list")} 🡒 Lists all connected devices`));
+  },
+  sendPing: (deviceId) => {
+    if (connectedDevices.size === 0) {
+      console.log(chalk.yellow("No devices connected."));
+    } else if (deviceId) {
+      const ws = connectedDevices.get(deviceId);
+      if (ws) {
+        ws.send(JSON.stringify({ type: "requestLocation" }), (err) => {
+          if (err) {
+            console.error(`Error sending requestLocation to device ${chalk.whiteBright(deviceId)}:`, err);
+          } else {
+            console.log(chalk.red.bold(`Location Request sent to device ${chalk.whiteBright(deviceId)}`));
+          }
+        });
+      } else {
+        console.log(chalk.red(`Device ${chalk.whiteBright(deviceId)} not found.`));
+      }
+    } else {
+      connectedDevices.forEach((ws, deviceId) => {
+        ws.send(JSON.stringify({ type: "requestLocation" }), (err) => {
+          if (err) {
+            console.error(`Error sending requestLocation to device ${chalk.whiteBright(deviceId)}:`, err);
+          } else {
+            console.log(chalk.red.bold(`Location Request sent to all devices`));
+          }
+        });
+      });
+    }
+  },
+  "device-list": () => {
+    if (connectedDevices.size === 0) {
+      console.log(chalk.yellow("No devices connected."));
+    } else {
+      const devicesArray = Array.from(connectedDevices.entries());
+      devicesArray.forEach(([deviceId, ws], index) => {
+        const positionText = ws.position ? `${ws.position.latitude} | ${ws.position.longitude}` : "No position";
+        const lastPingText = ws.lastPing ? `- Last Ping: ${timeAgo(ws.lastPing)}` : "";
+        const content = `ID: ${deviceId} - Position: ${positionText} ${lastPingText}`;
+        const prefix = index === 0 ? "┏" : index === devicesArray.length - 1 ? "┗" : "┣";
+        console.log(chalk.whiteBright(`${prefix} ${chalk.whiteBright(content)}`));
+      });
+    }
+  },
+};
 
 rl.on('line', (input) => {
-    const [command, ...args] = input.trim().split(' ');
-    if (commands[command]) {
-        commands[command](...args);
-    } else {
-        console.log(chalk.red(`Unknown command: ${command}`));
-    }
+  const [command, ...args] = input.trim().split(' ');
+  if (commands[command]) {
+    commands[command](...args);
+  } else {
+    console.log(chalk.red(`Unknown command: ${command}`));
+  }
 });
 
-app.post("/sendPing", (req, res) => {
-    if (connectedDevices.size === 0) {
-        return res.status(400).json({ message: "No devices connected" });
+
+app.get('/api/getData', checkAuth, (req, res) => {
+  if (connectedDevices.size === 0) {
+    return res.status(202).json({ message: 'No devices connected' });
+  }
+
+  const deviceData = Array.from(connectedDevices.entries()).map(([deviceId, ws]) => {
+    const position = ws.position ? { latitude: ws.position.latitude, longitude: ws.position.longitude } : { latitude: null, longitude: null };
+    return {
+      deviceId,
+      position,
+      lastPing: ws.lastPing || null,
+    };
+  });
+
+  console.log(deviceData);
+
+  res.json(deviceData); 
+});
+
+app.post('/api/sendPing', checkAuth, (req, res) => {
+  const { deviceId } = req.body;
+
+  if (connectedDevices.size === 0) {
+    return res.status(202).json({ message: 'No devices connected' });
+  }
+
+  if (deviceId) {
+    const ws = connectedDevices.get(deviceId);
+    if (ws) {
+      ws.send(JSON.stringify({ type: "requestLocation" }), (err) => {
+        if (err) {
+          return res.status(500).json({ message: `Error sending requestLocation to device ${deviceId}: ${err}` });
+        }
+        return res.json({ message: `Location request sent to device ${deviceId}` });
+      });
+    } else {
+      return res.status(202).json({ message: `Device ${deviceId} not found` });
     }
-
-    const timestamp = new Date().toISOString();
-
+  } else {
     connectedDevices.forEach((ws, deviceId) => {
-        const pingMessage = { ping: true, timestamp };
-        ws.send(JSON.stringify(pingMessage), (err) => {
-            if (err) {
-                console.error(chalk.red(`[-] Error sending ping to device ${deviceId}:`, err));
-            } else {
-                console.log(chalk.green(`[+] Ping sent to device ${deviceId} at ${timestamp}`));
-            }
-        });
+      ws.send(JSON.stringify({ type: "requestLocation" }), (err) => {
+        if (err) {
+          console.error(`Error sending requestLocation to device ${deviceId}:`, err);
+        }
+      });
     });
-
-    res.status(200).json({ message: "Ping sent to all devices", timestamp });
+    return res.json({ message: `Location request sent to all devices` });
+  }
 });
-
-app.get("/getData", (req, res) => {
-    if (connectedDevices.size === 0) {
-        return res.status(200).json({ message: "No devices connected" });
-    }
-
-    const deviceData = Array.from(connectedDevices.entries()).map(([deviceId, ws]) => {
-        const position = ws.position
-            ? { latitude: ws.position.latitude, longitude: ws.position.longitude }
-            : { latitude: null, longitude: null };
-
-        return {
-            deviceId,
-            position,
-            lastPing: ws.lastPing || null,
-        };
-    });
-
-    res.status(200).json({ devices: deviceData });
-});
-
-
-
-app.get("/getData/count", (req, res) => {
-    if (connectedDevices.size === 0) {
-        return res.status(200).json({ message: "No devices connected" });
-    }
-
-    res.status(200).json({ count: connectedDevices.size });
-});
-
-
-server.on('upgrade', (request, socket, head) => {
-    wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request);
-    });
-});
-
-function timeAgo(timestamp) {
-    const now = moment();
-    const then = moment(timestamp);
-    const diffInMinutes = now.diff(then, 'minutes');
-    const diffInHours = now.diff(then, 'hours');
-    const diffInDays = now.diff(then, 'days');
-
-    if (diffInMinutes < 1) {
-        return 'Just now';
-    } else if (diffInMinutes === 1) {
-        return '1 minute ago';
-    } else if (diffInMinutes < 60) {
-        return `${diffInMinutes} minutes ago`;
-    } else if (diffInHours === 1) {
-        return '1 hour ago';
-    } else if (diffInHours < 24) {
-        return `${diffInHours} hours ago`;
-    } else if (diffInDays === 1) {
-        return '1 day ago';
-    } else {
-        return `${diffInDays} days ago`;
-    }
-}
