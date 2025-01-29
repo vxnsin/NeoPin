@@ -6,25 +6,6 @@
 *** or simply open an issue with the tag "enhancement".
 *** Don't forget to give the project a star!
 *** Thanks again! Now go create something AMAZING! :D
--->
-
-
-
-<!-- PROJECT SHIELDS -->
-<!--
-*** I'm using markdown "reference style" links for readability.
-*** Reference links are enclosed in brackets [ ] instead of parentheses ( ).
-*** See the bottom of this document for the declaration of the reference variables
-*** for contributors-url, forks-url, etc. This is an optional, concise syntax you may use.
-*** https://www.markdownguide.org/basic-syntax/#reference-style-links
--->
-[![Contributors][contributors-shield]][contributors-url]
-[![Forks][forks-shield]][forks-url]
-[![Stargazers][stars-shield]][stars-url]
-[![Issues][issues-shield]][issues-url]
-[![project_license][license-shield]][license-url]
-
-
 
 <!-- PROJECT LOGO -->
 <br />
@@ -36,12 +17,12 @@
 <h3 align="center">NeoPin</h3>
 
   <p align="center">
-    project_description
+    NeoPin is an Open-Source Geo Tracker that aims to replace Google Maps Location Sharing
     <br />
     <a href="https://github.com/vxnsin/NeoPin"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://github.com/vxnsin/NeoPin">View Demo</a>
+    <a href="https://neopin.storagevault.me">View Demo</a>
     &middot;
     <a href="https://github.com/vxnsin/NeoPin/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     &middot;
@@ -155,13 +136,6 @@ Don't forget to give the project a star! Thanks again!
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-### Top contributors:
-
-<a href="https://github.com/vxnsin/NeoPin/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=vxnsin/NeoPin" alt="contrib.rocks image" />
-</a>
-
-
 
 <!-- LICENSE -->
 ## License
@@ -169,18 +143,6 @@ Don't forget to give the project a star! Thanks again!
 Distributed under the project_license. See `LICENSE.txt` for more information.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
-<!-- ACKNOWLEDGMENTS -->
-## Acknowledgments
-
-* []()
-* []()
-* []()
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
