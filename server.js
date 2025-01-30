@@ -13,11 +13,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 import dotenv from 'dotenv';
 
-dotenv.config();
+const envPath = path.join(__dirname, '.env');
+
+
+if (!fs.existsSync(envPath)) {
+  const defaultEnvContent = `PASSWORD=neopin123\nPORT=3012`;
+  fs.writeFileSync(envPath, defaultEnvContent, 'utf8');
+  console.log('.env file created with default values.');
+}
+
+dotenv.config()
+
 
 const app = express();
-const PORT = process.env.PORT || 3012;
-const PASSWORD = process.env.PASSWORD || "neopin123";
+const PORT = process.env.PORT;
+const PASSWORD = process.env.PASSWORD
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -177,6 +187,7 @@ const commands = {
     console.log(chalk.bold("Available commands:"));
     console.log(chalk.whiteBright(`${chalk.red.bold("sendPing [deviceId]")} 🡒 Sends a ping message to all connected devices or a specific device if deviceId is provided`));
     console.log(chalk.whiteBright(`${chalk.red.bold("device-list")} 🡒 Lists all connected devices`));
+    console.log(chalk.whiteBright(`${chalk.red.bold("changePassword [currentPassword] [newPassword]")} 🡒 Change the password for authentication`));
   },
   sendPing: (deviceId) => {
     if (connectedDevices.size === 0) {
@@ -220,6 +231,28 @@ const commands = {
       });
     }
   },
+
+  changePassword: (currentPassword, newPassword) => {
+    if (!currentPassword || !newPassword) {
+      console.log(chalk.red("Please provide both current and new password."));
+      return;
+    }
+
+    if (currentPassword !== PASSWORD) {
+      console.log(chalk.red("Current password is incorrect."));
+      return;
+    }
+
+    process.env.PASSWORD = newPassword;
+    console.log(chalk.green(`[+] ${chalk.whiteBright("Password changed successfully.")}`));
+
+    const envFilePath = path.join(__dirname, '.env');
+    const envFile = fs.readFileSync(envFilePath, 'utf-8');
+    const updatedEnvFile = envFile.replace(`PASSWORD=${PASSWORD}`, `PASSWORD=${newPassword}`);
+    fs.writeFileSync(envFilePath, updatedEnvFile);
+
+    console.log(chalk.green(`[+] ${chalk.whiteBright("The password has been successfully updated. Please restart the server to apply the change.")}`));
+  }
 };
 
 rl.on('line', (input) => {

@@ -19,15 +19,28 @@
   <a href="https://github.com/vxnsin/NeoPin/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
 </p>
 
+### 🚀 How to Set Up NeoPin Backend
 <div style="display: flex; justify-content: center; align-items: center;">
-  <div style="flex: 1; padding-right: 20px;">
-    <h4>How to Set Up NeoPin Backend</h4>
-    <ol>
-      <li>Clone the Repo</li>
-      <li>Run <code>npm install</code></li>
-      <li>Run <code>node server.js</code></li>
-    </ol>
-  </div>
+    <div style="flex: 1; max-width: 500px;">
+      <ol>
+        <li>
+          <details>
+            <summary>📥 › <u>Clone the Repository</u></summary>
+            <p><strong>🔹 Method 1: Git (recommended)</strong></p>
+            <pre>git clone https://github.com/vxnsin/NeoPin.git <br/>cd NeoPin</pre>
+            <p><strong>🔹 Method 2: Download ZIP</strong></p>
+            <ol>
+              <li><a href="https://github.com/vxnsin/NeoPin/archive/refs/heads/main.zip">Click here</a> to download the ZIP file.</li>
+              <li>Extract the file on your computer.</li>
+              <li>Open a terminal and navigate to the extracted folder.</li>
+            </ol>
+          </details>
+        </li>
+        <li>💻 › Run <code>npm install</code></li>
+        <li>🚀 › Run <code>node server.js</code></li>
+      </ol>
+    </div>
+
 
   <div style="flex: 1; padding-left: 20px;">
     <img src=".readme/setup.gif" alt="Setup GIF" style="width: 400px; height: auto;">
