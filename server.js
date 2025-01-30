@@ -142,7 +142,7 @@ const server = app.listen(PORT, async () => {
   console.log(chalk.red("  /  |/ / _ \\/ __ \\" ) + chalk.whiteBright("/ /_/ / / __ \\"));
   console.log(chalk.red(" / /|  /  __/ /_/ ") + chalk.whiteBright("/ ____/ / / / /"));
   console.log(chalk.red("/_/ |_/\___/\\____/") +chalk.whiteBright("_/    /_/_/ /_/ v0.5"));
-  console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://${getNetworkIp()}:${PORT}`)}`));
+  console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://localhost:${PORT}`)}`));
   console.log(chalk.whiteBright(`Type '${chalk.red.bold("help")}' to see available commands`));
 });
 
