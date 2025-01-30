@@ -136,13 +136,16 @@ async function handleMessage(parsedMessage, deviceId, ws) {
 }
 
 const server = app.listen(PORT, async () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+  const version = packageJson.version;
+
   console.clear();
   console.log(chalk.red("    _   __           ") + chalk.whiteBright("____  _ "));
   console.log(chalk.red("   / | / /__  ____  ") + chalk.whiteBright("/ __ \\(_)___"));
   console.log(chalk.red("  /  |/ / _ \\/ __ \\" ) + chalk.whiteBright("/ /_/ / / __ \\"));
   console.log(chalk.red(" / /|  /  __/ /_/ ") + chalk.whiteBright("/ ____/ / / / /"));
-  console.log(chalk.red("/_/ |_/\___/\\____/") +chalk.whiteBright("_/    /_/_/ /_/ v0.5"));
-  console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://localhost:${PORT}`)}`));
+  console.log(chalk.red("/_/ |_/\___/\\____/") +chalk.whiteBright(`_/    /_/_/ /_/ v${version}`));
+  console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://${getNetworkIp()}:${PORT}`)}`));
   console.log(chalk.whiteBright(`Type '${chalk.red.bold("help")}' to see available commands`));
 });
 
