@@ -1,8 +1,14 @@
 <br />
+<link rel="stylesheet" href=".readme/style.css">
+
 <div align="center">
   <a href="https://github.com/vxnsin/NeoPin">
     <img src=".readme/Logo.png" alt="Logo" width=150>
   </a>
+
+<a href="https://github.com/vxnsin/NeoPin" class="button-demo">
+  View Demo
+</a>
 
 <h3 align="center">NeoPin - Backend</h3>
 
