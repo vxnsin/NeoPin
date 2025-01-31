@@ -28,11 +28,13 @@
           <details>
             <summary>📥 › <u>Clone the Repository</u></summary>
             <p><strong>🔹 Method 1: Git (recommended)</strong></p>
-            <pre>git clone https://github.com/vxnsin/NeoPin.git <br/>cd NeoPin</pre>
+            <pre>git clone https://github.com/vxnsin/NeoPin.git</pre>
             <p><strong>🔹 Method 2: Download ZIP</strong></p>
+            <ol>
               <li><a href="https://github.com/vxnsin/NeoPin/archive/refs/heads/main.zip">Click here</a> to download the ZIP file.</li>
               <li>Extract the file on your computer.</li>
               <li>Open a terminal and navigate to the extracted folder.</li>
+            </ol>
           </details>
         </li>
         <li>💻 › Run <code>npm install</code></li>
