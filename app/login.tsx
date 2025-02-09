@@ -1,13 +1,21 @@
-import React, { useState } from 'react';
-import { View, TextInput, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
+// Login.tsx
+import React, { useState, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Animated } from 'react-native';
 import useThemeManager from '../hooks/useThemeManager';
-import Icon from 'react-native-vector-icons/MaterialIcons'; 
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import FloatingInput from '../components/FloatingInput'; 
 
 const Login = () => {
-  const colors = useThemeManager(); 
+  const colors = useThemeManager();
   const [username, setUsername] = useState('');
   const [serverIp, setServerIp] = useState('');
   const [serverPassword, setServerPassword] = useState('');
+
+  const animations = {
+    username: useRef(new Animated.Value(0)).current,
+    serverIp: useRef(new Animated.Value(0)).current,
+    serverPassword: useRef(new Animated.Value(0)).current,
+  };
 
   const handleConnect = () => {
     console.log("Connecting to the server...");
@@ -15,45 +23,51 @@ const Login = () => {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
-      {/* Server IP Input */}
-      <View style={styles.inputContainer}>
-        <Icon name="list" size={24} color={colors.colors.primary} style={styles.icon} />
-        <TextInput
-          style={[styles.input, { borderColor: colors.colors.primary, color: colors.colors.primary }]}
-          placeholder="Hostname"
-          value={serverIp}
-          onChangeText={setServerIp}
-        />
-      </View>
+      <Icon
+        name="wifi-tethering"
+        size={100}
+        color={colors.colors.primary}
+        style={styles.iconTop}
+      />
 
-      {/* Server Password Input */}
-      <View style={styles.inputContainer}>
-        <Icon name="password" size={24} color={colors.colors.primary} style={styles.icon} />
-        <TextInput
-          style={[styles.input, { borderColor: colors.colors.primary, color: colors.colors.primary }]}
-          placeholder="Password"
-          value={serverPassword}
-          onChangeText={setServerPassword}
-          secureTextEntry
-        />
-      </View>
+      <FloatingInput
+        label="Hostname"
+        customPlaceholder='127.0.0.0'
+        value={serverIp}
+        onChangeText={setServerIp}
+        secure={false}
+        animatedValue={animations.serverIp}
+        icon="list"
+        colors={colors}
+      />
 
-      {/* Username Input */}
-      <View style={styles.inputContainer}>
-        <Icon name="person" size={24} color={colors.colors.primary} style={styles.icon} />
-        <TextInput
-          style={[styles.input, { borderColor: colors.colors.primary, color: colors.colors.primary }]}
-          placeholder="Username"
-          value={username}
-          onChangeText={setUsername}
-        />
-      </View>
-      
+      <FloatingInput
+        label="Password"
+        value={serverPassword}
+        onChangeText={setServerPassword}
+        secure={true}
+        animatedValue={animations.serverPassword}
+        icon="lock"
+        colors={colors}
+      />
+
+      <FloatingInput
+        label="Username"
+        value={username}
+        onChangeText={setUsername}
+        secure={false}
+        animatedValue={animations.username}
+        icon="person"
+        colors={colors}
+      />
+
       <TouchableOpacity
-        style={[styles.button, { backgroundColor: colors.colors.secondary }]}  
+        style={[styles.button, { backgroundColor: colors.colors.secondary }]}
         onPress={handleConnect}
       >
-        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Connect to Server</Text>
+        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
+          Connect to Server
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -63,38 +77,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center', 
+    alignItems: 'center',
     padding: 20,
   },
-  inputContainer: {
-    flexDirection: 'row', 
-    alignItems: 'center',
-    width: '100%',
-    marginBottom: 15,
-    borderRadius: 25,
-    paddingLeft: 10,
-    paddingRight: 30,  
-  },
-  icon: {
-    marginRight: 10,  
-  },
-  input: {
-    flex: 1, 
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    borderWidth: 1,
+  iconTop: {
+    position: 'absolute',
+    top: 100,
   },
   button: {
-    paddingVertical: 25,
-    paddingHorizontal: 20,
-    borderRadius: 35,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 28,
+    marginTop: 30,
   },
   buttonText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
   },
 });
