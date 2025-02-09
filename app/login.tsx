@@ -1,15 +1,18 @@
-// Login.tsx
-import React, { useState, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Animated } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Animated, Linking } from 'react-native';
 import useThemeManager from '../hooks/useThemeManager';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import FloatingInput from '../components/FloatingInput'; 
+import FloatingInput from '../components/FloatingInput';
+import * as Device from 'expo-device';
+import pkg from '../package.json'
+import { FontAwesome } from '@expo/vector-icons';
 
 const Login = () => {
   const colors = useThemeManager();
   const [username, setUsername] = useState('');
   const [serverIp, setServerIp] = useState('');
   const [serverPassword, setServerPassword] = useState('');
+  const [deviceName, setDeviceName] = useState('');
 
   const animations = {
     username: useRef(new Animated.Value(0)).current,
@@ -17,8 +20,16 @@ const Login = () => {
     serverPassword: useRef(new Animated.Value(0)).current,
   };
 
+  useEffect(() => {
+    setDeviceName(Device.modelName ?? 'Unknown Device');
+  }, []);
+
   const handleConnect = () => {
     console.log("Connecting to the server...");
+  };
+
+  const handleGithubPress = () => {
+    Linking.openURL('https://github.com/vxnsin/NeoPin');
   };
 
   return (
@@ -32,7 +43,7 @@ const Login = () => {
 
       <FloatingInput
         label="Hostname"
-        customPlaceholder='127.0.0.0'
+        customPlaceholder="127.0.0.0"
         value={serverIp}
         onChangeText={setServerIp}
         secure={false}
@@ -53,6 +64,7 @@ const Login = () => {
 
       <FloatingInput
         label="Username"
+        customPlaceholder={deviceName}
         value={username}
         onChangeText={setUsername}
         secure={false}
@@ -67,6 +79,13 @@ const Login = () => {
       >
         <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
           Connect to Server
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.footer} onPress={handleGithubPress}>
+        <FontAwesome name="github" size={24} color={colors.colors.primary} />
+        <Text style={[styles.footerText, { color: colors.colors.primary }]}>
+          {`v${pkg.version}`}
         </Text>
       </TouchableOpacity>
     </View>
@@ -93,6 +112,17 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerText: {
+    marginLeft: 8,
+    fontSize: 16,
   },
 });
 

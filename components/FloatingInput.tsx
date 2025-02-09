@@ -111,6 +111,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
             showPlaceholder && !value ? (customPlaceholder || label) : ''
           }
           placeholderTextColor={colors.colors.onSurface}
+          selectionColor={colors.colors.primary} 
         />
       </View>
     </View>
