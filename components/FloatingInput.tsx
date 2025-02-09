@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { KeyboardType } from 'react-native';
 import { View, TextInput, StyleSheet, Animated } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
@@ -12,6 +13,9 @@ interface FloatingInputProps {
   colors: any;
   // Optional custom placeholder prop
   customPlaceholder?: string;
+  keyboardType?: KeyboardType;
+  error?: boolean;
+  errorMessage?: string;
 }
 
 const animateLabel = (animatedValue: Animated.Value, toValue: number) => {
@@ -31,6 +35,9 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
   animatedValue,
   colors,
   customPlaceholder,
+  keyboardType,
+  error,
+  errorMessage
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPlaceholder, setShowPlaceholder] = useState(false);
@@ -112,6 +119,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
           }
           placeholderTextColor={colors.colors.onSurface}
           selectionColor={colors.colors.primary} 
+          keyboardType={keyboardType || 'default'}
         />
       </View>
     </View>
