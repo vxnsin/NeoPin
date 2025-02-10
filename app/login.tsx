@@ -99,9 +99,6 @@ const Login = () => {
       await storeValue(userData);
       await ws.connect("wss://4sw16n7h-3012.euw.devtunnels.ms/ws", username, serverPassword);
       setConnectionStatus("Connected and authenticated!");
-      ws.addMessageListener((data) => {
-        console.log("Received message:", data);
-      });
     } catch (error: any) {
       setConnectionStatus("Connection failed: " + error.message);
     }
