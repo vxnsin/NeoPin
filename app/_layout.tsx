@@ -20,6 +20,7 @@ export default function RootLayout() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: theme.colors.surface },
+        animation: "fade"
       }}
     />
   );

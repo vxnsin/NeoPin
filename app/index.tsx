@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { View, Text, ActivityIndicator, StyleSheet } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
@@ -11,74 +11,92 @@ export default function Index() {
   const colors = useThemeManager();
   const { getValue } = useAsyncStorage("userData");
   const router = useRouter();
-  const ws = useWebSocket();
+  const { connect, close } = useWebSocket();
 
   const MAX_RETRIES = 3;
   const [status, setStatus] = useState<
-    "connecting" | "authenticated" | "error" | `Retrying (${number}/${number})`
+    "connecting" | "authenticated" | "error" | `Retrying`
   >("connecting");
 
+  const isMounted = useRef(true);
+  const connectRef = useRef(connect);
+  const disconnectRef = useRef(close);
+  const attemptCount = useRef(0);
+
   useEffect(() => {
-    let isMounted = true;
-    let attemptCount = 0;
-  
+    connectRef.current = connect;
+    disconnectRef.current = close;
+  }, [connect, close]);
+
+  useEffect(() => {
+    isMounted.current = true;
+    let timeoutId: NodeJS.Timeout | null = null;
+
     const attemptConnection = async () => {
       const userData = await getValue();
       if (!userData) {
-        if (isMounted) {
+        if (isMounted.current) {
           setStatus("error");
           router.replace("/login");
         }
         return;
       }
-  
+
       const { serverIp, deviceId, password } = JSON.parse(userData);
-  
+
       const connectWithRetry = async () => {
-        if (attemptCount >= MAX_RETRIES) {
-          if (isMounted) {
+        if (attemptCount.current >= MAX_RETRIES) {
+          if (isMounted.current) {
             setStatus("error");
             router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
           }
           return;
         }
-  
-        if (isMounted) {
-          setStatus(attemptCount === 0 ? "connecting" : `Retrying (${attemptCount}/${MAX_RETRIES})`);
+
+        if (isMounted.current) {
+          setStatus(
+            attemptCount.current === 0 
+              ? "connecting" 
+              : `Retrying`
+          );
         }
-  
+
         try {
           await delay(2500);
-          await ws.connect(serverIp, deviceId, password, { reconnecting: false });
-  
-          if (isMounted) {
+          await connectRef.current(serverIp, deviceId, password, { reconnecting: false });
+
+          if (isMounted.current) {
             setStatus("authenticated");
-            router.replace("/");
+            router.replace("/map");
           }
         } catch (error: any) {
-          attemptCount++;
-          console.error(`Connection error (Attempt ${attemptCount}/${MAX_RETRIES}):`, error);
-  
-          if (attemptCount < MAX_RETRIES) {
-            setTimeout(connectWithRetry, 3000);
-          } else if (isMounted) {
-            setStatus("error");
-            router.navigate("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
+          attemptCount.current++;
+          console.error(`Connection error (Attempt ${attemptCount.current}/${MAX_RETRIES}):`, error);
+
+          if (isMounted.current) {
+            if (attemptCount.current < MAX_RETRIES) {
+              timeoutId = setTimeout(connectWithRetry, 3000);
+            } else {
+              setStatus("error");
+              router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
+            }
           }
         }
       };
-  
+
       connectWithRetry();
     };
-  
-    attemptConnection();
-  
-    return () => {
-      isMounted = false;
-    };
-  }, [getValue, ws, router]);
 
-  if (status === "connecting" || (typeof status === "string" && status.startsWith("Retrying"))) {
+    attemptConnection();
+
+    return () => {
+      isMounted.current = false;
+      if (timeoutId) clearTimeout(timeoutId);
+      disconnectRef.current();
+    };
+  }, [getValue, router]);
+
+  if (status === "connecting" || status  === "Retrying") {
     return (
       <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
         <ActivityIndicator size="large" color={colors.colors.primary} />
@@ -101,7 +119,6 @@ export default function Index() {
 
   return null;
 }
-
 
 const styles = StyleSheet.create({
   container: {

@@ -81,6 +81,7 @@ const Login = () => {
           const response = JSON.parse(event.data);
           testSocket.close();
           if (response.successful === true) {
+            console.log("Connected")
             resolve();
           } else {
             reject(new Error("Authentication failed"));
@@ -93,7 +94,7 @@ const Login = () => {
       setConnectionStatus("Test connection successful - Connecting...");
       const userData = JSON.stringify({
         deviceId: username,
-        serverIp,
+        serverIp: "wss://4sw16n7h-3012.euw.devtunnels.ms/ws",
         password: serverPassword
       });
       await storeValue(userData);

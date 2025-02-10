@@ -29,7 +29,8 @@ export default function ErrorScreen() {
 
       {typeof status === "string" && status.startsWith("Retrying") && (
         <Text style={[styles.statusText, { color: colors.colors.primary }]}>{status}</Text>
-      )}
+        )}
+
 
       {/* Retry Button */}
       <TouchableOpacity
@@ -43,7 +44,7 @@ export default function ErrorScreen() {
         style={[styles.button, { backgroundColor: colors.colors.secondary }]}
         onPress={handleLogout}
       >
-        <Text style={[styles.buttonText, { color: colors.colors.primary }]}>Logout</Text>
+        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Logout</Text>
       </TouchableOpacity>
     </View>
   );
