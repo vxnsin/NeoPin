@@ -50,6 +50,12 @@
         "projectId": "1808f5ce-26ec-43c7-90fd-cfe81987c07b"
       }
     },
-    "owner": "vensin"
+    "owner": "vensin",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b"
+    }
   }
 }

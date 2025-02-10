@@ -92,7 +92,6 @@ export default function Index() {
     return () => {
       isMounted.current = false;
       if (timeoutId) clearTimeout(timeoutId);
-      disconnectRef.current();
     };
   }, [getValue, router]);
 
