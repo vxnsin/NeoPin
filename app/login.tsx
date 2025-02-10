@@ -6,7 +6,7 @@ import FloatingInput from '@/components/FloatingInput';
 import * as Device from 'expo-device';
 import pkg from '@/package.json';
 import { FontAwesome } from '@expo/vector-icons';
-import { useAuthWebSocket, WebSocketConfig } from '@/hooks/useWebSocket';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAsyncStorage } from '@/hooks/useAsyncStorage';
 
 const Login = () => {
@@ -15,91 +15,65 @@ const Login = () => {
   const [serverIp, setServerIp] = useState('');
   const [serverPassword, setServerPassword] = useState('');
   const [deviceName, setDeviceName] = useState('');
-  const [wsConfig, setWsConfig] = useState<WebSocketConfig | undefined>(undefined);
-  const [connectionStatus, setConnectionStatus] = useState<string>('');
-
+  const [connectionStatus, setConnectionStatus] = useState('');
   const animations = {
     username: useRef(new Animated.Value(0)).current,
     serverIp: useRef(new Animated.Value(0)).current,
-    serverPassword: useRef(new Animated.Value(0)).current,
+    serverPassword: useRef(new Animated.Value(0)).current
   };
+  const ws = useWebSocket();
+  const { storeValue } = useAsyncStorage('userData');
 
   useEffect(() => {
-    setDeviceName(Device.modelName ?? 'Unknown Device');
+    setDeviceName(Device.modelName || 'Unknown Device');
   }, []);
 
-  const { messages, sendMessage } = useAuthWebSocket(wsConfig);
-  const { storeValue, getValue } = useAsyncStorage('userData');
-  
   const handleConnect = async () => {
     if (!serverIp || !username || !serverPassword) {
+      setConnectionStatus("Please fill in all fields");
       return;
     }
-
-    const testConnection = new WebSocket("wss://4sw16n7h-3012.euw.devtunnels.ms/ws");
-  
-    testConnection.onopen = () => {
-      setConnectionStatus('Attempting to authenticate...');
-  
-      const authMessage = JSON.stringify({
-        type: 'authenticate',
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const testSocket = new WebSocket("wss://4sw16n7h-3012.euw.devtunnels.ms/ws");
+        testSocket.onopen = () => {
+          const authMessage = JSON.stringify({
+            type: "authenticate",
+            deviceId: username,
+            password: serverPassword
+          });
+          testSocket.send(authMessage);
+        };
+        testSocket.onmessage = (event) => {
+          const response = JSON.parse(event.data);
+          testSocket.close();
+          if (response.successful === true) {
+            resolve();
+          } else {
+            reject(new Error("Authentication failed"));
+          }
+        };
+        testSocket.onerror = () => {
+          reject(new Error("Test connection failed"));
+        };
+      });
+      setConnectionStatus("Test connection successful - Connecting...");
+      const userData = JSON.stringify({
         deviceId: username,
+        serverIp,
         password: serverPassword
       });
-  
-      testConnection.send(authMessage);
-    };
-  
-    testConnection.onmessage = async (event) => {
-      try {
-        const response = JSON.parse(event.data);
-  
-        if (response.successful === true) {
-          setConnectionStatus('Connection successful and authenticated!');
-          console.log("WebSocket authentication successful!");
-  
-          const userData = JSON.stringify({
-            deviceId:  username,
-            serverIp: "wss://4sw16n7h-3012.euw.devtunnels.ms/ws",
-            password: serverPassword,
-          });
-          await storeValue(userData);
-  
-          const config: WebSocketConfig = {
-            url: "wss://4sw16n7h-3012.euw.devtunnels.ms/ws",
-            deviceId: username,
-            password: "neopin123",
-          };
-          setWsConfig(config);
-
-          testConnection.close()
-  
-        } else {
-          setConnectionStatus('Authentication failed. Please check your credentials.');
-          console.error("Authentication failed. Server response:", response);
-        }
-      } catch (error) {
-        setConnectionStatus('Failed to parse response.');
-        console.error("Error parsing WebSocket response:", error);
-      }
-    };
-  
-    testConnection.onerror = (event) => {
-      setConnectionStatus('Connection failed. Please check the server IP or credentials.');
-      console.error("WebSocket connection failed", event);
-    };
-    
-    testConnection.onclose = (event) => {
-      if (event.code === 4000) {
-        setConnectionStatus('Connection failed: Unauthorized');
-        console.log('WebSocket closed with unauthorized error');
-      } else {
-        setConnectionStatus('Connection closed unexpectedly');
-        console.log('WebSocket connection closed with code: ' + event.code);
-      }
-    };
+      await storeValue(userData);
+      await ws.connect("wss://4sw16n7h-3012.euw.devtunnels.ms/ws", username, serverPassword);
+      setConnectionStatus("Connected and authenticated!");
+      ws.addMessageListener((data) => {
+        console.log("Received message:", data);
+      });
+    } catch (error: any) {
+      setConnectionStatus("Connection failed: " + error.message);
+    }
   };
-  
+
   const handleGithubPress = () => {
     Linking.openURL('https://github.com/vxnsin/NeoPin');
   };
@@ -139,14 +113,11 @@ const Login = () => {
       <TouchableOpacity style={[styles.button, { backgroundColor: colors.colors.secondary }]} onPress={handleConnect}>
         <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Connect to Server</Text>
       </TouchableOpacity>
-      
-      {/* Display connection status */}
       {connectionStatus ? (
         <Text style={{ color: connectionStatus.includes('failed') ? 'red' : 'green' }}>
           {connectionStatus}
         </Text>
       ) : null}
-
       <TouchableOpacity style={styles.footer} onPress={handleGithubPress}>
         <FontAwesome name="github" size={24} color={colors.colors.primary} />
         <Text style={[styles.footerText, { color: colors.colors.primary }]}>{`v${pkg.version}`}</Text>
@@ -154,7 +125,6 @@ const Login = () => {
     </View>
   );
 };
-
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },

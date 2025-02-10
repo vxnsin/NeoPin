@@ -1,120 +1,127 @@
-import { useEffect, useRef, useState } from "react";
-import { useAsyncStorage } from "@/hooks/useAsyncStorage";
+import { useRef } from 'react';
+import { registerHandlers } from '@/handlers/WebSocket';
 
-interface AuthMessage {
-  type: "authenticate";
-  deviceId: string;
-  password: string;
-}
+export type MessageHandler = (data: any) => void;
 
-export interface WebSocketConfig {
-  url: string;
-  deviceId: string;
-  password: string;
-  onRequestLocation?: () => void | Promise<void>;
-}
-
-export function useAuthWebSocket(config?: WebSocketConfig) {
-  const [messages, setMessages] = useState<any[]>([]);
+export function useWebSocket() {
   const socketRef = useRef<WebSocket | null>(null);
-  const { getValue } = useAsyncStorage('userData');
-  const retryCountRef = useRef(0); 
+  const messageListenersRef = useRef<MessageHandler[]>([]);
+  const manuallyClosedRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const connectionParamsRef = useRef<{ url: string; deviceId: string; password: string } | null>(null);
 
-  useEffect(() => {
-    if (!config) return;
+  const connect = (url: string, deviceId: string, password: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      manuallyClosedRef.current = false;
+      connectionParamsRef.current = { url, deviceId, password };
+      const socket = new WebSocket(url);
+      socketRef.current = socket;
 
-    const loadSavedData = async () => {
-      try {
-        const savedData = await getValue();
-        if (!savedData) {
-          console.error("No saved data found in AsyncStorage");
-          return;
-        }
+      socket.addEventListener('open', () => {
+        const authMsg = JSON.stringify({ type: "authenticate", deviceId, password });
+        socket.send(authMsg);
 
-        const parsedData = JSON.parse(savedData);
-        const { username, serverIp, password } = parsedData || {};
-
-        const deviceIdToUse = config.deviceId || username;
-        const passwordToUse = config.password || password;
-        const serverIpToUse = serverIp || config.url; 
-
-        if (!deviceIdToUse || !passwordToUse) {
-          console.error("Missing device ID or password");
-          return;
-        }
-
-        if (!serverIpToUse) {
-          console.error("No WebSocket server URL available");
-          return;
-        }
-
-        setupWebSocket(serverIpToUse, deviceIdToUse, passwordToUse);
-      } catch (error) {
-        console.error("Error initializing WebSocket:", error);
-      }
-    };
-
-    const setupWebSocket = (url: string, deviceId: string, password: string) => {
-      const ws = new WebSocket(url);
-
-      ws.onopen = () => {
-        retryCountRef.current = 0; 
-        const authMsg: AuthMessage = { 
-          type: "authenticate", 
-          deviceId, 
-          password 
-        };
-        ws.send(JSON.stringify(authMsg));
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          setMessages(prev => [...prev, data]);
-          
-          if (data.type === "requestLocation" && config.onRequestLocation) {
-            await config.onRequestLocation();
+        const authResponseHandler = (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.hasOwnProperty('successful')) {
+              socket.removeEventListener('message', authResponseHandler);
+              if (data.successful === true) {
+                reconnectAttemptsRef.current = 0;
+                // Auto-register default message handlers.
+                registerHandlers({ addMessageListener, emit });
+                resolve();
+              } else {
+                socket.close();
+                reject(new Error("Authentication failed"));
+              }
+            }
+          } catch (error) {
+            socket.removeEventListener('message', authResponseHandler);
+            socket.close();
+            reject(new Error("Invalid authentication response"));
           }
+        };
+
+        socket.addEventListener('message', authResponseHandler);
+      });
+
+      socket.addEventListener('error', () => {
+        reject(new Error("WebSocket error"));
+      });
+
+      socket.addEventListener('close', () => {
+        if (!manuallyClosedRef.current && connectionParamsRef.current) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          setTimeout(() => {
+            reconnectAttemptsRef.current++;
+            connect(
+              connectionParamsRef.current!.url,
+              connectionParamsRef.current!.deviceId,
+              connectionParamsRef.current!.password
+            ).catch(() => {});
+          }, delay);
+        }
+      });
+
+      socket.addEventListener('message', (event) => {
+        let data;
+        try {
+          data = JSON.parse(event.data);
         } catch (error) {
-          console.error("Error handling message:", error);
+          console.error("Error parsing WebSocket message:", error);
+          return;
         }
-      };
+        if (data.hasOwnProperty('successful')) return;
+        messageListenersRef.current.forEach((listener) => listener(data));
+      });
+    });
+  };
 
-      ws.onerror = (e) => {
-        console.error("WebSocket error:", e);
-      };
-
-      ws.onclose = (e) => {
-        console.log(`WebSocket closed (code: ${e.code}, reason: ${e.reason})`);
-        
-        if (retryCountRef.current < 3) {
-          const retryTime = Math.min(1000 * 2 ** retryCountRef.current, 30000);
-          retryCountRef.current++;
-          setTimeout(loadSavedData, retryTime);
-        }
-      };
-
-      socketRef.current = ws;
-    };
-
-    loadSavedData();
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.close();
-        socketRef.current = null;
-      }
-    };
-  }, [config, getValue]);
-
-  const sendMessage = (msg: string | object) => {
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      const payload = typeof msg === "string" ? msg : JSON.stringify(msg);
-      socketRef.current.send(payload);
-    } else {
-      console.warn("WebSocket is not open. Message not sent:", msg);
+  const close = () => {
+    manuallyClosedRef.current = true;
+    if (socketRef.current) {
+      socketRef.current.close();
+      socketRef.current = null;
     }
   };
 
-  return { messages, sendMessage };
+  const sendMessage = (msg: any): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+        return reject(new Error("WebSocket is not open"));
+      }
+      const payload = typeof msg === "string" ? msg : JSON.stringify(msg);
+      const handler = (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          socketRef.current?.removeEventListener('message', handler);
+          resolve(data);
+        } catch (error) {
+          socketRef.current?.removeEventListener('message', handler);
+          reject(error);
+        }
+      };
+      socketRef.current.addEventListener('message', handler);
+      socketRef.current.send(payload);
+    });
+  };
+
+  const emit = (msg: any) => {
+    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
+      console.warn("WebSocket is not open. Message not sent:", msg);
+      return;
+    }
+    const payload = typeof msg === "string" ? msg : JSON.stringify(msg);
+    socketRef.current.send(payload);
+  };
+
+  const addMessageListener = (listener: MessageHandler): (() => void) => {
+    messageListenersRef.current.push(listener);
+    return () => {
+      messageListenersRef.current = messageListenersRef.current.filter(l => l !== listener);
+    };
+  };
+
+  return { connect, close, sendMessage, emit, addMessageListener };
 }
