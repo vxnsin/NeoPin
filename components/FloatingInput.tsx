@@ -11,7 +11,6 @@ interface FloatingInputProps {
   icon: string;
   animatedValue: Animated.Value;
   colors: any;
-  // Optional custom placeholder prop
   customPlaceholder?: string;
   keyboardType?: KeyboardType;
   error?: boolean;
@@ -37,7 +36,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
   customPlaceholder,
   keyboardType,
   error,
-  errorMessage
+  errorMessage,
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPlaceholder, setShowPlaceholder] = useState(false);
@@ -63,6 +62,9 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
     setShowPlaceholder(false);
   };
 
+  // Use red if error is true; otherwise, use the primary color.
+  const effectiveColor = error ? 'red' : colors.colors.primary;
+
   return (
     <View style={styles.inputContainer}>
       <Icon
@@ -71,7 +73,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
         color={colors.colors.primary}
         style={styles.icon}
       />
-      <View style={[styles.inputWrapper, { borderColor: colors.colors.primary }]}>
+      <View style={[styles.inputWrapper, { borderColor: effectiveColor }]}>
         <Animated.Text
           style={[
             styles.label,
@@ -91,7 +93,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
                 },
               ],
               backgroundColor: colors.colors.surface,
-              color: colors.colors.primary,
+              color: effectiveColor,
               left: animatedValue.interpolate({
                 inputRange: [0, 1],
                 outputRange: [20, 15],
@@ -118,7 +120,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
             showPlaceholder && !value ? (customPlaceholder || label) : ''
           }
           placeholderTextColor={colors.colors.onSurface}
-          selectionColor={colors.colors.primary} 
+          selectionColor={colors.colors.primary}
           keyboardType={keyboardType || 'default'}
         />
       </View>
