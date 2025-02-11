@@ -110,13 +110,13 @@
             return response.json();
           })
           .then((data) => {
-            const devices = data.devices || [];
+            console.log(data)
 
             for (const deviceId in markers) {
               map.removeLayer(markers[deviceId]);
             }
 
-            devices.forEach((device) => {
+            data.forEach((device) => {
               const { latitude, longitude } = device.position || {};
               if (latitude != null && longitude != null) {
                 const marker = L.marker([latitude, longitude]).addTo(map);
