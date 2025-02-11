@@ -1,113 +1,100 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { registerHandlers } from "@/handlers/WebSocket";
 
-export type MessageHandler = (data: any) => void;
+export type MsgHandler = (data: any) => void;
 
 export function useWebSocket() {
-  const socketRef = useRef<WebSocket | null>(null);
-  const messageListenersRef = useRef<MessageHandler[]>([]);
-  const manuallyClosedRef = useRef(false);
-  const reconnectAttemptsRef = useRef(0); // internal counter
-  const connectionParamsRef = useRef<{ url: string; deviceId: string; password: string } | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
-  const MAX_RETRIES = 3; // Maximum retries set to 3
+  const socket = useRef<WebSocket | null>(null);
+  const listeners = useRef<MsgHandler[]>([]);
+  const closedManually = useRef(false);
+  const retryCount = useRef(0);
+  const connectionParm = useRef<{ url: string; deviceId: string; password: string } | null>(null);
+  const messageQueue = useRef<any[]>([]);
 
-  /**
-   * Options:
-   *   reconnecting: boolean (if false, auto-reconnection is disabled)
-   *   onMaxRetriesReached: optional callback when max retries are reached
-   */
+  const MAX_RETRIES = 3;
+
   const connect = (
     url: string,
     deviceId: string,
     password: string,
     options?: { reconnecting?: boolean; onMaxRetriesReached?: () => void }
   ): Promise<void> => {
-    // Default auto-reconnection to true if not provided.
-    const autoReconnect = options?.reconnecting !== undefined ? options.reconnecting : true;
+    const autoReconnect = options?.reconnecting !== false;
 
     return new Promise((resolve, reject) => {
-      // If auto-reconnect is enabled and we've reached the retry limit, call the callback and reject.
-      if (autoReconnect && reconnectAttemptsRef.current >= MAX_RETRIES) {
+      if (autoReconnect && retryCount.current >= MAX_RETRIES) {
         console.error("Max retry limit reached. Stopping reconnect attempts.");
-        if (options?.onMaxRetriesReached) {
-          options.onMaxRetriesReached();
-        }
-        reject(new Error("Max retry limit reached"));
-        return;
+        options?.onMaxRetriesReached?.();
+        return reject(new Error("Max retry limit reached"));
       }
 
-      manuallyClosedRef.current = false;
-      connectionParamsRef.current = { url, deviceId, password };
-      const socket = new WebSocket(url);
-      socketRef.current = socket;
+      closedManually.current = false;
+      connectionParm.current = { url, deviceId, password };
+      const ws = new WebSocket(url);
+      socket.current = ws;
 
-      // Log differently if autoReconnect is disabled.
-      if (autoReconnect) {
-        console.log(
-          `Connecting to WebSocket... (Attempt ${reconnectAttemptsRef.current + 1}/${MAX_RETRIES})`
-        );
-      } else {
-        console.log("Connecting to WebSocket...");
-      }
+      console.log(`Connecting... (Attempt ${retryCount.current + 1}/${MAX_RETRIES})`);
 
-      socket.addEventListener("open", () => {
-        // On a successful connection, reset the internal retry counter.
-        reconnectAttemptsRef.current = 0;
-        const authMsg = JSON.stringify({ type: "authenticate", deviceId, password });
-        socket.send(authMsg);
+      ws.addEventListener("open", () => {
+        retryCount.current = 0;
+        // Set the connected state to true
+        setIsConnected(true);
+        // Send authentication
+        ws.send(JSON.stringify({ type: "authenticate", deviceId, password }));
 
-        const authResponseHandler = (event: MessageEvent) => {
+        const authHandler = (event: MessageEvent) => {
           try {
             const data = JSON.parse(event.data);
-            if (data.hasOwnProperty("successful")) {
-              socket.removeEventListener("message", authResponseHandler);
+            if ("successful" in data) {
+              ws.removeEventListener("message", authHandler);
               if (data.successful) {
-                // Register message handlers after a successful authentication.
                 registerHandlers({ addMessageListener, emit });
+
+                while (messageQueue.current.length) {
+                  emit(messageQueue.current.shift());
+                }
+
                 resolve();
               } else {
-                socket.close();
+                ws.close();
                 reject(new Error("Authentication failed"));
               }
             }
-          } catch (error) {
-            socket.removeEventListener("message", authResponseHandler);
-            socket.close();
+          } catch {
+            ws.removeEventListener("message", authHandler);
+            ws.close();
             reject(new Error("Invalid authentication response"));
           }
         };
 
-        socket.addEventListener("message", authResponseHandler);
+        ws.addEventListener("message", authHandler);
       });
 
-      socket.addEventListener("error", () => {
-        console.error(
-          `WebSocket error (Attempt ${autoReconnect ? reconnectAttemptsRef.current + 1 : ""}/${autoReconnect ? MAX_RETRIES : ""})`
-        );
+      ws.addEventListener("error", () => {
+        console.error(`WebSocket error (Attempt ${retryCount.current + 1}/${MAX_RETRIES})`);
+        setIsConnected(false);
         reject(new Error("WebSocket error"));
       });
 
-      socket.addEventListener("close", () => {
-        if (!manuallyClosedRef.current && connectionParamsRef.current) {
+      ws.addEventListener("close", () => {
+        setIsConnected(false);
+        if (!closedManually.current && connectionParm.current) {
           if (autoReconnect) {
-            reconnectAttemptsRef.current++;
-            if (reconnectAttemptsRef.current >= MAX_RETRIES) {
+            retryCount.current++;
+            if (retryCount.current >= MAX_RETRIES) {
               console.error("Max retry limit reached. Not retrying further.");
-              if (options?.onMaxRetriesReached) {
-                options.onMaxRetriesReached();
-              }
+              options?.onMaxRetriesReached?.();
               return;
             }
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 5000);
-            console.log(
-              `Retrying WebSocket connection in ${delay / 1000}s... (Retry ${reconnectAttemptsRef.current}/${MAX_RETRIES})`
-            );
+            const delay = Math.min(1000 * Math.pow(2, retryCount.current), 5000);
+            console.log(`Retrying WebSocket connection in ${delay / 1000}s... (Retry ${retryCount.current}/${MAX_RETRIES})`);
             setTimeout(() => {
               connect(
-                connectionParamsRef.current!.url,
-                connectionParamsRef.current!.deviceId,
-                connectionParamsRef.current!.password,
+                connectionParm.current!.url,
+                connectionParm.current!.deviceId,
+                connectionParm.current!.password,
                 options
               ).catch(() => {});
             }, delay);
@@ -115,7 +102,7 @@ export function useWebSocket() {
         }
       });
 
-      socket.addEventListener("message", (event) => {
+      ws.addEventListener("message", (event) => {
         let data;
         try {
           data = JSON.parse(event.data);
@@ -123,36 +110,40 @@ export function useWebSocket() {
           console.error("Error parsing WebSocket message:", error);
           return;
         }
-        // Ignore authentication responses (handled above)
         if (data.hasOwnProperty("successful")) return;
-        messageListenersRef.current.forEach((listener) => listener(data));
+        listeners.current.forEach((listener) => listener(data));
       });
     });
   };
 
   const close = () => {
-    manuallyClosedRef.current = true;
-    if (socketRef.current) {
-      socketRef.current.close();
-      socketRef.current = null;
+    console.log("Closing WebSocket");
+    closedManually.current = true;
+    setIsConnected(false);
+    if (socket.current) {
+      socket.current.close();
+      socket.current = null;
     }
   };
 
   const emit = (msg: any) => {
-    if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      console.warn("WebSocket is not open. Message not sent:", msg);
+    if (!socket.current || socket.current.readyState !== WebSocket.OPEN) {
+      console.warn("WebSocket is not open. Queuing message:", msg);
+      messageQueue.current.push(msg);
       return;
     }
+
     const payload = typeof msg === "string" ? msg : JSON.stringify(msg);
-    socketRef.current.send(payload);
+    console.log("Sending message to WebSocket:", payload);
+    socket.current.send(payload);
   };
 
-  const addMessageListener = (listener: MessageHandler): (() => void) => {
-    messageListenersRef.current.push(listener);
+  const addMessageListener = (listener: MsgHandler): (() => void) => {
+    listeners.current.push(listener);
     return () => {
-      messageListenersRef.current = messageListenersRef.current.filter((l) => l !== listener);
+      listeners.current = listeners.current.filter((l) => l !== listener);
     };
   };
 
-  return { connect, close, emit, addMessageListener };
+  return { connect, close, emit, addMessageListener, isConnected };
 }

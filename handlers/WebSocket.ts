@@ -6,13 +6,19 @@ export function registerHandlers(ws: {
       if (!data || !data.type) return;
       switch (data.type) {
         case 'requestLocation':
+          console.log("Received requestLocation event from server.");
+          console.log("Sending updatePosition message...");
           ws.emit({
-            type: 'locationResponse',
-            location: { latitude: 37.7749, longitude: -122.4194 }
+            type: 'updatePosition',
+            latitude: 37.7749,
+            longitude: -122.4194
           });
           break;
         case 'ping':
-          ws.emit({ type: 'pong' });
+            ws.emit({ type: 'pong' });
+          break;
+          case 'dataResponse':
+            console.log("Global handler received dataResponse:", data);
           break;
         default:
           console.warn('Unhandled message type:', data.type);

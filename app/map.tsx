@@ -3,45 +3,54 @@ import { View, ActivityIndicator, StyleSheet, Text } from "react-native";
 import { WebView } from "react-native-webview";
 import useThemeManager from "@/hooks/useThemeManager";
 import * as Location from "expo-location";
+import { useWebSocketContext } from "@/context/WebSocket"; 
 
 export default function MapComponent() {
-  const [loading, setLoading] = useState(true);
   const [webViewLoaded, setWebViewLoaded] = useState(false);
   const colors = useThemeManager();
-  const webviewRef = useRef<any>(null);
+  const webviewRef = useRef<WebView>(null);
+  const loaded = useRef(false);
+  const { emit, addMessageListener, isConnected } = useWebSocketContext(); 
+
+  useEffect(() => {
+    const removeListener = addMessageListener((data: { type: string; devices?: any; latitude?: number; longitude?: number }) => {
+      if (data.type === "dataResponse" && data.devices) {
+        webviewRef.current?.postMessage(
+          JSON.stringify({
+            type: "dataResponse",
+            devices: data.devices,
+          })
+        );
+      }
+    });
+    return () => {
+      removeListener();
+    };
+  }, [addMessageListener]);
 
   useEffect(() => {
     if (!webViewLoaded) return;
-
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      console.log("Location permission status:", status);
-      
       if (status !== "granted") return;
 
-      // Initial location
       const currentLocation = await Location.getCurrentPositionAsync({});
       webviewRef.current?.postMessage(
         JSON.stringify({
           type: "updateLocation",
           latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude
+          longitude: currentLocation.coords.longitude,
         })
       );
 
-      // Watch for updates
       Location.watchPositionAsync(
-        { 
-          accuracy: Location.Accuracy.High, 
-          timeInterval: 1000, 
-          distanceInterval: 1 
-        },
+        { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 5 },
         (newLocation) => {
           webviewRef.current?.postMessage(
             JSON.stringify({
               type: "updateLocation",
               latitude: newLocation.coords.latitude,
-              longitude: newLocation.coords.longitude
+              longitude: newLocation.coords.longitude,
             })
           );
         }
@@ -49,73 +58,20 @@ export default function MapComponent() {
     })();
   }, [webViewLoaded]);
 
-  const injectedJavaScript = `
-    (function() {
-      // Initialize Leaflet icon path
-      var leafletScript = document.createElement('script');
-      leafletScript.text = \`
-        L.Icon.Default.imagePath = 'https://unpkg.com/leaflet/dist/images/';
-        
-        window.updateMarkerFromNative = function(lat, lng) {
-          console.log('Updating marker to:', lat, lng);
-          var latlng = [lat, lng];
-          
-          if (!window.userMarker) {
-            window.userMarker = L.marker(latlng, {
-              icon: new L.Icon.Default(),
-              title: 'Your Location',
-              zIndexOffset: 1000
-            }).addTo(map);
-            map.setView(latlng, 17);
-          } else {
-            window.userMarker.setLatLng(latlng);
-          }
-        };
-      \`;
-      document.head.appendChild(leafletScript);
-
-      // Enhanced message handling
-      window.ReactNativeWebView = {
-        postMessage: function(data) {
-          window.webkit.messageHandlers.ReactNativeWebView.postMessage(data);
-        }
-      };
-      
-      window.ReactNativeWebView.onMessage = function(event) {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'updateLocation') {
-            if (typeof window.updateMarkerFromNative === 'function') {
-              window.updateMarkerFromNative(data.latitude, data.longitude);
-            } else {
-              console.error('Marker function not available');
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'error',
-                message: 'updateMarkerFromNative not defined'
-              }));
-            }
-          }
-        } catch (error) {
-          console.error('Message handling error:', error);
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'error',
-            error: error.message
-          }));
-        }
-      };
-    })();
-    true;
-  `;
-
-  const handleLoad = () => {
-    setLoading(false);
-    setWebViewLoaded(true);
-    console.log("WebView fully initialized");
-  };
+  useEffect(() => {
+    if (webViewLoaded && isConnected && !loaded.current) {
+      console.log("WebSocket is connected and WebView loaded. Sending messages...");
+      setTimeout(() => {
+        console.log("Sending initial ping...");
+        emit({ type: "ping" });
+      }, 1000);
+      loaded.current = true; 
+    }
+  }, [webViewLoaded, isConnected, emit]);
 
   return (
     <View style={styles.container}>
-      {loading && (
+      {!webViewLoaded && (
         <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
           <ActivityIndicator size="large" color={colors.colors.primary} />
           <Text style={[styles.text, { color: colors.colors.primary }]}>Loading Map...</Text>
@@ -125,17 +81,16 @@ export default function MapComponent() {
         ref={webviewRef}
         source={{ html: mapHTML }}
         style={styles.webview}
-        onLoad={handleLoad}
-        injectedJavaScript={injectedJavaScript}
+        onLoad={() => setWebViewLoaded(true)}
         geolocationEnabled={true}
         onMessage={(event) => {
           try {
             const data = JSON.parse(event.nativeEvent.data);
-            if (data.type === 'error') {
-              console.error('WebView Error:', data.message || data.error);
+            if (data.type === "error") {
+              console.error("WebView Error:", data.message || data.error);
             }
           } catch (e) {
-            console.error('Error parsing WebView message:', e);
+            console.error("Error parsing WebView message:", e);
           }
         }}
       />
@@ -146,7 +101,7 @@ export default function MapComponent() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   webview: { flex: 1 },
-  text: { marginTop: 10, fontSize: 16, fontWeight: "bold" }
+  text: { marginTop: 10, fontSize: 16, fontWeight: "bold" },
 });
 
 const mapHTML = `
@@ -158,39 +113,108 @@ const mapHTML = `
     * { margin: 0; padding: 0; }
     html, body, #map { height: 100%; width: 100%; }
     .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
-    .leaflet-marker-icon { filter: hue-rotate(220deg) saturate(150%); }
   </style>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 <body>
   <div id="map"></div>
-  <script>
-    // Map initialization
+ <script>
     var map = L.map('map', {
-      center: [51.1657, 10.4515],
-      zoom: 6,
+      center: [51.505, -0.09],
+      zoom: 10,
       minZoom: 2,
       maxZoom: 19,
       attributionControl: false,
       zoomControl: false
     });
-
-    // Tile layer with retina support
+    
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       noWrap: true,
       detectRetina: true,
-      maxZoom: 19,
-      updateWhenIdle: true
-    }).addTo(map);
-
-    // Static reference marker
-    var staticMarker = L.marker([35.737448286487595, 51.39876293182373], {
-      title: 'Reference Point',
-      zIndexOffset: 500
+      maxZoom: 19
     }).addTo(map);
     
-    staticMarker.bindPopup('<b>Reference Point</b><br />Static location').openPopup();
+    window.userMarker = null;
+    window.updateMarkerFromNative = function(lat, lng) {
+      var latlng = [lat, lng];
+      if (!window.userMarker) {
+        window.userMarker = L.marker(latlng, {
+          icon: new L.Icon.Default(),
+          title: 'Your Location',
+          zIndexOffset: 1000
+        }).addTo(map);
+        map.setView(latlng, 12);
+      } else {
+        window.userMarker.setLatLng(latlng);
+      }
+    };
+
+    window.deviceMarkers = {};
+    
+    window.updateDeviceMarkers = function(devices) {
+      const updatedDeviceIds = new Set(devices.map(device => device.deviceId));
+      
+      devices.forEach(function(device) {
+        if (!device.position) return;
+        
+        var lat = device.position.latitude;
+        var lng = device.position.longitude;
+        var status = device.status || "online";
+        var lastPing = device.lastPing || "N/A";
+        
+        var popupContent = "<b>Device:</b> " + device.deviceId + "<br>" +
+                           "<b>Status:</b> " + status + "<br>" +
+                           "<b>Last Ping:</b> " + lastPing;
+        
+        if (window.deviceMarkers[device.deviceId]) {
+          window.deviceMarkers[device.deviceId].setLatLng([lat, lng]);
+          window.deviceMarkers[device.deviceId].bindPopup(popupContent);
+        } else {
+          var marker = L.marker([lat, lng]).addTo(map);
+          marker.bindPopup(popupContent);
+          window.deviceMarkers[device.deviceId] = marker;
+        }
+      });
+      
+      Object.keys(window.deviceMarkers).forEach(function(deviceId) {
+        if (!updatedDeviceIds.has(deviceId)) {
+          map.removeLayer(window.deviceMarkers[deviceId]);
+          delete window.deviceMarkers[deviceId];
+        }
+      });
+    };
+
+    window.addEventListener('message', function(event) {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'updateLocation') {
+          window.updateMarkerFromNative(data.latitude, data.longitude);
+        } else if (data.type === 'dataResponse' && data.devices) {
+          window.updateDeviceMarkers(data.devices);
+        }
+      } catch (error) {
+        console.error('Error processing message:', error);
+      }
+    });
+
+    setTimeout(function(){
+      var dummyDevices = [
+        { 
+          deviceId: "Dummy1", 
+          position: { latitude: 51.51, longitude: -0.1 }, 
+          lastPing: "2 minutes ago", 
+          status: "online" 
+        },
+        { 
+          deviceId: "Dummy2", 
+          position: { latitude: 51.50, longitude: -0.08 }, 
+          lastPing: "5 minutes ago", 
+          status: "offline" 
+        }
+      ];
+      window.updateDeviceMarkers(dummyDevices);
+    }, 6000);
   </script>
 </body>
 </html>
