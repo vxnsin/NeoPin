@@ -27,7 +27,6 @@ const Loader: React.FC<LoaderProps> = ({
   useEffect(() => {
     if (!visible) {
       animation.setValue(0);
-      console.log('Animation reset to 0');
       return;
     }
     
@@ -91,7 +90,6 @@ const Loader: React.FC<LoaderProps> = ({
         style={styles.textContainer}
         onLayout={(e) => {
           setContainerLayout(e.nativeEvent.layout);
-          console.log('Container layout set:', e.nativeEvent.layout);
         }}
       >
         <Text style={[styles.text, { color: theme.colors.onSurface, opacity: 0.3 }]}>

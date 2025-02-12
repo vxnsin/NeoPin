@@ -24,7 +24,7 @@ export function useWebSocket() {
     const autoReconnect = options?.reconnecting !== false;
 
     return new Promise((resolve, reject) => {
-      if (autoReconnect && retryCount.current >= MAX_RETRIES) {
+      if (!options?.reconnecting && autoReconnect && retryCount.current >= MAX_RETRIES) {
         console.error("Max retry limit reached. Stopping reconnect attempts.");
         options?.onMaxRetriesReached?.();
         return reject(new Error("Max retry limit reached"));
@@ -35,13 +35,11 @@ export function useWebSocket() {
       const ws = new WebSocket(url);
       socket.current = ws;
 
-      console.log(`Connecting... (Attempt ${retryCount.current + 1}/${MAX_RETRIES})`);
+      console.log(`Connecting... (Attempt ${retryCount.current + 1}${options?.reconnecting ? '' : `/${MAX_RETRIES}`})`);
 
       ws.addEventListener("open", () => {
         retryCount.current = 0;
-        // Set the connected state to true
         setIsConnected(true);
-        // Send authentication
         ws.send(JSON.stringify({ type: "authenticate", deviceId, password }));
 
         const authHandler = (event: MessageEvent) => {
@@ -73,7 +71,7 @@ export function useWebSocket() {
       });
 
       ws.addEventListener("error", () => {
-        console.error(`WebSocket error (Attempt ${retryCount.current + 1}/${MAX_RETRIES})`);
+        console.error(`WebSocket error (Attempt ${retryCount.current + 1}${options?.reconnecting ? '' : `/${MAX_RETRIES}`})`);
         setIsConnected(false);
         reject(new Error("WebSocket error"));
       });
@@ -83,19 +81,14 @@ export function useWebSocket() {
         if (!closedManually.current && connectionParm.current) {
           if (autoReconnect) {
             retryCount.current++;
-            if (retryCount.current >= MAX_RETRIES) {
-              console.error("Max retry limit reached. Not retrying further.");
-              options?.onMaxRetriesReached?.();
-              return;
-            }
             const delay = Math.min(1000 * Math.pow(2, retryCount.current), 5000);
-            console.log(`Retrying WebSocket connection in ${delay / 1000}s... (Retry ${retryCount.current}/${MAX_RETRIES})`);
+            console.log(`Retrying WebSocket connection in ${delay / 1000}s... (Retry ${retryCount.current})`);
             setTimeout(() => {
               connect(
                 connectionParm.current!.url,
                 connectionParm.current!.deviceId,
                 connectionParm.current!.password,
-                options
+                { ...options, reconnecting: true } 
               ).catch(() => {});
             }, delay);
           }

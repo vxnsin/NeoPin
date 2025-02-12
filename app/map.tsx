@@ -66,10 +66,8 @@ export default function MapComponent() {
 
   useEffect(() => {
     if (webViewLoaded && isConnected && !loaded.current) {
-      console.log("WebSocket is connected and WebView loaded. Sending messages...");
       setTimeout(() => {
-        console.log("Sending initial ping...");
-        emit({ type: "ping" });
+        emit({ type: "pingDevices" });
       }, 1000);
       loaded.current = true; 
     }
