@@ -102,8 +102,7 @@ const Login = () => {
       setConnectionStatus("Connection failed: " + error.message);
     }
   };
-
-
+      //Todo: Double Username Error / Connection Status / Redirect 
   return (
     <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
       <Icon name="wifi-tethering" size={100} color={colors.colors.primary} style={styles.iconTop} />

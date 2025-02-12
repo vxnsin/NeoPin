@@ -24,10 +24,7 @@ const Loader: React.FC<LoaderProps> = ({
   const animation = useRef(new Animated.Value(0)).current;
   const [containerLayout, setContainerLayout] = useState<LayoutRectangle | null>(null);
 
-  console.log('Loader initialized with props:', { text, duration, loop, instant, visible });
-
   useEffect(() => {
-    console.log('useEffect triggered with visible:', visible);
     if (!visible) {
       animation.setValue(0);
       console.log('Animation reset to 0');
@@ -37,7 +34,6 @@ const Loader: React.FC<LoaderProps> = ({
     let anim: Animated.CompositeAnimation | null = null;
     
     if (!instant && loop) {
-      console.log('Starting loop animation');
       const runLoop = () => {
         Animated.timing(animation, {
           toValue: 1,
@@ -63,14 +59,12 @@ const Loader: React.FC<LoaderProps> = ({
         }
       });
     } else {
-      console.log('Starting one-time animation');
       anim = Animated.timing(animation, {
         toValue: 1,
         duration,
         useNativeDriver: false,
       });
       anim.start(({ finished }) => {
-        console.log('One-time animation finished:', finished);
         if (finished && onComplete) {
           onComplete();
         }
@@ -79,7 +73,6 @@ const Loader: React.FC<LoaderProps> = ({
     
     return () => {
       if (anim) {
-        console.log('Stopping animation');
         anim.stop();
       }
     };

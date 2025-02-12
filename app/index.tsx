@@ -43,7 +43,7 @@ export default function Index() {
       const connectWithRetry = async (isFirstAttempt = false) => {
         if (attemptCount.current >= MAX_RETRIES) {
           if (isMounted.current) {
-            router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
+            router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off");
           }
           return;
         }
@@ -63,7 +63,7 @@ export default function Index() {
           if (isMounted.current && attemptCount.current < MAX_RETRIES) {
             timeoutId = setTimeout(() => connectWithRetry(false), 3000);
           } else {
-            router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
+            router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off");
           }
         }
       };

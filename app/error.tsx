@@ -16,10 +16,10 @@ export default function ErrorScreen() {
   const [retrying, setRetrying] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const errorTitle = params.error || "⚠️ Connection Failed";
-  const errorDescription =
-    params.description ||
-    "Unable to connect to the server. Please check your network or server settings.";
+  const iconName = Array.isArray(params.icon) ? params.icon[0] : (params.icon || "wifi-off");
+
+  const errorTitle = params.error || "Error Title";
+  const errorDescription = params.description || "Error Desc";
 
   const handleLogout = async () => {
     await removeValue();
@@ -48,11 +48,22 @@ export default function ErrorScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
-      <Icon name="wifi-off" size={100} color={colors.colors.primary} style={styles.iconTop} />
-      <Text style={[styles.errorText, { color: colors.colors.primary }]}>{errorTitle}</Text>
-      <Text style={[styles.subText, { color: colors.colors.primary }]}>{errorDescription}</Text>
+      <Icon 
+        name={iconName} 
+        size={100} 
+        color={colors.colors.primary} 
+        style={styles.iconTop} 
+      />
+      <Text style={[styles.errorText, { color: colors.colors.primary }]}>
+        {errorTitle}
+      </Text>
+      <Text style={[styles.subText, { color: colors.colors.primary }]}>
+        {errorDescription}
+      </Text>
       {errorMessage ? (
-        <Text style={[styles.statusText, { color: colors.colors.primary }]}>{errorMessage}</Text>
+        <Text style={[styles.statusText, { color: colors.colors.primary }]}>
+          {errorMessage}
+        </Text>
       ) : null}
       {retrying ? (
         <ActivityIndicator size="large" color={colors.colors.primary} />
@@ -61,25 +72,56 @@ export default function ErrorScreen() {
           style={[styles.button, { backgroundColor: colors.colors.secondary }]}
           onPress={handleRetry}
         >
-          <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Retry</Text>
+          <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
+            Retry
+          </Text>
         </TouchableOpacity>
       )}
       <TouchableOpacity
         style={[styles.button, { backgroundColor: colors.colors.secondary }]}
         onPress={handleLogout}
       >
-        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Logout</Text>
+        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
+          Logout
+        </Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", alignItems: "center", padding: 20 },
-  iconTop: { position: "absolute", top: 160 },
-  errorText: { fontSize: 24, fontWeight: "bold", marginBottom: 10 },
-  subText: { fontSize: 16, textAlign: "center", marginBottom: 20 },
-  statusText: { fontSize: 16, marginBottom: 20 },
-  button: { paddingVertical: 16, paddingHorizontal: 32, borderRadius: 28, marginTop: 10 },
-  buttonText: { fontSize: 18, fontWeight: "bold" },
+  container: { 
+    flex: 1, 
+    justifyContent: "center", 
+    alignItems: "center", 
+    padding: 20 
+  },
+  iconTop: { 
+    position: "absolute", 
+    top: 160 
+  },
+  errorText: { 
+    fontSize: 24, 
+    fontWeight: "bold", 
+    marginBottom: 10 
+  },
+  subText: { 
+    fontSize: 16, 
+    textAlign: "center", 
+    marginBottom: 20 
+  },
+  statusText: { 
+    fontSize: 16, 
+    marginBottom: 20 
+  },
+  button: { 
+    paddingVertical: 16, 
+    paddingHorizontal: 32, 
+    borderRadius: 28, 
+    marginTop: 10 
+  },
+  buttonText: { 
+    fontSize: 18, 
+    fontWeight: "bold" 
+  },
 });
