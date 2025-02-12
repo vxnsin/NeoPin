@@ -136,7 +136,10 @@ const mapHTML = `
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
     * { margin: 0; padding: 0; }
-    html, body, #map { height: 100%; width: 100%; }
+    html, body, #map { height: 100%; width: 100%;}
+    .leaflet-container {
+      background: #FFFFFF !important;
+    }
     .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
   </style>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
@@ -151,10 +154,10 @@ const mapHTML = `
       minZoom: 2,
       maxZoom: 19,
       attributionControl: false,
-      zoomControl: false
+      zoomControl: false,
     });
     
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       noWrap: true,
       detectRetina: true,
       maxZoom: 19
@@ -240,6 +243,25 @@ const mapHTML = `
       ];
       window.updateDeviceMarkers(dummyDevices);
     }, 6000);
+
+        let clickCount = 0;
+        const maxClicks = 2;
+        const clickResetTime = 1000;
+
+        map.on("click", function (e) {
+          clickCount++;
+
+          if (clickCount >= maxClicks) {
+            map.setView(e.latlng, map.getZoom() + 1, { animate: true });
+            clickCount = 0; 
+          }
+
+          setTimeout(() => {
+            clickCount = 0;
+          }, clickResetTime);
+        });
+
+
   </script>
 </body>
 </html>
