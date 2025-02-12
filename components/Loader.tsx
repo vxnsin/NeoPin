@@ -1,3 +1,4 @@
+// Loader.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Animated, StyleSheet, LayoutRectangle } from 'react-native';
 import useThemeManager from '@/hooks/useThemeManager';
@@ -8,7 +9,7 @@ interface LoaderProps {
   loop?: boolean;
   instant?: boolean;
   visible?: boolean;
-  onComplete?: () => void; // optionaler Callback, wenn die Animation fertig ist
+  onComplete?: () => void;
 }
 
 const Loader: React.FC<LoaderProps> = ({
@@ -23,15 +24,34 @@ const Loader: React.FC<LoaderProps> = ({
   const animation = useRef(new Animated.Value(0)).current;
   const [containerLayout, setContainerLayout] = useState<LayoutRectangle | null>(null);
 
+  console.log('Loader initialized with props:', { text, duration, loop, instant, visible });
+
   useEffect(() => {
+    console.log('useEffect triggered with visible:', visible);
     if (!visible) {
       animation.setValue(0);
+      console.log('Animation reset to 0');
       return;
     }
     
     let anim: Animated.CompositeAnimation | null = null;
     
-    if (instant) {
+    if (!instant && loop) {
+      console.log('Starting loop animation');
+      const runLoop = () => {
+        Animated.timing(animation, {
+          toValue: 1,
+          duration: duration,
+          useNativeDriver: false,
+        }).start(({ finished }) => {
+          if (finished && !instant) {
+            animation.setValue(0);
+            runLoop();
+          }
+        });
+      };
+      runLoop();
+    } else if (instant) {
       anim = Animated.timing(animation, {
         toValue: 1,
         duration: 2500,
@@ -42,30 +62,26 @@ const Loader: React.FC<LoaderProps> = ({
           onComplete();
         }
       });
-    } else if (loop) {
-      anim = Animated.loop(
-        Animated.timing(animation, {
-          toValue: 1,
-          duration: duration,
-          useNativeDriver: false,
-        })
-      );
-      anim.start();
     } else {
+      console.log('Starting one-time animation');
       anim = Animated.timing(animation, {
         toValue: 1,
         duration,
         useNativeDriver: false,
       });
       anim.start(({ finished }) => {
+        console.log('One-time animation finished:', finished);
         if (finished && onComplete) {
           onComplete();
         }
       });
     }
-
+    
     return () => {
-      if (anim) anim.stop();
+      if (anim) {
+        console.log('Stopping animation');
+        anim.stop();
+      }
     };
   }, [visible, duration, loop, instant, onComplete]);
 
@@ -80,7 +96,10 @@ const Loader: React.FC<LoaderProps> = ({
     <View style={styles.container}>
       <View 
         style={styles.textContainer}
-        onLayout={(e) => setContainerLayout(e.nativeEvent.layout)}
+        onLayout={(e) => {
+          setContainerLayout(e.nativeEvent.layout);
+          console.log('Container layout set:', e.nativeEvent.layout);
+        }}
       >
         <Text style={[styles.text, { color: theme.colors.onSurface, opacity: 0.3 }]}>
           {text}
@@ -114,4 +133,4 @@ const styles = StyleSheet.create({
   filledText: {},
 });
 
-export default Loader;
+export default React.memo(Loader);

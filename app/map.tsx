@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, ActivityIndicator, StyleSheet, Text } from "react-native";
+import { View, ActivityIndicator, StyleSheet, Text, Animated } from "react-native";
 import { WebView } from "react-native-webview";
 import useThemeManager from "@/hooks/useThemeManager";
 import * as Location from "expo-location";
@@ -7,10 +7,16 @@ import { useWebSocketContext } from "@/context/WebSocket";
 
 export default function MapComponent() {
   const [webViewLoaded, setWebViewLoaded] = useState(false);
+  const [minLoadingTimeFinished, setMinLoadingTimeFinished] = useState(false);
   const colors = useThemeManager();
   const webviewRef = useRef<WebView>(null);
   const loaded = useRef(false);
   const { emit, addMessageListener, isConnected } = useWebSocketContext(); 
+
+  useEffect(() => {
+    const timer = setTimeout(() => setMinLoadingTimeFinished(true), 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     const removeListener = addMessageListener((data: { type: string; devices?: any; latitude?: number; longitude?: number }) => {
@@ -69,18 +75,29 @@ export default function MapComponent() {
     }
   }, [webViewLoaded, isConnected, emit]);
 
+  const showLoader = !webViewLoaded || !minLoadingTimeFinished;
+
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: showLoader ? 1 : 0,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
+  }, [showLoader, fadeAnim]);
+
   return (
     <View style={styles.container}>
-      {!webViewLoaded && (
-        <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
-          <ActivityIndicator size="large" color={colors.colors.primary} />
-          <Text style={[styles.text, { color: colors.colors.primary }]}>Loading Map...</Text>
-        </View>
-      )}
+      <Animated.View style={[styles.loaderContainer, { backgroundColor: colors.colors.surface, opacity: fadeAnim }]}>
+        <ActivityIndicator size="large" color={colors.colors.primary} />
+        <Text style={[styles.text, { color: colors.colors.primary }]}>Loading Map...</Text>
+      </Animated.View>
+      
       <WebView
         ref={webviewRef}
         source={{ html: mapHTML }}
-        style={styles.webview}
+        style={[styles.webview, showLoader && { opacity: 0 }]} 
         onLoad={() => setWebViewLoaded(true)}
         geolocationEnabled={true}
         onMessage={(event) => {
@@ -100,6 +117,16 @@ export default function MapComponent() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  loaderContainer: { 
+    flex: 1,
+    alignItems: "center", 
+    justifyContent: "center", 
+    padding: 20,
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    zIndex: 10,
+  },
   webview: { flex: 1 },
   text: { marginTop: 10, fontSize: 16, fontWeight: "bold" },
 });
@@ -119,7 +146,7 @@ const mapHTML = `
 </head>
 <body>
   <div id="map"></div>
- <script>
+  <script>
     var map = L.map('map', {
       center: [51.505, -0.09],
       zoom: 10,

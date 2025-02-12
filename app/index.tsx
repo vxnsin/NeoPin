@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useRouter } from "expo-router";
 import { useWebSocketContext } from "@/context/WebSocket";
 import Loader from "@/components/Loader";
-
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export default function Index() {
@@ -15,7 +14,6 @@ export default function Index() {
   const { connect, close } = useWebSocketContext();
 
   const MAX_RETRIES = 3;
-  const [status, setStatus] = useState<"connecting" | "authenticated" | "error" | `Retrying (${number}/${number})`>("connecting");
   const [loaded, setLoaded] = useState(false); 
   const isMounted = useRef(true);
   const connectRef = useRef(connect);
@@ -35,7 +33,6 @@ export default function Index() {
       const userData = await getValue();
       if (!userData) {
         if (isMounted.current) {
-          setStatus("error");
           router.replace("/");
         }
         return;
@@ -46,18 +43,9 @@ export default function Index() {
       const connectWithRetry = async (isFirstAttempt = false) => {
         if (attemptCount.current >= MAX_RETRIES) {
           if (isMounted.current) {
-            setStatus("error");
             router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
           }
           return;
-        }
-
-        if (isMounted.current) {
-          setStatus(
-            isFirstAttempt 
-              ? "connecting"
-              : `Retrying (${attemptCount.current + 1}/${MAX_RETRIES})`
-          );
         }
 
         try {
@@ -67,7 +55,6 @@ export default function Index() {
           await connectRef.current(serverIp, deviceId, password, { reconnecting: false });
 
           if (isMounted.current) {
-            setStatus("authenticated");
             setLoaded(true); 
           }
         } catch (error: any) {
@@ -76,7 +63,6 @@ export default function Index() {
           if (isMounted.current && attemptCount.current < MAX_RETRIES) {
             timeoutId = setTimeout(() => connectWithRetry(false), 3000);
           } else {
-            setStatus("error");
             router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.");
           }
         }
@@ -98,7 +84,7 @@ export default function Index() {
       <Loader 
         text="Connecting" 
         loop={true} 
-        duration={14250} 
+        duration={14050} 
         instant={loaded}
         onComplete={() => router.replace("/map")}
       />

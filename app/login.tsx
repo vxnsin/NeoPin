@@ -4,8 +4,6 @@ import useThemeManager from '@/hooks/useThemeManager';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import FloatingInput from '@/components/FloatingInput';
 import * as Device from 'expo-device';
-import pkg from '@/package.json';
-import { FontAwesome } from '@expo/vector-icons';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import { useAsyncStorage } from '@/hooks/useAsyncStorage';
 
@@ -105,9 +103,6 @@ const Login = () => {
     }
   };
 
-  const handleGithubPress = () => {
-    Linking.openURL('https://github.com/vxnsin/NeoPin');
-  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
@@ -150,10 +145,6 @@ const Login = () => {
       <TouchableOpacity style={[styles.button, { backgroundColor: colors.colors.secondary }]} onPress={handleConnect}>
         <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Connect to Server</Text>
       </TouchableOpacity>
-      <TouchableOpacity style={styles.footer} onPress={handleGithubPress}>
-        <FontAwesome name="github" size={24} color={colors.colors.primary} />
-        <Text style={[styles.footerText, { color: colors.colors.primary }]}>{`v${pkg.version}`}</Text>
-      </TouchableOpacity>
     </View>
   );
 };
@@ -163,8 +154,6 @@ const styles = StyleSheet.create({
   iconTop: { position: 'absolute', top: 100 },
   button: { paddingVertical: 16, paddingHorizontal: 32, borderRadius: 28, marginTop: 30 },
   buttonText: { fontSize: 18, fontWeight: 'bold' },
-  footer: { position: 'absolute', bottom: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
-  footerText: { marginLeft: 8, fontSize: 16 },
 });
 
 export default Login;
