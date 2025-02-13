@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { View, Dimensions, StyleSheet } from "react-native";
 import { Stack, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
@@ -21,14 +22,23 @@ export default function RootLayout() {
 
   return (
     <WebSocketProvider>
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: theme.colors.surface },
-          animation: "fade",
-        }}
-      />
-      {pathname !== "/map" && <Footer />}
+      <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: "fade",
+          }}
+        />
+        {pathname !== "/map" && <Footer />}
+      </View>
     </WebSocketProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    minHeight: Dimensions.get("window").height,
+    position: "relative", 
+  },
+});

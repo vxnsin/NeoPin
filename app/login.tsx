@@ -6,6 +6,7 @@ import {
   Text,
   Animated,
   Linking,
+  Dimensions,
 } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
 import Icon from "react-native-vector-icons/MaterialIcons";
@@ -13,6 +14,7 @@ import FloatingInput from "@/components/FloatingInput";
 import * as Device from "expo-device";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const Login = () => {
   const colors = useThemeManager();
@@ -118,7 +120,7 @@ const Login = () => {
   //Todo: Double Username Error / Connection Status / Redirect
   return (
     <View
-      style={[styles.container, { backgroundColor: colors.colors.surface }]}
+      style={[styles.container, {backgroundColor: colors.colors.surface }]}
     >
       <Icon
         name="wifi-tethering"

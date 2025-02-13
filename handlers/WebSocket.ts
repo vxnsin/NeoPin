@@ -33,7 +33,8 @@ export function registerHandlers(ws: {
         }
         break;
 
-      case "pong":
+      case "ping":
+          ws.emit({ type: "pong" });
         break;
 
       case "dataResponse":

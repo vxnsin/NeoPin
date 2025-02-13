@@ -30,7 +30,8 @@ export default {
       permissions: [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      softwareKeyboardLayoutMode: "pan"
     },
     web: {
       bundler: "metro",

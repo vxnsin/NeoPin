@@ -23,11 +23,12 @@ export default function Footer() {
 const styles = StyleSheet.create({
   footer: {
     position: 'absolute',
-    bottom: 20,
     flexDirection: 'row',
+    bottom: 50,
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
+    zIndex: 999,
   },
   footerText: {
     marginLeft: 8,
