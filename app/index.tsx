@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Linking,
+} from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useRouter } from "expo-router";
 import { useWebSocketContext } from "@/context/WebSocket";
 import Loader from "@/components/Loader";
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function Index() {
   const colors = useThemeManager();
@@ -14,7 +20,7 @@ export default function Index() {
   const { connect, close } = useWebSocketContext();
 
   const MAX_RETRIES = 3;
-  const [loaded, setLoaded] = useState(false); 
+  const [loaded, setLoaded] = useState(false);
   const isMounted = useRef(true);
   const connectRef = useRef(connect);
   const disconnectRef = useRef(close);
@@ -43,7 +49,9 @@ export default function Index() {
       const connectWithRetry = async (isFirstAttempt = false) => {
         if (attemptCount.current >= MAX_RETRIES) {
           if (isMounted.current) {
-            router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off");
+            router.replace(
+              "/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off"
+            );
           }
           return;
         }
@@ -52,18 +60,25 @@ export default function Index() {
           if (!isFirstAttempt) {
             await delay(2500);
           }
-          await connectRef.current(serverIp, deviceId, password, { reconnecting: false });
+          await connectRef.current(serverIp, deviceId, password, {
+            reconnecting: false,
+          });
 
           if (isMounted.current) {
-            setLoaded(true); 
+            setLoaded(true);
           }
         } catch (error: any) {
           attemptCount.current++;
-          console.error(`Connection error (Attempt ${attemptCount.current}/${MAX_RETRIES}):`, error);
+          console.error(
+            `Connection error (Attempt ${attemptCount.current}/${MAX_RETRIES}):`,
+            error
+          );
           if (isMounted.current && attemptCount.current < MAX_RETRIES) {
             timeoutId = setTimeout(() => connectWithRetry(false), 3000);
           } else {
-            router.replace("/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off");
+            router.replace(
+              "/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off"
+            );
           }
         }
       };
@@ -80,11 +95,13 @@ export default function Index() {
   }, [getValue, router]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
-      <Loader 
-        text="Connecting" 
-        loop={true} 
-        duration={14050} 
+    <View
+      style={[styles.container, { backgroundColor: colors.colors.surface }]}
+    >
+      <Loader
+        text="Connecting"
+        loop={true}
+        duration={14050}
         instant={loaded}
         onComplete={() => router.replace("/map")}
       />
@@ -93,11 +110,11 @@ export default function Index() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    justifyContent: "center", 
-    alignItems: "center", 
-    padding: 20 
+  container: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
   },
   text: {
     marginTop: 10,

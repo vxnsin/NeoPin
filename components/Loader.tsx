@@ -1,7 +1,13 @@
 // Loader.tsx
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Animated, StyleSheet, LayoutRectangle } from 'react-native';
-import useThemeManager from '@/hooks/useThemeManager';
+import React, { useEffect, useRef, useState } from "react";
+import {
+  View,
+  Text,
+  Animated,
+  StyleSheet,
+  LayoutRectangle,
+} from "react-native";
+import useThemeManager from "@/hooks/useThemeManager";
 
 interface LoaderProps {
   text?: string;
@@ -13,7 +19,7 @@ interface LoaderProps {
 }
 
 const Loader: React.FC<LoaderProps> = ({
-  text = 'Loading',
+  text = "Loading",
   duration = 10000,
   loop = false,
   instant = false,
@@ -22,16 +28,17 @@ const Loader: React.FC<LoaderProps> = ({
 }) => {
   const theme = useThemeManager();
   const animation = useRef(new Animated.Value(0)).current;
-  const [containerLayout, setContainerLayout] = useState<LayoutRectangle | null>(null);
+  const [containerLayout, setContainerLayout] =
+    useState<LayoutRectangle | null>(null);
 
   useEffect(() => {
     if (!visible) {
       animation.setValue(0);
       return;
     }
-    
+
     let anim: Animated.CompositeAnimation | null = null;
-    
+
     if (!instant && loop) {
       const runLoop = () => {
         Animated.timing(animation, {
@@ -69,7 +76,7 @@ const Loader: React.FC<LoaderProps> = ({
         }
       });
     }
-    
+
     return () => {
       if (anim) {
         anim.stop();
@@ -81,23 +88,36 @@ const Loader: React.FC<LoaderProps> = ({
 
   const widthInterpolation = animation.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
+    outputRange: ["0%", "100%"],
   });
 
   return (
     <View style={styles.container}>
-      <View 
+      <View
         style={styles.textContainer}
         onLayout={(e) => {
           setContainerLayout(e.nativeEvent.layout);
         }}
       >
-        <Text style={[styles.text, { color: theme.colors.onSurface, opacity: 0.3 }]}>
+        <Text
+          style={[styles.text, { color: theme.colors.onSurface, opacity: 0.3 }]}
+        >
           {text}
         </Text>
-        <View style={[StyleSheet.absoluteFill, { overflow: 'hidden', width: containerLayout?.width }]}>
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { overflow: "hidden", width: containerLayout?.width },
+          ]}
+        >
           <Animated.View style={{ width: widthInterpolation }}>
-            <Text style={[styles.text, styles.filledText, { color: theme.colors.primary }]}>
+            <Text
+              style={[
+                styles.text,
+                styles.filledText,
+                { color: theme.colors.primary },
+              ]}
+            >
               {text}
             </Text>
           </Animated.View>
@@ -109,17 +129,17 @@ const Loader: React.FC<LoaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   textContainer: {
-    position: 'relative',
+    position: "relative",
   },
   text: {
     fontSize: 40,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    fontFamily: 'System',
+    fontWeight: "bold",
+    textTransform: "uppercase",
+    fontFamily: "System",
   },
   filledText: {},
 });

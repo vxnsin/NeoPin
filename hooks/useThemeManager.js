@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
-import LightTheme from '../themes/LightTheme';
-import DarkTheme from '../themes/DarkTheme';
+import React, { useEffect, useState } from "react";
+import { useColorScheme } from "react-native";
+import LightTheme from "../themes/LightTheme";
+import DarkTheme from "../themes/DarkTheme";
 
 const useThemeManager = () => {
   const colorScheme = useColorScheme();
   const [theme, setTheme] = useState(LightTheme);
 
   useEffect(() => {
-    if (colorScheme === 'dark') {
+    if (colorScheme === "dark") {
       setTheme(DarkTheme);
     } else {
       setTheme(LightTheme);

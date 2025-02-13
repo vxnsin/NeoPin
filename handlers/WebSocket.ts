@@ -26,15 +26,17 @@ export function registerHandlers(ws: {
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
           });
-
         } catch (error: any) {
           console.error("Error getting location:", error);
-          ws.emit({ type: "locationError", message: error.message || "Unknown error" });
+          ws.emit({
+            type: "locationError",
+            message: error.message || "Unknown error",
+          });
         }
         break;
 
       case "ping":
-          ws.emit({ type: "pong" });
+        ws.emit({ type: "pong" });
         break;
 
       case "dataResponse":

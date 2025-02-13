@@ -1,6 +1,6 @@
 // useAsyncStorage.ts
-import { useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useCallback } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export const useAsyncStorage = (key: string) => {
   const getValue = useCallback(async (): Promise<string | null> => {
@@ -13,13 +13,16 @@ export const useAsyncStorage = (key: string) => {
     }
   }, [key]);
 
-  const storeValue = useCallback(async (value: string): Promise<void> => {
-    try {
-      await AsyncStorage.setItem(key, value);
-    } catch (error) {
-      console.error(`Error storing value for key "${key}":`, error);
-    }
-  }, [key]);
+  const storeValue = useCallback(
+    async (value: string): Promise<void> => {
+      try {
+        await AsyncStorage.setItem(key, value);
+      } catch (error) {
+        console.error(`Error storing value for key "${key}":`, error);
+      }
+    },
+    [key]
+  );
 
   const removeValue = useCallback(async (): Promise<void> => {
     try {

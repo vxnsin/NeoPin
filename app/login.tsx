@@ -75,9 +75,7 @@ const Login = () => {
     }
     try {
       await new Promise<void>((resolve, reject) => {
-        const testSocket = new WebSocket(
-          serverIp
-        );
+        const testSocket = new WebSocket(serverIp);
         testSocket.onopen = () => {
           const authMessage = JSON.stringify({
             type: "authenticate",
@@ -107,11 +105,7 @@ const Login = () => {
         password: serverPassword,
       });
       await storeValue(userData);
-      await ws.connect(
-        serverIp,
-        username,
-        serverPassword
-      );
+      await ws.connect(serverIp, username, serverPassword);
       setConnectionStatus("Connected and authenticated!");
     } catch (error: any) {
       setConnectionStatus("Connection failed: " + error.message);
@@ -120,7 +114,7 @@ const Login = () => {
   //Todo: Double Username Error / Connection Status / Redirect
   return (
     <View
-      style={[styles.container, {backgroundColor: colors.colors.surface }]}
+      style={[styles.container, { backgroundColor: colors.colors.surface }]}
     >
       <Icon
         name="wifi-tethering"

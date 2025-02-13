@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { KeyboardType } from 'react-native';
-import { View, TextInput, StyleSheet, Animated } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import React, { useState, useRef } from "react";
+import { KeyboardType } from "react-native";
+import { View, TextInput, StyleSheet, Animated } from "react-native";
+import Icon from "react-native-vector-icons/MaterialIcons";
 
 interface FloatingInputProps {
   label: string;
@@ -62,7 +62,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
     setShowPlaceholder(false);
   };
 
-  const effectiveColor = error ? 'red' : colors.colors.primary;
+  const effectiveColor = error ? "red" : colors.colors.primary;
 
   return (
     <View style={styles.inputContainer}>
@@ -116,11 +116,11 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
           onBlur={handleBlur}
           secureTextEntry={secure}
           placeholder={
-            showPlaceholder && !value ? (customPlaceholder || label) : ''
+            showPlaceholder && !value ? customPlaceholder || label : ""
           }
           placeholderTextColor={colors.colors.onSurface}
           selectionColor={colors.colors.primary}
-          keyboardType={keyboardType || 'default'}
+          keyboardType={keyboardType || "default"}
         />
       </View>
     </View>
@@ -129,9 +129,9 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
 
 const styles = StyleSheet.create({
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
+    flexDirection: "row",
+    alignItems: "center",
+    width: "100%",
     marginBottom: 25,
   },
   icon: {
@@ -142,20 +142,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 25,
     height: 60,
-    justifyContent: 'center',
-    position: 'relative',
+    justifyContent: "center",
+    position: "relative",
   },
   label: {
-    position: 'absolute',
+    position: "absolute",
     paddingHorizontal: 4,
     fontSize: 15,
-    fontWeight: '400',
+    fontWeight: "400",
   },
   input: {
     paddingHorizontal: 20,
     fontSize: 18,
     height: 50,
-    textAlignVertical: 'center',
+    textAlignVertical: "center",
   },
 });
 

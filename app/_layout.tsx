@@ -22,7 +22,9 @@ export default function RootLayout() {
 
   return (
     <WebSocketProvider>
-      <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
+      <View
+        style={[styles.container, { backgroundColor: theme.colors.surface }]}
+      >
         <Stack
           screenOptions={{
             headerShown: false,
@@ -39,6 +41,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     minHeight: Dimensions.get("window").height,
-    position: "relative", 
+    position: "relative",
   },
 });

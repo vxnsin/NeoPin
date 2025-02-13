@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
-import { View, ActivityIndicator, StyleSheet, Text, Animated } from "react-native";
+import {
+  View,
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  Animated,
+} from "react-native";
 import { WebView } from "react-native-webview";
 import useThemeManager from "@/hooks/useThemeManager";
 import * as Location from "expo-location";
-import { useWebSocketContext } from "@/context/WebSocket"; 
+import { useWebSocketContext } from "@/context/WebSocket";
 
 export default function MapComponent() {
   const [webViewLoaded, setWebViewLoaded] = useState(false);
@@ -11,7 +17,7 @@ export default function MapComponent() {
   const colors = useThemeManager();
   const webviewRef = useRef<WebView>(null);
   const loaded = useRef(false);
-  const { emit, addMessageListener, isConnected } = useWebSocketContext(); 
+  const { emit, addMessageListener, isConnected } = useWebSocketContext();
 
   useEffect(() => {
     const timer = setTimeout(() => setMinLoadingTimeFinished(true), 1500);
@@ -19,16 +25,23 @@ export default function MapComponent() {
   }, []);
 
   useEffect(() => {
-    const removeListener = addMessageListener((data: { type: string; devices?: any; latitude?: number; longitude?: number }) => {
-      if (data.type === "dataResponse" && data.devices) {
-        webviewRef.current?.postMessage(
-          JSON.stringify({
-            type: "dataResponse",
-            devices: data.devices,
-          })
-        );
+    const removeListener = addMessageListener(
+      (data: {
+        type: string;
+        devices?: any;
+        latitude?: number;
+        longitude?: number;
+      }) => {
+        if (data.type === "dataResponse" && data.devices) {
+          webviewRef.current?.postMessage(
+            JSON.stringify({
+              type: "dataResponse",
+              devices: data.devices,
+            })
+          );
+        }
       }
-    });
+    );
     return () => {
       removeListener();
     };
@@ -50,7 +63,11 @@ export default function MapComponent() {
       );
 
       Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 5 },
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 5000,
+          distanceInterval: 5,
+        },
         (newLocation) => {
           webviewRef.current?.postMessage(
             JSON.stringify({
@@ -69,14 +86,14 @@ export default function MapComponent() {
       setTimeout(() => {
         emit({ type: "pingDevices" });
       }, 1000);
-      loaded.current = true; 
+      loaded.current = true;
     }
   }, [webViewLoaded, isConnected, emit]);
 
   const showLoader = !webViewLoaded || !minLoadingTimeFinished;
 
   const fadeAnim = useRef(new Animated.Value(1)).current;
-  
+
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: showLoader ? 1 : 0,
@@ -87,15 +104,22 @@ export default function MapComponent() {
 
   return (
     <View style={styles.container}>
-      <Animated.View style={[styles.loaderContainer, { backgroundColor: colors.colors.surface, opacity: fadeAnim }]}>
+      <Animated.View
+        style={[
+          styles.loaderContainer,
+          { backgroundColor: colors.colors.surface, opacity: fadeAnim },
+        ]}
+      >
         <ActivityIndicator size="large" color={colors.colors.primary} />
-        <Text style={[styles.text, { color: colors.colors.primary }]}>Loading Map...</Text>
+        <Text style={[styles.text, { color: colors.colors.primary }]}>
+          Loading Map...
+        </Text>
       </Animated.View>
-      
+
       <WebView
         ref={webviewRef}
         source={{ html: mapHTML }}
-        style={[styles.webview, showLoader && { opacity: 0 }]} 
+        style={[styles.webview, showLoader && { opacity: 0 }]}
         onLoad={() => setWebViewLoaded(true)}
         geolocationEnabled={true}
         onMessage={(event) => {
@@ -115,10 +139,10 @@ export default function MapComponent() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loaderContainer: { 
+  loaderContainer: {
     flex: 1,
-    alignItems: "center", 
-    justifyContent: "center", 
+    alignItems: "center",
+    justifyContent: "center",
     padding: 20,
     position: "absolute",
     width: "100%",
