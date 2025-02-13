@@ -2,7 +2,7 @@ import "dotenv/config";
 
 export default {
   expo: {
-    name: "neopin",
+    name: "NeoPin",
     slug: "neopin",
     version: "1.0.0",
     orientation: "portrait",

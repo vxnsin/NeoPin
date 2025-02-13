@@ -12,6 +12,8 @@ import { useRouter } from "expo-router";
 import { useWebSocketContext } from "@/context/WebSocket";
 import Loader from "@/components/Loader";
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import useNotify from "@/hooks/useNotify";
+import usePermissions from "@/hooks/usePermission";
 
 export default function Index() {
   const colors = useThemeManager();
@@ -25,6 +27,9 @@ export default function Index() {
   const connectRef = useRef(connect);
   const disconnectRef = useRef(close);
   const attemptCount = useRef(0);
+  const expoPushToken = useNotify();
+
+  usePermissions();
 
   useEffect(() => {
     connectRef.current = connect;
@@ -40,6 +45,9 @@ export default function Index() {
       if (!userData) {
         if (isMounted.current) {
           router.replace("/login");
+          console.log("Expo Push Token:", expoPushToken);
+
+
         }
         return;
       }
