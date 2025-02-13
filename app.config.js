@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import "dotenv/config";
 
 export default {
   expo: {
@@ -15,28 +15,27 @@ export default {
       supportsTablet: true,
       infoPlist: {
         NSAppTransportSecurity: {
-          NSAllowsArbitraryLoads: true
+          NSAllowsArbitraryLoads: true,
         },
-        NSLocationWhenInUseUsageDescription: "This app needs your location to display the map correctly.",
-        NSLocationAlwaysUsageDescription: "This app needs your location to display the map correctly."
-      }
+        NSLocationWhenInUseUsageDescription:
+          "This app needs your location to display the map correctly.",
+        NSLocationAlwaysUsageDescription:
+          "This app needs your location to display the map correctly.",
+      },
     },
     android: {
       package: "de.vensin.neopin",
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
-        backgroundColor: "#ffffff"
+        backgroundColor: "#ffffff",
       },
-      permissions: [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
-      ],
-      softwareKeyboardLayoutMode: "pan"
+      permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      softwareKeyboardLayoutMode: "pan",
     },
     web: {
       bundler: "metro",
       output: "static",
-      favicon: "./assets/images/favicon.png"
+      favicon: "./assets/images/favicon.png",
     },
     plugins: [
       "expo-router",
@@ -46,25 +45,25 @@ export default {
           image: "./assets/images/splash-icon.png",
           imageWidth: 200,
           resizeMode: "contain",
-          backgroundColor: "#ffffff"
-        }
-      ]
+          backgroundColor: "#ffffff",
+        },
+      ],
     ],
     experiments: {
-      typedRoutes: true
+      typedRoutes: true,
     },
     extra: {
       router: {
-        origin: false
+        origin: false,
       },
       eas: {
-        projectId: "1808f5ce-26ec-43c7-90fd-cfe81987c07b"
-      }
+        projectId: "1808f5ce-26ec-43c7-90fd-cfe81987c07b",
+      },
     },
     owner: "vensin",
-    runtimeVersion: "1.0.0", 
+    runtimeVersion: "1.0.0",
     updates: {
-      url: "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b"
-    }
-  }
+      url: "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b",
+    },
+  },
 };
