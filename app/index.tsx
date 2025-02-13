@@ -33,7 +33,7 @@ export default function Index() {
       const userData = await getValue();
       if (!userData) {
         if (isMounted.current) {
-          router.replace("/");
+          router.replace("/login");
         }
         return;
       }

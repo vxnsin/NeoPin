@@ -11,6 +11,7 @@ export default {
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     ios: {
+      bundleIdentifier: "de.vensin.neopin",
       supportsTablet: true,
       infoPlist: {
         NSAppTransportSecurity: {
@@ -21,6 +22,7 @@ export default {
       }
     },
     android: {
+      package: "de.vensin.neopin",
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
         backgroundColor: "#ffffff"
@@ -51,7 +53,6 @@ export default {
       typedRoutes: true
     },
     extra: {
-      CESIUM_ION_TOKEN: process.env.CESIUM_ION_TOKEN, 
       router: {
         origin: false
       },
@@ -60,9 +61,7 @@ export default {
       }
     },
     owner: "vensin",
-    runtimeVersion: {
-      policy: "appVersion"
-    },
+    runtimeVersion: "1.0.0", 
     updates: {
       url: "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b"
     }

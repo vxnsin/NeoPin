@@ -1,19 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Animated, Linking } from 'react-native';
-import useThemeManager from '@/hooks/useThemeManager';
-import Icon from 'react-native-vector-icons/MaterialIcons';
-import FloatingInput from '@/components/FloatingInput';
-import * as Device from 'expo-device';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { useAsyncStorage } from '@/hooks/useAsyncStorage';
+import React, { useState, useRef, useEffect } from "react";
+import {
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  Text,
+  Animated,
+  Linking,
+} from "react-native";
+import useThemeManager from "@/hooks/useThemeManager";
+import Icon from "react-native-vector-icons/MaterialIcons";
+import FloatingInput from "@/components/FloatingInput";
+import * as Device from "expo-device";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 
 const Login = () => {
   const colors = useThemeManager();
-  const [username, setUsername] = useState('');
-  const [serverIp, setServerIp] = useState('');
-  const [serverPassword, setServerPassword] = useState('');
-  const [deviceName, setDeviceName] = useState('');
-  const [connectionStatus, setConnectionStatus] = useState('');
+  const [username, setUsername] = useState("");
+  const [serverIp, setServerIp] = useState("");
+  const [serverPassword, setServerPassword] = useState("");
+  const [deviceName, setDeviceName] = useState("");
+  const [connectionStatus, setConnectionStatus] = useState("");
   const [errors, setErrors] = useState({
     username: false,
     serverIp: false,
@@ -25,29 +32,29 @@ const Login = () => {
     serverPassword: useRef(new Animated.Value(0)).current,
   };
   const ws = useWebSocket();
-  const { storeValue } = useAsyncStorage('userData');
+  const { storeValue } = useAsyncStorage("userData");
 
   useEffect(() => {
-    setDeviceName(Device.modelName || 'Unknown Device');
+    setDeviceName(Device.modelName || "Unknown Device");
   }, []);
 
   const handleUsernameChange = (text: string) => {
     setUsername(text);
-    if (errors.username && text.trim() !== '') {
+    if (errors.username && text.trim() !== "") {
       setErrors((prev) => ({ ...prev, username: false }));
     }
   };
 
   const handleServerIpChange = (text: string) => {
     setServerIp(text);
-    if (errors.serverIp && text.trim() !== '') {
+    if (errors.serverIp && text.trim() !== "") {
       setErrors((prev) => ({ ...prev, serverIp: false }));
     }
   };
 
   const handleServerPasswordChange = (text: string) => {
     setServerPassword(text);
-    if (errors.serverPassword && text.trim() !== '') {
+    if (errors.serverPassword && text.trim() !== "") {
       setErrors((prev) => ({ ...prev, serverPassword: false }));
     }
   };
@@ -66,12 +73,14 @@ const Login = () => {
     }
     try {
       await new Promise<void>((resolve, reject) => {
-        const testSocket = new WebSocket("wss://4sw16n7h-3012.euw.devtunnels.ms/ws");
+        const testSocket = new WebSocket(
+          serverIp
+        );
         testSocket.onopen = () => {
           const authMessage = JSON.stringify({
             type: "authenticate",
             deviceId: username,
-            password: serverPassword
+            password: serverPassword,
           });
           testSocket.send(authMessage);
         };
@@ -79,7 +88,7 @@ const Login = () => {
           const response = JSON.parse(event.data);
           testSocket.close();
           if (response.successful === true) {
-            console.log("Connected")
+            console.log("Connected");
             resolve();
           } else {
             reject(new Error("Authentication failed"));
@@ -92,20 +101,31 @@ const Login = () => {
       setConnectionStatus("Test connection successful - Connecting...");
       const userData = JSON.stringify({
         deviceId: username,
-        serverIp: "wss://4sw16n7h-3012.euw.devtunnels.ms/ws",
-        password: serverPassword
+        serverIp: serverIp,
+        password: serverPassword,
       });
       await storeValue(userData);
-      await ws.connect("wss://4sw16n7h-3012.euw.devtunnels.ms/ws", username, serverPassword);
+      await ws.connect(
+        serverIp,
+        username,
+        serverPassword
+      );
       setConnectionStatus("Connected and authenticated!");
     } catch (error: any) {
       setConnectionStatus("Connection failed: " + error.message);
     }
   };
-      //Todo: Double Username Error / Connection Status / Redirect 
+  //Todo: Double Username Error / Connection Status / Redirect
   return (
-    <View style={[styles.container, { backgroundColor: colors.colors.surface }]}>
-      <Icon name="wifi-tethering" size={100} color={colors.colors.primary} style={styles.iconTop} />
+    <View
+      style={[styles.container, { backgroundColor: colors.colors.surface }]}
+    >
+      <Icon
+        name="wifi-tethering"
+        size={100}
+        color={colors.colors.primary}
+        style={styles.iconTop}
+      />
       <FloatingInput
         label="Hostname"
         customPlaceholder="ws://127.0.0.1:3012"
@@ -141,18 +161,33 @@ const Login = () => {
         error={errors.username}
         errorMessage="Username is required"
       />
-      <TouchableOpacity style={[styles.button, { backgroundColor: colors.colors.secondary }]} onPress={handleConnect}>
-        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>Connect to Server</Text>
+      <TouchableOpacity
+        style={[styles.button, { backgroundColor: colors.colors.secondary }]}
+        onPress={handleConnect}
+      >
+        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
+          Connect to Server
+        </Text>
       </TouchableOpacity>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
-  iconTop: { position: 'absolute', top: 100 },
-  button: { paddingVertical: 16, paddingHorizontal: 32, borderRadius: 28, marginTop: 30 },
-  buttonText: { fontSize: 18, fontWeight: 'bold' },
+  container: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  iconTop: { position: "absolute", top: 100 },
+  button: {
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 28,
+    marginTop: 30,
+  },
+  buttonText: { fontSize: 18, fontWeight: "bold" },
 });
 
 export default Login;

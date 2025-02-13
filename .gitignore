@@ -37,3 +37,7 @@ yarn-error.*
 
 app-example
 .env
+android
+ios
+.expo
+.vscode

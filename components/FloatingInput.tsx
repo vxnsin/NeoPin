@@ -62,7 +62,6 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
     setShowPlaceholder(false);
   };
 
-  // Use red if error is true; otherwise, use the primary color.
   const effectiveColor = error ? 'red' : colors.colors.primary;
 
   return (
