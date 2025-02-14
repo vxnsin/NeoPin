@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
-import * as Permissions from "expo-permissions";
 
 export default function useNotify() {
   const [expoPushToken, setExpoPushToken] = useState("");
@@ -13,7 +12,7 @@ export default function useNotify() {
         return;
       }
 
-      const { status } = await Permissions.askAsync(Permissions.NOTIFICATIONS);
+      const { status } = await Notifications.requestPermissionsAsync();
       if (status !== "granted") {
         console.log("No Perms for Notify.");
         return;
