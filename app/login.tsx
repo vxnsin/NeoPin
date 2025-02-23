@@ -14,7 +14,6 @@ import FloatingInput from "@/components/FloatingInput";
 import * as Device from "expo-device";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 const Login = () => {
   const colors = useThemeManager();
