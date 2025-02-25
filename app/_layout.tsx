@@ -1,10 +1,11 @@
 import React, { useEffect } from "react";
-import { View, Dimensions, StyleSheet } from "react-native";
+import { View, Dimensions, StyleSheet, AppState } from "react-native";
 import { Stack, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
+import { startWebSocketService, stopWebSocketService } from "@/services/WebSocketService";
 
 export default function RootLayout() {
   const theme = useThemeManager();
@@ -18,6 +19,19 @@ export default function RootLayout() {
       }, 2000);
     }
     prepare();
+  }, []);
+
+  useEffect(() => {
+    const handleAppState = async (nextAppState: string) => {
+      if (nextAppState === "active") {
+        await stopWebSocketService();
+      } else if(nextAppState  === "background") {
+        await startWebSocketService();
+      }
+    }
+
+    const subscription = AppState.addEventListener("change", handleAppState);
+    return () => subscription.remove();
   }, []);
 
   return (
