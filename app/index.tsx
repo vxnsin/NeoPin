@@ -1,104 +1,56 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Linking,
-} from "react-native";
-import useThemeManager from "@/hooks/useThemeManager";
-import { useAsyncStorage } from "@/hooks/useAsyncStorage";
+import React, { useEffect, useState } from "react";
+import { View, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
+import useThemeManager from "@/hooks/useThemeManager";
 import { useWebSocketContext } from "@/context/WebSocket";
 import Loader from "@/components/Loader";
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 import usePermissions from "@/hooks/usePermission";
+import { readCredentials, socket } from "@/lib/socket";
 
 export default function Index() {
-  const colors = useThemeManager();
-  const { getValue } = useAsyncStorage("userData");
+  const theme = useThemeManager();
   const router = useRouter();
-  const { connect, close } = useWebSocketContext();
-
-  const MAX_RETRIES = 3;
+  const { connect } = useWebSocketContext();
   const [loaded, setLoaded] = useState(false);
-  const isMounted = useRef(true);
-  const connectRef = useRef(connect);
-  const disconnectRef = useRef(close);
-  const attemptCount = useRef(0);
 
   usePermissions();
 
   useEffect(() => {
-    connectRef.current = connect;
-    disconnectRef.current = close;
-  }, [connect, close]);
+    let active = true;
 
-  useEffect(() => {
-    isMounted.current = true;
-    let timeoutId: NodeJS.Timeout | null = null;
-
-    const attemptConnection = async () => {
-      const userData = await getValue();
-      if (!userData) {
-        if (isMounted.current) {
-          router.replace("/login");
-        }
+    (async () => {
+      const creds = await readCredentials();
+      if (!creds) {
+        if (active) router.replace("/login");
         return;
       }
-
-      const { serverIp, deviceId, password } = JSON.parse(userData);
-
-      const connectWithRetry = async (isFirstAttempt = false) => {
-        if (attemptCount.current >= MAX_RETRIES) {
-          if (isMounted.current) {
-            router.replace(
-              "/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off"
-            );
-          }
-          return;
-        }
-
-        try {
-          if (!isFirstAttempt) {
-            await delay(2500);
-          }
-          await connectRef.current(serverIp, deviceId, password);
-
-          if (isMounted.current) {
-            setLoaded(true);
-          }
-        } catch (error: any) {
-          attemptCount.current++;
-          console.error(
-            `Connection error (Attempt ${attemptCount.current}/${MAX_RETRIES}):`,
-            error
-          );
-          if (isMounted.current && attemptCount.current < MAX_RETRIES) {
-            timeoutId = setTimeout(() => connectWithRetry(false), 3000);
-          } else {
-            router.replace(
-              "/error?error=Connection Failed&description=Unable to connect after multiple attempts.&icon=wifi-off"
-            );
-          }
-        }
-      };
-
-      connectWithRetry(true);
-    };
-
-    attemptConnection();
+      if (socket.connected) {
+        if (active) setLoaded(true);
+        return;
+      }
+      try {
+        await connect(creds.serverIp, creds.deviceId, creds.password);
+        if (active) setLoaded(true);
+      } catch (error: any) {
+        if (!active) return;
+        router.replace({
+          pathname: "/error",
+          params: {
+            error: "Connection failed",
+            description: error?.message || "Unable to reach the server.",
+            icon: "wifi-off",
+          },
+        });
+      }
+    })();
 
     return () => {
-      isMounted.current = false;
-      if (timeoutId) clearTimeout(timeoutId);
+      active = false;
     };
-  }, [getValue, router]);
+  }, [connect, router]);
 
   return (
-    <View
-      style={[styles.container, { backgroundColor: colors.colors.surface }]}
-    >
+    <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
       <Loader
         text="Connecting"
         loop={true}
@@ -116,14 +68,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
-  },
-  text: {
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  errorText: {
-    fontSize: 18,
-    fontWeight: "bold",
   },
 });

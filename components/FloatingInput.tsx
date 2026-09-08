@@ -1,7 +1,8 @@
 import React, { useState, useRef } from "react";
 import { KeyboardType } from "react-native";
 import { View, TextInput, StyleSheet, Animated } from "react-native";
-import Icon from "react-native-vector-icons/MaterialIcons";
+import { MaterialIcons as Icon } from "@expo/vector-icons";
+import type { Theme } from "@/themes/Theme";
 
 interface FloatingInputProps {
   label: string;
@@ -10,7 +11,7 @@ interface FloatingInputProps {
   secure: boolean;
   icon: string;
   animatedValue: Animated.Value;
-  colors: any;
+  colors: Theme;
   customPlaceholder?: string;
   keyboardType?: KeyboardType;
   error?: boolean;
@@ -67,7 +68,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
   return (
     <View style={styles.inputContainer}>
       <Icon
-        name={icon}
+        name={icon as React.ComponentProps<typeof Icon>["name"]}
         size={24}
         color={colors.colors.primary}
         style={styles.icon}

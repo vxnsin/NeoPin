@@ -1,4 +1,6 @@
-const LightTheme = {
+import type { Theme } from "./Theme";
+
+const LightTheme: Theme = {
   isDark: false,
   colors: {
     surface: "#FFFFFF",

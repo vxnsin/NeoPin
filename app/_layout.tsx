@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { View, Dimensions, StyleSheet, AppState, Platform } from "react-native";
 import { Stack, usePathname } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -8,20 +8,33 @@ import Footer from "@/components/Footer";
 import { startWebSocketService, stopWebSocketService } from "@/services/WebSocketService";
 import { startPositionReporting } from "@/handlers/Location";
 import { startBackgroundLocation } from "@/tasks/LocationTask";
+import {
+  REPORTING_PRESETS,
+  getReportingPreset,
+  loadSettings,
+  onSettingsChange,
+  type ReportingPreset,
+} from "@/lib/settings";
 
 function ConnectionLifecycle() {
   const { emit, isConnected } = useWebSocketContext();
+  const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
+
+  useEffect(() => {
+    loadSettings().then((s) => setPreset(s.reporting));
+    return onSettingsChange((s) => setPreset(s.reporting));
+  }, []);
 
   useEffect(() => {
     if (!isConnected) return;
-    const stop = startPositionReporting({ emit });
+    const stop = startPositionReporting({ emit }, REPORTING_PRESETS[preset]);
     if (Platform.OS === "ios") {
       startBackgroundLocation().catch((error) =>
         console.warn("Background location unavailable:", error?.message)
       );
     }
     return stop;
-  }, [isConnected, emit]);
+  }, [isConnected, emit, preset]);
 
   useEffect(() => {
     if (Platform.OS !== "android") return;
@@ -55,9 +68,7 @@ export default function RootLayout() {
   return (
     <WebSocketProvider>
       <ConnectionLifecycle />
-      <View
-        style={[styles.container, { backgroundColor: theme.colors.surface }]}
-      >
+      <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
         <Stack
           screenOptions={{
             headerShown: false,

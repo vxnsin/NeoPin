@@ -125,8 +125,8 @@ export class SocketClient {
             settle(resolve);
           } else {
             this.closedManually = true;
-            ws.close();
             settle(() => reject(new Error("Authentication failed")));
+            ws.close();
           }
           return;
         }

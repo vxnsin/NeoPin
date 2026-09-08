@@ -9,7 +9,7 @@ import {
   Dimensions,
 } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
-import Icon from "react-native-vector-icons/MaterialIcons";
+import { MaterialIcons as Icon } from "@expo/vector-icons";
 import FloatingInput from "@/components/FloatingInput";
 import * as Device from "expo-device";
 import { useRouter } from "expo-router";

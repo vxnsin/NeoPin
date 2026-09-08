@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
-import Icon from "react-native-vector-icons/MaterialIcons";
+import { MaterialIcons as Icon } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useWebSocketContext } from "@/context/WebSocket";
@@ -59,7 +59,7 @@ export default function ErrorScreen() {
       style={[styles.container, { backgroundColor: colors.colors.surface }]}
     >
       <Icon
-        name={iconName}
+        name={iconName as React.ComponentProps<typeof Icon>["name"]}
         size={100}
         color={colors.colors.primary}
         style={styles.iconTop}

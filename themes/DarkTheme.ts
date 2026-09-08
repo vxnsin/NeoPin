@@ -1,4 +1,6 @@
-const DarkTheme = {
+import type { Theme } from "./Theme";
+
+const DarkTheme: Theme = {
   isDark: true,
   colors: {
     surface: "#090a0d",

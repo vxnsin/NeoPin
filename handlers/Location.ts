@@ -6,6 +6,7 @@ type Emitter = { emit: (msg: Message) => void };
 export type ReportingOptions = {
   timeInterval?: number;
   distanceInterval?: number;
+  accuracy?: Location.Accuracy;
 };
 
 // Pushes the own position to the server whenever the device moves, so the
@@ -20,7 +21,7 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
 
     subscription = await Location.watchPositionAsync(
       {
-        accuracy: Location.Accuracy.High,
+        accuracy: options.accuracy ?? Location.Accuracy.High,
         timeInterval: options.timeInterval ?? 15_000,
         distanceInterval: options.distanceInterval ?? 10,
       },

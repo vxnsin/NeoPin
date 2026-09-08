@@ -10,6 +10,7 @@ A React Native app for your phones, a tiny Node.js server on your own machine, o
 [![Expo SDK](https://img.shields.io/badge/Expo-SDK%2052-000020?style=flat-square&logo=expo&logoColor=white)](https://expo.dev)
 [![React Native](https://img.shields.io/badge/React%20Native-0.76-20232a?style=flat-square&logo=react&logoColor=61dafb)](https://reactnative.dev)
 [![Server](https://img.shields.io/badge/Server-Node.js%20%2B%20ws-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://github.com/vxnsin/NeoPin/tree/Server)
+[![License](https://img.shields.io/badge/License-MIT-d3171e?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/Android%20%7C%20iOS-lightgrey?style=flat-square)](#build-the-app)
 
 <br>
@@ -29,18 +30,20 @@ A React Native app for your phones, a tiny Node.js server on your own machine, o
 - [Build the app](#build-the-app)
 - [Protocol](#protocol)
 - [App structure](#app-structure)
+- [Tests](#tests)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [License](#license)
 
 ## How it works
 
-Every phone runs the NeoPin app and connects to **your** server over a WebSocket, authenticated with a shared password. The server keeps the last known position of each device in memory and hands it to whoever asks: the app renders all devices on a map, and a small web dashboard does the same in the browser.
+Every phone runs the NeoPin app and connects to **your** server over a WebSocket, authenticated with a shared password. The server keeps the last known position of each device in memory and pushes every change to all connected apps and dashboards.
 
 ```mermaid
 flowchart LR
     A[📱 Phone A<br/>NeoPin app] <-- WebSocket --> S[(🖥️ NeoPin Server<br/>Node.js + ws)]
     B[📱 Phone B<br/>NeoPin app] <-- WebSocket --> S
-    S -- HTTP + cookie auth --> D[🌐 Web dashboard<br/>Leaflet map]
+    S <-- WebSocket + session cookie --> D[🌐 Web dashboard<br/>Leaflet map]
 ```
 
 Nothing is stored on disk and no third-party service is involved. Restart the server and the slate is clean.
@@ -58,24 +61,26 @@ The app and the server live in the same repository on different branches.
 ## Features
 
 - **Bring your own server.** Enter a hostname, the server password and a device name. That's the whole onboarding.
-- **Live map.** Leaflet map with satellite imagery inside a WebView. Your own position updates every 5 seconds or 5 meters, other devices appear with status and last ping.
-- **Resilient connection.** Exponential back-off reconnects, a message queue for anything sent while offline, and a dedicated error screen with retry.
+- **Live map.** Leaflet map with satellite imagery inside a WebView. Markers are colour-coded: green for online, yellow when the last fix is older than 10 minutes, grey for offline. Tap a marker for status and "last seen".
+- **Device list.** The menu shows every device with its state, jumps to it on tap and refreshes all positions on demand.
+- **Choose your battery trade-off.** Battery saver, balanced or precise position updates, switchable in the app and persisted.
+- **Resilient connection.** Heartbeat every 25 seconds, exponential back-off reconnects, a message queue for anything sent while offline, and a live status pill on the map.
 - **Keeps running in the background.** On Android a foreground service keeps the socket, heartbeat and position reporter alive while the app is not on screen. On iOS the system wakes a background location task that pushes the new position to the server.
-- **Pushes and answers.** The app reports its position whenever it moves (every 15 s or 10 m) and additionally replies to on-demand location requests from the server.
+- **Pushes and answers.** The app reports its position whenever it moves and additionally replies to on-demand location requests from the server.
 - **Light and dark theme** following the system setting.
-- **Over-the-air updates** via EAS Update, so fixes reach installed apps without a store release.
+- **Over-the-air updates** via EAS Update, so JavaScript fixes reach installed apps without a store release.
 
 ## Quick start
 
 ### 1. Run the server
 
-The server lives on the `Server` branch. Node.js 18 or newer is required.
+The server lives on the `Server` branch. Node.js 20 or newer is required.
 
 ```bash
 git clone -b Server https://github.com/vxnsin/NeoPin.git neopin-server
 cd neopin-server
 npm install
-node server.js
+npm start
 ```
 
 On first start a `.env` is created with `PORT=3012` and a default password. Change the password right away, either in the file or with the `changePassword` console command. Docker instructions and the full API are in the [server README](https://github.com/vxnsin/NeoPin/blob/Server/README.md).
@@ -86,7 +91,7 @@ On first start a `.env` is created with `PORT=3012` and a default password. Chan
 git clone https://github.com/vxnsin/NeoPin.git
 cd NeoPin
 npm install
-npx expo run:android   # or: npx expo run:ios
+npx expo run:android   # or: npx pod-install && npx expo run:ios
 ```
 
 The app uses native modules (background service, location, device info), so it needs a development build rather than Expo Go.
@@ -99,7 +104,7 @@ The app uses native modules (background service, location, device info), so it n
 | Password | the `PASSWORD` from the server's `.env` |
 | Username | any unique name, this is how the device shows up on the map |
 
-Credentials are stored on the device. The next launch connects automatically and jumps straight to the map.
+Credentials are stored on the device. The next launch connects automatically and jumps straight to the map. Grant location access "all the time" when asked, otherwise background updates stop as soon as the screen locks.
 
 ## Build the app
 
@@ -130,27 +135,42 @@ All messages are JSON over a single WebSocket. The first message must authentica
 | Message | Purpose |
 |---|---|
 | `{ "type": "requestLocation", "from"? }` | Please send an `updatePosition` now. |
-| `{ "type": "dataResponse", "devices": [...] }` | List of `{ deviceId, position, lastPing, status }`. |
+| `{ "type": "dataResponse", "devices": [...] }` | List of `{ deviceId, position, lastPing, status }`, pushed on every change. |
 | `{ "type": "pong" }` | Keep-alive answer. |
 
 ## App structure
 
 ```
 app/
-├─ _layout.tsx        # WebSocket provider, theme, background service toggle
-├─ index.tsx          # auto-connect with stored credentials, retries
+├─ _layout.tsx        # socket provider, position reporter, background service toggle
+├─ index.tsx          # auto-connect with stored credentials
 ├─ login.tsx          # hostname / password / username form
-├─ map.tsx            # Leaflet map in a WebView, location watcher
+├─ map.tsx            # map, status pill, device list, settings, logout
 └─ error.tsx          # connection error screen with retry
 components/           # FloatingInput, Loader, Footer
-context/WebSocket.tsx # shares one socket across screens
-handlers/WebSocket.ts # reacts to server messages (requestLocation, ping)
+context/WebSocket.tsx # exposes the shared socket to screens
+lib/
+├─ SocketClient.ts    # reconnecting WebSocket client with heartbeat and queue
+├─ socket.ts          # the one shared client instance + stored credentials
+├─ settings.ts        # position update presets
+└─ time.ts            # "x min ago"
+handlers/             # server message handlers, position reporting
 hooks/                # useWebSocket, useAsyncStorage, usePermission, useThemeManager
-services/             # Android foreground service that keeps the socket alive
-themes/               # light and dark palettes
+services/             # Android foreground service
+tasks/                # iOS background location task
+themes/               # typed light and dark palettes
+__tests__/            # Jest tests
 app.config.js         # Expo config (bundle id de.vensin.neopin, permissions)
 eas.json              # build profiles
 ```
+
+## Tests
+
+```bash
+npm test
+```
+
+The socket client is covered with a fake WebSocket: authentication, rejection, reconnect back-off, message queue, heartbeat and shutdown.
 
 ## Roadmap
 
@@ -162,6 +182,10 @@ eas.json              # build profiles
 ## Contributing
 
 Issues and pull requests are welcome. Fork the repository, create a branch from `main` (app) or `Server` (backend), and open a PR against the same branch.
+
+## License
+
+[MIT](LICENSE)
 
 ---
 

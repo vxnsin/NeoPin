@@ -172,3 +172,5 @@ vendor/
 
 expo-env.d.ts
 # @end expo-cli
+# Expo export output
+/dist
