@@ -53,7 +53,6 @@ The app and the server live in the same repository on different branches.
 |---|---|
 | **`main`** | The React Native / Expo app. You are here. |
 | [**`Server`**](https://github.com/vxnsin/NeoPin/tree/Server) | Node.js WebSocket server with the web dashboard. Has its own [README](https://github.com/vxnsin/NeoPin/blob/Server/README.md). |
-| `Testing` | Early Flutter prototype, kept for reference. |
 | `archive/flutter` (tag) | The original Flutter app before the React Native rewrite. |
 
 ## Features
