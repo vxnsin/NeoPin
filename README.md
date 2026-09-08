@@ -144,5 +144,5 @@ Connect to the same host and port. Messages are JSON. The first message must be 
 ---
 
 <div align="center">
-<sub>Part of <a href="https://github.com/vxnsin">NeoPin</a> · made by <a href="https://github.com/vxnsin">Vensin</a></sub>
+<sub>Part of <a href="https://github.com/vxnsin/NeoPin">NeoPin</a> · made by <a href="https://github.com/vxnsin">Vensin</a></sub>
 </div>
