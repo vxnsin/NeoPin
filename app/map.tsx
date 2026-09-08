@@ -250,24 +250,6 @@ const mapHTML = `
       }
     });
 
-    setTimeout(function(){
-      var dummyDevices = [
-        { 
-          deviceId: "Dummy1", 
-          position: { latitude: 51.51, longitude: -0.1 }, 
-          lastPing: "2 minutes ago", 
-          status: "online" 
-        },
-        { 
-          deviceId: "Dummy2", 
-          position: { latitude: 51.50, longitude: -0.08 }, 
-          lastPing: "5 minutes ago", 
-          status: "offline" 
-        }
-      ];
-      window.updateDeviceMarkers(dummyDevices);
-    }, 6000);
-
         let clickCount = 0;
         const maxClicks = 2;
         const clickResetTime = 1000;

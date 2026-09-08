@@ -1,18 +1,20 @@
 import * as Location from "expo-location";
+import type { Message } from "@/lib/SocketClient";
 
-export function registerHandlers(ws: {
-  addMessageListener: (fn: (data: any) => void) => () => void;
-  emit: (msg: any) => void;
-}) {
-  const unsubscribe = ws.addMessageListener(async (data: any) => {
+type Socket = {
+  onMessage: (fn: (data: Message) => void) => () => void;
+  emit: (msg: Message) => void;
+};
+
+export function registerHandlers(ws: Socket) {
+  return ws.onMessage(async (data) => {
     if (!data || !data.type) return;
 
     switch (data.type) {
       case "requestLocation":
         try {
-          const { status } = await Location.requestForegroundPermissionsAsync();
+          const { status } = await Location.getForegroundPermissionsAsync();
           if (status !== "granted") {
-            console.error("Location permission denied");
             ws.emit({ type: "locationError", message: "Permission denied" });
             return;
           }
@@ -27,10 +29,9 @@ export function registerHandlers(ws: {
             longitude: position.coords.longitude,
           });
         } catch (error: any) {
-          console.error("Error getting location:", error);
           ws.emit({
             type: "locationError",
-            message: error.message || "Unknown error",
+            message: error?.message || "Unknown error",
           });
         }
         break;
@@ -47,6 +48,4 @@ export function registerHandlers(ws: {
         break;
     }
   });
-
-  return unsubscribe;
 }

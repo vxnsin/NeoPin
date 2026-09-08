@@ -45,7 +45,7 @@ export default function ErrorScreen() {
         return;
       }
       const { serverIp, deviceId, password } = JSON.parse(userData);
-      await connect(serverIp, deviceId, password, { reconnecting: false });
+      await connect(serverIp, deviceId, password);
       router.replace("/map");
     } catch (error: any) {
       console.error("Retry connection error:", error);

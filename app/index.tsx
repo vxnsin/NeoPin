@@ -63,9 +63,7 @@ export default function Index() {
           if (!isFirstAttempt) {
             await delay(2500);
           }
-          await connectRef.current(serverIp, deviceId, password, {
-            reconnecting: false,
-          });
+          await connectRef.current(serverIp, deviceId, password);
 
           if (isMounted.current) {
             setLoaded(true);

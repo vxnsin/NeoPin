@@ -60,8 +60,8 @@ The app and the server live in the same repository on different branches.
 - **Bring your own server.** Enter a hostname, the server password and a device name. That's the whole onboarding.
 - **Live map.** Leaflet map with satellite imagery inside a WebView. Your own position updates every 5 seconds or 5 meters, other devices appear with status and last ping.
 - **Resilient connection.** Exponential back-off reconnects, a message queue for anything sent while offline, and a dedicated error screen with retry.
-- **Keeps running in the background.** On Android a foreground service holds the WebSocket open while the app is not on screen.
-- **Answers location requests.** When the server asks, the app replies with a fresh high-accuracy fix.
+- **Keeps running in the background.** On Android a foreground service keeps the socket, heartbeat and position reporter alive while the app is not on screen. On iOS the system wakes a background location task that pushes the new position to the server.
+- **Pushes and answers.** The app reports its position whenever it moves (every 15 s or 10 m) and additionally replies to on-demand location requests from the server.
 - **Light and dark theme** following the system setting.
 - **Over-the-air updates** via EAS Update, so fixes reach installed apps without a store release.
 
@@ -154,7 +154,7 @@ eas.json              # build profiles
 
 ## Roadmap
 
-- [ ] Make the background connection survive longer than a couple of minutes
+- [ ] Verify the background connection on real devices (Android foreground service, iOS background location)
 - [ ] App screenshots for this page
 - [ ] Publish builds: Play Store, F-Droid, GitHub Releases APK
 - [ ] Optional TLS setup guide for the server

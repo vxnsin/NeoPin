@@ -6,7 +6,10 @@
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
   <uses-permission android:name="android.permission.WAKE_LOCK" />
   <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
   <queries>
@@ -38,7 +41,7 @@
     </activity>
     <service
       android:name="com.asterinet.react.bgactions.RNBackgroundActionsTask"
-      android:foregroundServiceType="dataSync|remoteMessage"
+      android:foregroundServiceType="location"
       android:stopWithTask="false"
       android:exported="false"
       android:enabled="true"

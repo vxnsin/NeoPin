@@ -1,83 +1,52 @@
+import { Platform } from "react-native";
 import BackgroundService from "react-native-background-actions";
-import { useAsyncStorage } from "@/hooks/useAsyncStorage";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { socket, readCredentials } from "@/lib/socket";
 
-const BackgroundTask = async () => {
-    console.log("Starte Service");
+const CHECK_INTERVAL_MS = 10_000;
 
-    const { getValue } = useAsyncStorage("userData");
-    const { connect, close, isConnected } = useWebSocket();
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    const userData = await getValue();
-    if (!userData) {
-        return;
+// Android only. The foreground service keeps the JS runtime alive while the app
+// is in the background, so the shared socket, its heartbeat and the position
+// reporter keep running. The task itself just makes sure we are connected.
+const keepAlive = async () => {
+  while (BackgroundService.isRunning()) {
+    if (!socket.connected && !socket.reconnectPending) {
+      const creds = await readCredentials();
+      if (!creds) break;
+      try {
+        await socket.connect(creds.serverIp, creds.deviceId, creds.password);
+      } catch (error: any) {
+        console.warn("Background connect failed:", error?.message);
+      }
     }
-
-    const { serverIp, deviceId, password } = JSON.parse(userData);
-
-    try {
-        await connect(serverIp, deviceId, password, {
-            reconnecting: false,
-        });
-
-        while (isConnected) {
-            console.log("Connected");
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
-    } catch (error) {
-        console.error("Error:", error);
-    }
+    await sleep(CHECK_INTERVAL_MS);
+  }
 };
 
-
+const options = {
+  taskName: "NeoPin",
+  taskTitle: "NeoPin is sharing your location",
+  taskDesc: "Connected to your server",
+  taskIcon: { name: "ic_launcher", type: "mipmap" },
+  color: "#d3171e",
+  linkingURI: "de.vensin.neopin://",
+};
 
 export async function startWebSocketService() {
-    const options = {
-      taskName: 'NeoPin - WebSocket',
-      taskTitle: 'WebSocket Active',
-      taskDesc: 'Maintaining connection...',
-      taskIcon: {
-        name: 'ic_launcher',
-        type: 'mipmap',
-      },
-      color: '#FF0000',
-      linkingURI: 'neopin://',
-      parameters: {
-        delay: 1000,
-      },
-      foregroundService: {
-        type: 'dataSync',
-        notificationId: 112233,
-        pressAction: {
-          id: 'default',
-          launchActivity: 'de.vensin.neopin.MainActivity',
-          extras: {}
-        },
-        notificationChannel: {
-          id: 'websocket_channel',
-          name: 'WebSocket Channel',
-          description: 'Background connection channel',
-          enableVibration: false,
-          importance: 2,
-          showBadge: false
-        }
-      },
-      allowWhileIdle: true,
-      wakeLock: true,
-      wakeLockTimeout: 5000
-    };
-  
-    try {
-      await BackgroundService.start(BackgroundTask, options);
-      await BackgroundService.updateNotification({
-        taskDesc: 'Connection maintained in background'
-      });
-    } catch (error) {
-      console.error('Background service error:', error);
-    }
+  if (Platform.OS !== "android" || BackgroundService.isRunning()) return;
+  try {
+    await BackgroundService.start(keepAlive, options);
+  } catch (error) {
+    console.error("Background service error:", error);
   }
+}
 
 export async function stopWebSocketService() {
+  if (Platform.OS !== "android" || !BackgroundService.isRunning()) return;
+  try {
     await BackgroundService.stop();
+  } catch (error) {
+    console.error("Background service stop error:", error);
+  }
 }
-  

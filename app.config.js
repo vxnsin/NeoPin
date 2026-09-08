@@ -20,7 +20,10 @@ export default {
         NSLocationWhenInUseUsageDescription:
           "This app needs your location to display the map correctly.",
         NSLocationAlwaysUsageDescription:
-          "This app needs your location to display the map correctly.",
+          "NeoPin shares your location with your own server while the app is in the background.",
+        NSLocationAlwaysAndWhenInUseUsageDescription:
+          "NeoPin shares your location with your own server while the app is in the background.",
+        UIBackgroundModes: ["location"],
       },
     },
     android: {
@@ -29,7 +32,15 @@ export default {
         foregroundImage: "./assets/images/adaptive-icon.png",
         backgroundColor: "#ffffff",
       },
-      permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      permissions: [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "WAKE_LOCK",
+      ],
       softwareKeyboardLayoutMode: "pan",
     },
     web: {
@@ -39,6 +50,14 @@ export default {
     },
     plugins: [
       "expo-router",
+      [
+        "expo-location",
+        {
+          isIosBackgroundLocationEnabled: true,
+          isAndroidBackgroundLocationEnabled: true,
+          isAndroidForegroundServiceEnabled: true,
+        },
+      ],
       [
         "expo-splash-screen",
         {

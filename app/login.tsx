@@ -12,7 +12,7 @@ import useThemeManager from "@/hooks/useThemeManager";
 import Icon from "react-native-vector-icons/MaterialIcons";
 import FloatingInput from "@/components/FloatingInput";
 import * as Device from "expo-device";
-import { useWebSocket } from "@/hooks/useWebSocket";
+import { useRouter } from "expo-router";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 
 const Login = () => {
@@ -32,7 +32,7 @@ const Login = () => {
     serverIp: useRef(new Animated.Value(0)).current,
     serverPassword: useRef(new Animated.Value(0)).current,
   };
-  const ws = useWebSocket();
+  const router = useRouter();
   const { storeValue } = useAsyncStorage("userData");
 
   useEffect(() => {
@@ -104,13 +104,11 @@ const Login = () => {
         password: serverPassword,
       });
       await storeValue(userData);
-      await ws.connect(serverIp, username, serverPassword);
-      setConnectionStatus("Connected and authenticated!");
+      router.replace("/");
     } catch (error: any) {
       setConnectionStatus("Connection failed: " + error.message);
     }
   };
-  //Todo: Double Username Error / Connection Status / Redirect
   return (
     <View
       style={[styles.container, { backgroundColor: colors.colors.surface }]}
