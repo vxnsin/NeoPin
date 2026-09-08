@@ -5,165 +5,227 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NeoPin - Home</title>
 
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css"
-    />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css"
-    />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
     <link rel="stylesheet" href="assets/styles/index.css" />
     <link rel="stylesheet" href="assets/styles/theme.css" />
-
-    <link rel="icon" type="image/x-icon" href="assets/images/favicon.ico">
+    <link rel="icon" type="image/x-icon" href="assets/images/favicon.ico" />
   </head>
 
   <body data-theme="dark">
     <div id="spinner" class="spinner"></div>
     <div class="wrapper-body" id="content">
-        <div class="container-map-by">
-            <a href="https://leafletjs.com/">Leaflet</a>
-        </div>
-        <div id="map"></div>
+      <div id="map"></div>
 
-        <div class="menu-button" id="menuButton">
+      <div class="status-pill" id="status" data-state="connecting">
+        <span class="status-dot"></span>
+        <span class="status-text">Connecting…</span>
+      </div>
+
+      <div class="menu-button" id="menuButton" title="Menu">
         <i class="fas fa-cog"></i>
-        </div>
+      </div>
 
-        <div class="menu-box">
+      <div class="menu-box">
         <div id="menu" class="dropdown-menu">
-            <div class="icon" id="refreshButton">
-                <i class="fa fa-refresh"></i>
-            </div>
-            <div onclick="window.location.href='/logout'" class="icon">
-                <i class="fas fa-sign-out-alt"></i>
-            </div>
+          <div class="icon" id="refreshButton" title="Ask all devices for a fresh position">
+            <i class="fas fa-rotate"></i>
+          </div>
+          <div class="icon" id="listButton" title="Device list">
+            <i class="fas fa-list"></i>
+          </div>
+          <div class="icon" onclick="window.location.href='/logout'" title="Logout">
+            <i class="fas fa-right-from-bracket"></i>
+          </div>
         </div>
-        </div>
+      </div>
+
+      <aside class="device-panel" id="devicePanel">
+        <header>
+          <strong>Devices</strong>
+          <button id="closePanel" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </header>
+        <ul id="deviceList"></ul>
+      </aside>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        let map;
+      const statusEl = document.getElementById("status");
+      const panel = document.getElementById("devicePanel");
+      const listEl = document.getElementById("deviceList");
+      const markers = {};
+      let devices = [];
+      let socket = null;
+      let reconnectTimer = null;
       let menuOpen = false;
-      let loaded = false;
-      let layer;
 
-      function showLoader() {
-        const spinner = document.getElementById("spinner");
-        const content = document.getElementById("content");
-        document.body.classList.remove("loaded");
-        document.body.classList.add("loading");
-        content.classList.remove("loaded"); 
-        spinner.style.opacity = 1;  
+      function setStatus(state, text) {
+        statusEl.dataset.state = state;
+        statusEl.querySelector(".status-text").textContent = text;
       }
 
-      function hideLoader() {
-        const spinner = document.getElementById("spinner");
-        const content = document.getElementById("content");
-        document.body.classList.remove("loading");
-        document.body.classList.add("loaded");
-        content.classList.add("loaded");                 
-        spinner.style.opacity = 0;  
+      function showLoader(show) {
+        document.body.classList.toggle("loading", show);
+        document.body.classList.toggle("loaded", !show);
+        document.getElementById("content").classList.toggle("loaded", !show);
+        document.getElementById("spinner").style.opacity = show ? 1 : 0;
       }
 
-    function initMap() {
-        showLoader();
-        
-        map = L.map("map").setView([50.5561, 9.6333], 6);
-        let bounds = [
-          [-90, -180],
-          [90, 180],
-        ];
-        map.setMaxBounds(bounds);
-        layer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {"attribution": "Mapbox", "detectRetina": false, "maxNativeZoom": 19, "maxZoom": 20, "minZoom": 0, "noWrap": true, "opacity": 1, "subdomains": "abc", "tms": false})
-        .addTo(map);
+      const map = L.map("map", { zoomControl: true }).setView([50.5561, 9.6333], 6);
+      map.setMaxBounds([[-90, -180], [90, 180]]);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19,
+        noWrap: true,
+      }).addTo(map);
+
+      function timeAgo(timestamp) {
+        if (!timestamp) return "never";
+        const seconds = Math.max(0, Math.floor((Date.now() - new Date(timestamp)) / 1000));
+        if (seconds < 60) return `${seconds}s ago`;
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes} min ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours} h ago`;
+        return `${Math.floor(hours / 24)} d ago`;
       }
-      setTimeout(() => {
-        if(!loaded) {
-              fetchDeviceData();
-              hideLoader();
-              loaded = true;
+
+      function freshness(device) {
+        if (device.status !== "online") return "offline";
+        if (!device.lastPing) return "unknown";
+        return Date.now() - new Date(device.lastPing) > 10 * 60 * 1000 ? "stale" : "online";
+      }
+
+      function markerIcon(state) {
+        return L.divIcon({
+          className: `device-marker device-marker--${state}`,
+          html: '<span class="device-marker__dot"></span>',
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+          popupAnchor: [0, -12],
+        });
+      }
+
+      function popupHtml(device) {
+        const pos = device.position
+          ? `${device.position.latitude.toFixed(5)}, ${device.position.longitude.toFixed(5)}`
+          : "no position yet";
+        return `<b>${device.deviceId}</b><br>${device.status} · ${timeAgo(device.lastPing)}<br><small>${pos}</small>`;
+      }
+
+      function render(list) {
+        devices = list;
+        const seen = new Set();
+        list.forEach((device) => {
+          if (!device.position) return;
+          seen.add(device.deviceId);
+          const latlng = [device.position.latitude, device.position.longitude];
+          const state = freshness(device);
+          let marker = markers[device.deviceId];
+          if (!marker) {
+            marker = L.marker(latlng, { icon: markerIcon(state), title: device.deviceId }).addTo(map);
+            markers[device.deviceId] = marker;
+          } else {
+            marker.setLatLng(latlng);
+            marker.setIcon(markerIcon(state));
+          }
+          marker.bindPopup(popupHtml(device));
+        });
+        Object.keys(markers).forEach((id) => {
+          if (!seen.has(id)) {
+            map.removeLayer(markers[id]);
+            delete markers[id];
+          }
+        });
+        renderList();
+      }
+
+      function renderList() {
+        listEl.innerHTML = "";
+        if (devices.length === 0) {
+          listEl.innerHTML = '<li class="empty">No devices yet</li>';
+          return;
         }
-      }, 1000);
-
-      var markers = {};
-      function fetchDeviceData() {
-        fetch("/api/sendPing", {
-            method: "POST",
-            credentials: "include"
-        })
-
-        fetch("/api/getData", {
-        method: "GET",
-        credentials: "include", 
-       })
-          .then((response) => {
-            if (!response.ok) {
-              throw new Error(`HTTP error! Status: ${response.status}`);
+        devices.forEach((device) => {
+          const li = document.createElement("li");
+          li.dataset.state = freshness(device);
+          li.innerHTML = `<span class="dot"></span><span class="name">${device.deviceId}</span><span class="meta">${timeAgo(device.lastPing)}</span>`;
+          li.onclick = () => {
+            if (device.position) {
+              map.flyTo([device.position.latitude, device.position.longitude], Math.max(map.getZoom(), 14));
+              markers[device.deviceId]?.openPopup();
             }
-            return response.json();
-          })
-          .then((data) => {
-            console.log(data)
+          };
+          listEl.appendChild(li);
+        });
+      }
 
-            for (const deviceId in markers) {
-              map.removeLayer(markers[deviceId]);
+      function connect() {
+        clearTimeout(reconnectTimer);
+        setStatus("connecting", "Connecting…");
+        const protocol = location.protocol === "https:" ? "wss" : "ws";
+        socket = new WebSocket(`${protocol}://${location.host}`);
+
+        socket.onopen = () => socket.send(JSON.stringify({ type: "authenticate", viewer: true }));
+        socket.onmessage = (event) => {
+          let data;
+          try {
+            data = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          if ("successful" in data) {
+            if (data.successful) {
+              setStatus("online", "Live");
+              showLoader(false);
+            } else {
+              window.location.href = "/login.html";
             }
-
-            data.forEach((device) => {
-              const { latitude, longitude } = device.position || {};
-              if (latitude != null && longitude != null) {
-                const marker = L.marker([latitude, longitude]).addTo(map);
-                marker.bindPopup(
-                  `<b>${device.deviceId}</b><br>${latitude}, ${longitude}`
-                );
-                markers[device.deviceId] = marker;
-              }
-            });
-          })
-          .catch((error) => {
-            console.error("Error fetching device data:", error);
-          });
+            return;
+          }
+          if (data.type === "dataResponse") render(data.devices || []);
+        };
+        socket.onclose = (event) => {
+          if (event.code === 4000) {
+            window.location.href = "/login.html";
+            return;
+          }
+          setStatus("offline", "Reconnecting…");
+          reconnectTimer = setTimeout(connect, 3000);
+        };
+        socket.onerror = () => socket.close();
       }
 
       document.getElementById("menuButton").onclick = function () {
-        const menu = document.getElementById("menu");
-        menu.classList.toggle("show");
+        document.getElementById("menu").classList.toggle("show");
         this.classList.toggle("rotate");
         menuOpen = !menuOpen;
       };
 
-      document.addEventListener("click", function (event) {
+      document.addEventListener("click", (event) => {
         const menu = document.getElementById("menu");
-        const menuButton = document.getElementById("menuButton");
-
-        if (
-          !menu.contains(event.target) &&
-          event.target !== menuButton &&
-          menuOpen
-        ) {
+        const button = document.getElementById("menuButton");
+        if (menuOpen && !menu.contains(event.target) && event.target !== button) {
           menu.classList.remove("show");
-          menuButton.classList.remove("rotate");
+          button.classList.remove("rotate");
           menuOpen = false;
         }
       });
 
-      document.getElementById("refreshButton").onclick = async function () {
-        const refreshIcon = this.querySelector("i");
-        refreshIcon.classList.add("fa-spin");
-
-        await fetchDeviceData();
-        setTimeout(() => {
-          refreshIcon.classList.remove("fa-spin");
-        }, 1000);
+      document.getElementById("refreshButton").onclick = function () {
+        const icon = this.querySelector("i");
+        icon.classList.add("fa-spin");
+        if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "pingDevices" }));
+        setTimeout(() => icon.classList.remove("fa-spin"), 1500);
       };
-      initMap();
+
+      document.getElementById("listButton").onclick = () => panel.classList.toggle("open");
+      document.getElementById("closePanel").onclick = () => panel.classList.remove("open");
+
+      setInterval(renderList, 15000);
+      showLoader(true);
+      connect();
     </script>
   </body>
 </html>

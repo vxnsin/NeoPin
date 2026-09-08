@@ -1,13 +1,13 @@
 {
-  "name": "neopin",
-  "version": "0.1",
-  "description": "NeoPin Backend Server",
+  "name": "neopin-server",
+  "version": "1.0.0",
+  "description": "Self-hosted NeoPin backend: WebSocket hub for devices plus a live web dashboard",
   "keywords": [
-    "neopin"
+    "neopin",
+    "location-sharing",
+    "websocket",
+    "self-hosted"
   ],
-  "scripts": {
-    "build:css": "postcss public/assets/styles/*.css --replace"
-  },
   "homepage": "https://github.com/vxnsin/NeoPin#readme",
   "bugs": {
     "url": "https://github.com/vxnsin/NeoPin/issues"
@@ -16,12 +16,18 @@
     "type": "git",
     "url": "git+https://github.com/vxnsin/NeoPin.git"
   },
-  "license": "ISC",
+  "license": "MIT",
   "author": "Vensin",
   "type": "module",
   "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
   "dependencies": {
-    "body-parser": "^1.20.3",
     "chalk": "^5.4.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.7",

@@ -1,0 +1,11 @@
+services:
+  neopin:
+    build: .
+    ports:
+      - "3012:3012"
+    environment:
+      - PORT=3012
+      - PASSWORD=change-me
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
