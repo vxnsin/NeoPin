@@ -138,6 +138,7 @@ Connect to the same host and port. Messages are JSON. The first message must be 
 ## Good to know
 
 - **State is in memory.** A restart forgets all devices and positions. Disconnected devices are kept and marked `offline` until the next restart.
+- **Heartbeat.** The server pings every online device every 30 seconds and drops connections that stop answering. A device that reconnects under the same name replaces its old connection and keeps its last known position.
 - **Use TLS in the wild.** Put the server behind a reverse proxy (Caddy, nginx, Traefik) that terminates HTTPS, and use `wss://` in the app. The password travels in plain text otherwise.
 - **The console needs a TTY.** When running as a service without stdin, the interactive commands are simply unavailable. Everything else works.
 

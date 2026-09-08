@@ -79,13 +79,39 @@ app.get("/logout", (req, res) => {
   res.redirect("/login.html");
 });
 
+const HEARTBEAT_INTERVAL = 30 * 1000;
+
+// Ping every online device; anything that did not answer since the last round is dead.
+const heartbeat = setInterval(() => {
+  connectedDevices.forEach((deviceWs, deviceId) => {
+    if (deviceWs.status !== "online") return;
+    if (deviceWs.isAlive === false) {
+      console.log(
+        chalk.yellow(`[Heartbeat] Device ${chalk.whiteBright(deviceId)} stopped responding. Closing connection.`)
+      );
+      deviceWs.terminate();
+      return;
+    }
+    deviceWs.isAlive = false;
+    deviceWs.ping();
+  });
+}, HEARTBEAT_INTERVAL);
+
+wss.on("close", () => clearInterval(heartbeat));
+
 // WebSocket connection handling
 wss.on("connection", (ws) => {
   let deviceId;
   let password;
   let authenticated = false;
 
+  ws.isAlive = true;
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
+
   ws.on("message", async (message) => {
+    ws.isAlive = true;
     try {
       const messageStr = message.toString();
       if (!messageStr.trim()) {
@@ -104,20 +130,6 @@ wss.on("connection", (ws) => {
           )
         );
 
-        // Check if a device with the same ID is already connected and online.
-        if (deviceId && connectedDevices.has(deviceId)) {
-          const existingWs = connectedDevices.get(deviceId);
-          if (existingWs && existingWs.status === "online") {
-            console.log(
-              chalk.red(
-                `[Failed] Device ${chalk.whiteBright(deviceId)} is already connected. Rejecting duplicate connection.`
-              )
-            );
-            ws.close(4000, "Device already connected");
-            return;
-          }
-        }
-
         if (!deviceId || password !== PASSWORD) {
           console.log(
             chalk.red(
@@ -126,6 +138,23 @@ wss.on("connection", (ws) => {
           );
           ws.close(4000, "Unauthorized");
           return;
+        }
+
+        // A device that reconnects (new network, app restart, dropped socket)
+        // takes over from its previous connection and keeps its last position.
+        const existingWs = connectedDevices.get(deviceId);
+        if (existingWs && existingWs !== ws) {
+          ws.position = existingWs.position;
+          ws.lastPing = existingWs.lastPing;
+          if (existingWs.status === "online") {
+            console.log(
+              chalk.yellow(
+                `[i] Device ${chalk.whiteBright(deviceId)} reconnected. Replacing the previous connection.`
+              )
+            );
+            existingWs.replaced = true;
+            existingWs.terminate();
+          }
         }
 
         authenticated = true;
@@ -148,14 +177,14 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    if (authenticated) {
-      console.log(
-        chalk.redBright(
-          `[-] Device ${chalk.whiteBright(deviceId)} has disconnected. Marking as offline.`
-        )
-      );
-      ws.status = "offline";
-    }
+    if (!authenticated || ws.replaced) return;
+    if (connectedDevices.get(deviceId) !== ws) return;
+    console.log(
+      chalk.redBright(
+        `[-] Device ${chalk.whiteBright(deviceId)} has disconnected. Marking as offline.`
+      )
+    );
+    ws.status = "offline";
   });
 });
 
@@ -174,7 +203,7 @@ async function handleMessage(parsedMessage, deviceId, ws) {
       const responsePromises = [];
 
       connectedDevices.forEach((deviceWs, otherDeviceId) => {
-        if (otherDeviceId !== deviceId) {
+        if (otherDeviceId !== deviceId && deviceWs.status === "online") {
           const responsePromise = new Promise((resolve) => {
             const onMessage = (message) => {
               try {
