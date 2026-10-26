@@ -35,16 +35,12 @@
 
     <div id="map"></div>
 
-    <!-- Heads-up display over the map: who is where, how many are online, the time, the connection. -->
+    <!-- Heads-up display over the map: who is where, how many are online, the connection. -->
     <header class="hud">
       <div class="hud-right">
         <div class="hud-tile hud-stat" aria-label="Devices online">
           <span class="hud-stat__value"><span id="onlineCount">0</span><small>/<span id="totalCount">0</span></small></span>
           <span class="hud-stat__label">online</span>
-        </div>
-        <div class="hud-tile hud-stat hud-clock">
-          <span class="hud-stat__value" id="clock">--:--</span>
-          <span class="hud-stat__label" id="date"></span>
         </div>
         <div class="hud-tile hud-tools">
           <button class="icon-btn" id="refreshButton" type="button" aria-label="Ask every device for a fresh position" title="Refresh positions">

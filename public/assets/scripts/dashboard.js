@@ -13,8 +13,6 @@ const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const onlineCountEl = document.getElementById("onlineCount");
 const totalCountEl = document.getElementById("totalCount");
-const clockEl = document.getElementById("clock");
-const dateEl = document.getElementById("date");
 const listEl = document.getElementById("deviceList");
 const stackEl = document.getElementById("avatarStack");
 const panel = document.getElementById("devicesPanel");
@@ -106,12 +104,6 @@ function toast(text) {
 
 function hideLoader() {
   document.getElementById("loader").classList.add("is-hidden");
-}
-
-function updateClock() {
-  const now = new Date();
-  clockEl.textContent = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  dateEl.textContent = now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
 // Map
@@ -450,10 +442,8 @@ function connect() {
 
 // Times like "3 min ago" and the stale state move on without new data.
 setInterval(render, 15_000);
-setInterval(updateClock, 5_000);
 // On a phone the list starts folded, so the map stays visible.
 phone.addEventListener("change", (event) => setExpanded(!event.matches));
 setExpanded(!phone.matches);
-updateClock();
 render();
 connect();

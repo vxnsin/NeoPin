@@ -513,10 +513,6 @@ body {
     border-radius: 16px;
   }
 
-  .hud-clock {
-    display: none;
-  }
-
   .hud-stat {
     min-width: 0;
     padding: 6px 12px;
