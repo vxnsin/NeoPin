@@ -1,3 +1,5 @@
+import type { DeviceType } from "@/lib/devices";
+
 export type User = {
   id: number;
   username: string;
@@ -95,7 +97,7 @@ async function json<T>(response: Response): Promise<T> {
 
 export async function loginRequest(
   serverUrl: string,
-  body: { username: string; password: string; deviceId: string }
+  body: { username: string; password: string; deviceId: string; deviceType?: DeviceType }
 ): Promise<{ token: string; user: User }> {
   return json(
     await request(`${httpBase(serverUrl)}/api/auth/login`, {
@@ -170,6 +172,7 @@ export type AccountSummary = User & { devices: number };
 export type AccountDevice = {
   deviceId: string;
   linkedAt?: string | null;
+  deviceType?: DeviceType;
   status: "online" | "offline";
   lastPing: string | null;
   position: { latitude: number; longitude: number } | null;

@@ -46,6 +46,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .bubble::after { content: ""; position: absolute; left: 50%; bottom: -5px; z-index: -1; width: 13px; height: 13px; border-radius: 3px; background: var(--surface); transform: translateX(-50%) rotate(45deg); }
     .avatar { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: #fff; font: 700 15px system-ui, sans-serif;
       box-shadow: 0 0 0 2px var(--surface), 0 0 0 4.5px var(--ring); }
+    .dtype { position: absolute; right: -3px; bottom: -1px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+    .dtype svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
     .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
     .online { --ring: ${STATE_COLORS.online}; }
     .stale { --ring: ${STATE_COLORS.stale}; }
@@ -154,6 +156,15 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     function keyOf(d) { return d.key || d.deviceId; }
     function ownerName(d) { return d.owner && d.owner.displayName ? d.owner.displayName : d.deviceId; }
     function fullName(d) { return d.owner && d.owner.displayName ? d.owner.displayName + " \u00b7 " + d.deviceId : d.deviceId; }
+    var TYPE_PATHS = {
+      phone: '<rect width="12" height="20" x="6" y="2" rx="2.5"/><path d="M11 18h2"/>',
+      tablet: '<rect width="16" height="20" x="4" y="2" rx="2.5"/><path d="M11 18h2"/>',
+      desktop: '<rect width="16" height="11" x="4" y="5" rx="2"/><path d="M2 20h20"/>'
+    };
+    function typeBadge(d) {
+      var paths = TYPE_PATHS[d.deviceType] || TYPE_PATHS.phone;
+      return '<span class="dtype"><svg viewBox="0 0 24 24">' + paths + "</svg></span>";
+    }
     function avatarHtml(d) {
       var inner = d.avatar ? '<img src="' + esc(d.avatar) + '" alt="">' : "<span>" + esc(initials(ownerName(d))) + "</span>";
       var bg = d.avatar ? "" : "background:" + colour(ownerName(d));
@@ -177,7 +188,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         var id = keyOf(d);
         seen[id] = true;
         var lngLat = [d.position.longitude, d.position.latitude];
-        var key = state(d) + "|" + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : "");
+        var key = state(d) + "|" + (d.deviceType || "") + "|" + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : "");
         var entry = markers[id];
         if (!entry) {
           var el = document.createElement("button");
@@ -187,7 +198,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         }
         entry.marker.setLngLat(lngLat);
         if (entry.key !== key) {
-          entry.el.innerHTML = '<span class="pin-body ' + state(d) + '"><span class="bubble">' + avatarHtml(d) + '</span><span class="label">' + esc(fullName(d)) + "</span></span>";
+          entry.el.innerHTML = '<span class="pin-body ' + state(d) + '"><span class="bubble">' + avatarHtml(d) + typeBadge(d) + '</span><span class="label">' + esc(fullName(d)) + "</span></span>";
           entry.key = key;
         }
         entry.el.classList.toggle("selected", id === selectedId);

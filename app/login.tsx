@@ -17,6 +17,7 @@ import useThemeManager from "@/hooks/useThemeManager";
 import Field from "@/components/Field";
 import { useWebSocketContext } from "@/context/WebSocket";
 import { loginRequest, normalizeServerUrl } from "@/lib/api";
+import { currentDeviceType } from "@/lib/deviceType";
 import { saveCredentials } from "@/lib/credentials";
 
 type Errors = { server?: string; username?: string; password?: string; name?: string };
@@ -54,7 +55,7 @@ const Login = () => {
     setConnecting(true);
     const serverUrl = normalizeServerUrl(url);
     try {
-      const { token, user: account } = await loginRequest(serverUrl, { username: user, password, deviceId });
+      const { token, user: account } = await loginRequest(serverUrl, { username: user, password, deviceId, deviceType: currentDeviceType() });
       // Connect with the shared socket right away instead of a throwaway test
       // connection: it has the auth timeout and clean error handling already.
       await connect(serverUrl, deviceId, token);

@@ -1,3 +1,16 @@
+export type DeviceType = "phone" | "tablet" | "desktop";
+
+export const DEVICE_ICONS: Record<DeviceType, "smartphone" | "tablet" | "computer"> = {
+  phone: "smartphone",
+  tablet: "tablet",
+  desktop: "computer",
+};
+
+// Older servers send no type, those devices are phones.
+export function typeOf(device: { deviceType?: string | null }): DeviceType {
+  return device.deviceType === "tablet" || device.deviceType === "desktop" ? device.deviceType : "phone";
+}
+
 export type Device = {
   deviceId: string;
   userId?: number;
@@ -6,6 +19,7 @@ export type Device = {
   lastPing: string | null;
   status: "online" | "offline";
   avatarUrl?: string | null;
+  deviceType?: DeviceType;
 };
 
 // Device names are only unique per account.

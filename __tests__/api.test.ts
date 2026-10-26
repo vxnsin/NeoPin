@@ -34,6 +34,13 @@ test("a login posts the device with the credentials and returns the token", asyn
   expect(JSON.parse(init.body)).toEqual({ username: "luis", password: "pw", deviceId: "iPhone" });
 });
 
+test("a login can carry the device type", async () => {
+  const fetchMock = respond(200, { token: "tok", user: { id: 1 } });
+  (global as any).fetch = fetchMock;
+  await loginRequest("ws://10.0.0.2:3012", { username: "luis", password: "pw", deviceId: "iPad", deviceType: "tablet" });
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body).deviceType).toBe("tablet");
+});
+
 test("the server message is shown", async () => {
   (global as any).fetch = respond(401, { detail: "Wrong username or password" });
   await expect(loginRequest("ws://x", { username: "a", password: "b", deviceId: "c" })).rejects.toThrow("Wrong username or password");

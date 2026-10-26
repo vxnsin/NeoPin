@@ -74,7 +74,7 @@ test("authenticates after the socket opens and resolves on success", async () =>
   const ws = await connectAndAuthenticate(client);
 
   expect(ws.url).toBe("ws://server");
-  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", token: "secret" });
+  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", token: "secret", deviceType: "phone" });
   expect(client.connected).toBe(true);
 });
 
@@ -129,7 +129,7 @@ test("queues messages while offline and flushes them after authentication", asyn
   const ws = await connectAndAuthenticate(client);
 
   expect(ws.sent).toEqual([
-    { type: "authenticate", deviceId: "phone", token: "secret" },
+    { type: "authenticate", deviceId: "phone", token: "secret", deviceType: "phone" },
     { type: "updatePosition", latitude: 1, longitude: 2 },
   ]);
 });
@@ -172,7 +172,7 @@ test("authenticates with the token and tells listeners when it is refused", asyn
   const refused = jest.fn();
   client.onRejected(refused);
   const ws = await connectAndAuthenticate(client);
-  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", token: "secret" });
+  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", token: "secret", deviceType: "phone" });
 
   ws.close(4000, "Unauthorized");
   expect(refused).toHaveBeenCalledTimes(1);

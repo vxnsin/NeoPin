@@ -13,7 +13,7 @@ import {
   type Timeline,
 } from "@/lib/api";
 import type { StoredCredentials } from "@/lib/credentials";
-import { freshness, type Device } from "@/lib/devices";
+import { DEVICE_ICONS, freshness, typeOf, type Device } from "@/lib/devices";
 import {
   MODE_COLORS,
   MODE_ICONS,
@@ -102,7 +102,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     fetchUserDevices(creds, user.id)
       .then((list) => {
         setOtherDevices(
-          list.map((d) => ({ deviceId: d.deviceId, position: d.position, lastPing: d.lastPing, status: d.status, avatarUrl: user.avatarUrl }))
+          list.map((d) => ({ deviceId: d.deviceId, position: d.position, lastPing: d.lastPing, status: d.status, avatarUrl: user.avatarUrl, deviceType: d.deviceType }))
         );
         setDeviceId(list[0]?.deviceId ?? "");
       })
@@ -239,6 +239,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                   size={18}
                   gapColor={active ? c.secondary : c.subtle}
                 />
+                <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={14} color={chipText(active).color} />
                 <Text style={[styles.chipLabel, chipText(active)]} numberOfLines={1}>
                   {device.deviceId}
                 </Text>

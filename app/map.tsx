@@ -30,7 +30,7 @@ import PasswordForm from "@/components/PasswordForm";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
-import { STATE_COLORS, deviceKey, deviceLabel, freshness, isOwnDevice, ownerName, type Device } from "@/lib/devices";
+import { DEVICE_ICONS, STATE_COLORS, typeOf, deviceKey, deviceLabel, freshness, isOwnDevice, ownerName, type Device } from "@/lib/devices";
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
@@ -295,6 +295,7 @@ export default function MapScreen() {
         <Avatar name={ownerName(device)} uri={avatarFor(device.avatarUrl)} state={state} gapColor={c.raised} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
+            <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={15} color={c.muted} />{" "}
             {isMe ? device.deviceId : deviceLabel(device)}
             {isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
           </Text>

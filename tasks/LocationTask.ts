@@ -1,5 +1,6 @@
 import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
+import { currentDeviceType } from "@/lib/deviceType";
 import { socket, readCredentials, type StoredCredentials } from "@/lib/socket";
 
 export const LOCATION_TASK = "neopin-background-location";
@@ -45,7 +46,7 @@ function pushOnce(creds: StoredCredentials, message: Record<string, unknown>): P
     };
 
     ws.onopen = () =>
-      ws.send(JSON.stringify({ type: "authenticate", deviceId: creds.deviceId, token: creds.token }));
+      ws.send(JSON.stringify({ type: "authenticate", deviceId: creds.deviceId, token: creds.token, deviceType: currentDeviceType() }));
     ws.onmessage = (event) => {
       try {
         const reply = JSON.parse(event.data);
