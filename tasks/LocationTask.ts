@@ -1,5 +1,6 @@
 import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
+import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
 import { socket, readCredentials, type StoredCredentials } from "@/lib/socket";
 
@@ -70,9 +71,13 @@ export type BackgroundOptions = { timeInterval: number; distanceInterval: number
 // runs as a foreground service with a notification, on iOS the system wakes the
 // task on movement. Restarting applies a changed update preset.
 export async function startBackgroundLocation(options: BackgroundOptions): Promise<boolean> {
+  // The permission dialogs belong to the setup flow (hooks/usePermission). Asking again here while
+  // that flow runs makes two requests collide, and starting the foreground service while the app is
+  // not in front is refused by Android 12 and newer, which kills the app.
+  if (AppState.currentState !== "active") return false;
   const foreground = await Location.getForegroundPermissionsAsync();
   if (foreground.status !== "granted") return false;
-  const background = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+  const background = await Location.getBackgroundPermissionsAsync().catch(() => null);
   if (background?.status !== "granted") return false;
 
   if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) {

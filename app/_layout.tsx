@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Dimensions, StyleSheet } from "react-native";
+import { AppState, View, Dimensions, StyleSheet } from "react-native";
 import { Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
@@ -41,10 +41,20 @@ function ConnectionLifecycle() {
   useEffect(() => {
     if (!isConnected) return;
     const stop = startPositionReporting({ emit }, REPORTING_PRESETS[preset]);
-    startBackgroundLocation(REPORTING_PRESETS[preset]).catch((error) =>
-      console.warn("Background location unavailable:", error?.message)
-    );
-    return stop;
+    const startBackground = () =>
+      startBackgroundLocation(REPORTING_PRESETS[preset]).catch((error) =>
+        console.warn("Background location unavailable:", error?.message)
+      );
+    startBackground();
+    // The permission dialogs send the app to the background and back. Once it is in front again
+    // (and the permissions are granted) the background service can start.
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") startBackground();
+    });
+    return () => {
+      stop();
+      subscription.remove();
+    };
   }, [isConnected, emit, preset]);
 
   return null;
