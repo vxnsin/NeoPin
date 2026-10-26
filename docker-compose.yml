@@ -1,16 +1,31 @@
 services:
   neopin:
-    build: .
+    image: ghcr.io/vxnsin/neopin-server:latest
+    # To build from this checkout instead of pulling, comment out `image` and use:
+    # build: .
+    pull_policy: always
     ports:
       - "3012:3012"
     environment:
       - PORT=3012
-      # - ALLOW_REGISTRATION=true
+      # - ADMIN_USERNAME=admin
+      # - ADMIN_PASSWORD=choose-a-long-one   # generated and printed in the logs when unset
+      # - TRUST_PROXY=true                   # behind a reverse proxy
+      # - SECURE_COOKIES=true                # once HTTPS is in place
+      # - HISTORY_DAYS=365
     volumes:
       - neopin-data:/app/data
-    stdin_open: true
-    tty: true
     restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  # Optional: checks for a new image every 5 minutes and restarts only labelled containers.
+  # watchtower:
+  #   image: nickfedor/watchtower:latest
+  #   command: --label-enable --cleanup --interval 300
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   restart: unless-stopped
 
 volumes:
   neopin-data:
