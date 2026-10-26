@@ -283,8 +283,8 @@ export default function MapScreen() {
   const summary = !isConnected
     ? "Reconnecting…"
     : devices.length === 0
-      ? "Connected · no devices yet"
-      : `${online} of ${devices.length} connected`;
+      ? "Connected · nobody yet"
+      : `${people.length} ${people.length === 1 ? "person" : "people"} · ${online} of ${devices.length} ${devices.length === 1 ? "device" : "devices"} online`;
 
   // One row per person. Tapping focuses their primary device and opens the list of their devices.
   const togglePerson = (person: Person) => {
@@ -382,10 +382,10 @@ export default function MapScreen() {
       <Pressable
         style={[styles.bar, { bottom: insets.bottom + 12, backgroundColor: c.raised }]}
         onPress={() => setSheet("devices")}
-        accessibilityLabel={`Devices, ${summary}`}
+        accessibilityLabel={`People, ${summary}`}
       >
         <View style={{ flex: 1 }}>
-          <Text style={[styles.barTitle, { color: c.primary }]}>Devices</Text>
+          <Text style={[styles.barTitle, { color: c.primary }]}>People</Text>
           <View style={styles.metaRow}>
             <View style={[styles.metaDot, { backgroundColor: isConnected ? STATE_COLORS.online : STATE_COLORS.stale }]} />
             <Text style={[styles.deviceMeta, { color: c.muted }]}>{summary}</Text>
@@ -445,7 +445,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : "Devices"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -459,7 +459,7 @@ export default function MapScreen() {
               <Pressable
                 style={[styles.headerButton, { backgroundColor: c.subtle }]}
                 onPress={() => setSheet(sheet === "settings" ? "devices" : "settings")}
-                accessibilityLabel={sheet === "settings" ? "Back to devices" : "Settings"}
+                accessibilityLabel={sheet === "settings" ? "Back to people" : "Settings"}
               >
                 <MaterialIcons name={sheet === "settings" ? "people-outline" : "settings"} size={20} color={c.primary} />
               </Pressable>
@@ -471,7 +471,7 @@ export default function MapScreen() {
               <Text style={[styles.sheetMeta, { color: c.muted }]}>{summary}</Text>
               <ScrollView style={styles.deviceList}>
                 {people.length === 0 && (
-                  <Text style={[styles.empty, { color: c.muted }]}>No devices yet.</Text>
+                  <Text style={[styles.empty, { color: c.muted }]}>Nobody here yet.</Text>
                 )}
                 {people.map(personRow)}
               </ScrollView>
