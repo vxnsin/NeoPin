@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   KeyboardAvoidingView,
@@ -127,8 +128,30 @@ export default function MapScreen() {
     [addMessageListener]
   );
 
+  // Dragging the top of the sheet down closes it.
+  const sheetDrag = useRef(new Animated.Value(0)).current;
+  const sheetPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 4,
+      onPanResponderMove: (_, g) => sheetDrag.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80 || g.vy > 0.8) {
+          setSheet(null);
+          sheetDrag.setValue(0);
+        } else {
+          Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start();
+        }
+      },
+      onPanResponderTerminate: () => Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start(),
+    })
+  ).current;
+
   // The map gets each device with its picture as a data URI, it cannot send the login headers itself.
-  const mapDevices = devices.map((device) => ({ ...device, avatar: avatarFor(device.avatarUrl) }));
+  // This phone is the "you are here" dot already, so its own device gets no second pin.
+  const mapDevices = devices
+    .filter((device) => device.deviceId !== creds?.deviceId)
+    .map((device) => ({ ...device, avatar: avatarFor(device.avatarUrl) }));
   const mapDevicesKey = JSON.stringify(mapDevices);
   useEffect(() => {
     if (webViewLoaded) post({ type: "devices", devices: JSON.parse(mapDevicesKey) });
@@ -365,10 +388,14 @@ export default function MapScreen() {
       <Modal visible={sheet !== null} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
         <KeyboardAvoidingView style={styles.sheetHost} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <Pressable style={styles.backdrop} onPress={() => setSheet(null)} />
-        <View style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16 }]}>
-          <View style={[styles.grabber, { backgroundColor: c.muted }]} />
+        <Animated.View
+          style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16, transform: [{ translateY: sheetDrag }] }]}
+        >
+          <View {...sheetPan.panHandlers} style={styles.grabArea}>
+            <View style={[styles.grabber, { backgroundColor: c.muted }]} />
+          </View>
 
-          <View style={styles.sheetHeader}>
+          <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
             <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : "Devices"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
@@ -477,7 +504,7 @@ export default function MapScreen() {
               </Pressable>
             </ScrollView>
           )}
-        </View>
+        </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -533,7 +560,8 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     maxHeight: "85%",
   },
-  grabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, opacity: 0.35, marginBottom: 12 },
+  grabArea: { paddingTop: 4, paddingBottom: 16, marginTop: -4 },
+  grabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, opacity: 0.35 },
   sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sheetTitle: { fontSize: 24, fontWeight: "800", letterSpacing: -0.3 },
   sheetMeta: { fontSize: 13, marginTop: 2, marginBottom: 8 },
