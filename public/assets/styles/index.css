@@ -840,13 +840,16 @@ body.is-timeline .maplibregl-popup {
   margin: 0 8px 8px 0;
 }
 
-.maplibregl-ctrl-attrib {
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-attrib-inner,
+.maplibregl-ctrl-attrib a {
   background: var(--surface) !important;
-  color: var(--text-muted);
+  color: var(--text-muted) !important;
 }
 
+.maplibregl-ctrl-attrib-inner,
 .maplibregl-ctrl-attrib a {
-  color: inherit;
+  background: none !important;
 }
 
 :root[data-theme="dark"] .maplibregl-ctrl-attrib-button {
