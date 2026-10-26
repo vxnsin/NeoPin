@@ -68,6 +68,15 @@ function looksLike(type, data) {
   return false;
 }
 
+function decodeHeader(value) {
+  if (typeof value !== "string") return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function send(socket, payload) {
   if (socket?.readyState === 1) socket.send(payload).catch(() => {});
 }
@@ -127,12 +136,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
 
   // Devices speak HTTP with the same password as on the socket: the device id in
   // X-Device-Id, the password as a bearer token. Wrong guesses count against the
-  // same per-IP limit as failed socket logins.
+  // same per-IP limit as failed socket logins. Both are percent-encoded, because
+  // names like "Luis’ iPhone" are no valid header values as they are.
   function deviceFromHeaders(ctx) {
     if (authFailures.blocked(ctx.ip)) throw problem(429, "too-many-attempts", "Too many attempts");
-    const deviceId = ctx.headers["x-device-id"];
+    const deviceId = decodeHeader(ctx.headers["x-device-id"]);
     const auth = ctx.headers.authorization;
-    const password = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    const password = typeof auth === "string" && auth.startsWith("Bearer ") ? decodeHeader(auth.slice(7)) : null;
     if (typeof deviceId !== "string" || !deviceId || !passwordMatches(password)) {
       if (password !== null) authFailures.fail(ctx.ip);
       throw problem(401, "unauthorized", "Send X-Device-Id and the server password as a bearer token");

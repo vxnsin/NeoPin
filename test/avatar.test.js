@@ -54,9 +54,10 @@ async function connectDevice(deviceId) {
   return client;
 }
 
+// The app percent-encodes both values, header values have to stay ASCII.
 const deviceHeaders = (deviceId, password = config.password) => ({
-  "x-device-id": deviceId,
-  authorization: `Bearer ${password}`,
+  "x-device-id": encodeURIComponent(deviceId),
+  authorization: `Bearer ${encodeURIComponent(password)}`,
 });
 
 const upload = (body, { deviceId = "phone", password, type = "image/jpeg", headers } = {}) =>
@@ -126,6 +127,15 @@ test("wrong passwords on the upload count against the same limit as socket login
     assert.equal((await upload(jpeg(), { password: "wrong" })).status, 401);
   }
   assert.equal((await upload(jpeg())).status, 429);
+});
+
+test("device names outside ASCII work once percent-encoded", async () => {
+  await connectDevice("Luis’ iPhone");
+  const res = await upload(jpeg(), { deviceId: "Luis’ iPhone" });
+  assert.equal(res.status, 200);
+  const { avatarUrl } = await res.json();
+  assert.equal(avatarUrl.split("?")[0], `/avatars/${encodeURIComponent("Luis’ iPhone")}`);
+  assert.equal((await fetch(baseUrl + avatarUrl, { headers: deviceHeaders("Luis’ iPhone") })).status, 200);
 });
 
 test("only small pictures of a known type are taken", async () => {
