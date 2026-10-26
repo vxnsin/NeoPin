@@ -665,6 +665,44 @@ body.is-timeline .maplibregl-popup {
   box-shadow: var(--shadow-md);
 }
 
+/* Two rings that only fade in and out: opacity animates on the GPU without repainting the map. */
+.pin[data-state="online"] .avatar::before,
+.pin[data-state="online"] .avatar::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid var(--online);
+  opacity: 0;
+  pointer-events: none;
+  animation: breathe 2.6s ease-in-out infinite;
+}
+
+.pin[data-state="online"] .avatar::before {
+  inset: -4.5px;
+}
+
+.pin[data-state="online"] .avatar::after {
+  inset: -10px;
+  animation-delay: 0.45s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pin[data-state="online"] .avatar::before,
+  .pin[data-state="online"] .avatar::after {
+    animation: none;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  45% {
+    opacity: 0.85;
+  }
+}
+
 .pin__bubble::after {
   content: "";
   position: absolute;
