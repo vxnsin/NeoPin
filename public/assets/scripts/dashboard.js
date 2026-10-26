@@ -335,6 +335,21 @@ function sortedDevices() {
   );
 }
 
+// One entry per owner: their freshest device stands for them, extra counts the others.
+function groupByOwner(list) {
+  const rank = { online: 0, stale: 1, offline: 2 };
+  const groups = new Map();
+  for (const device of list) {
+    const group = groups.get(device.userId);
+    if (!group) groups.set(device.userId, { device, extra: 0 });
+    else {
+      group.extra += 1;
+      if (rank[freshness(device)] < rank[freshness(group.device)]) group.device = device;
+    }
+  }
+  return [...groups.values()];
+}
+
 function renderPanel() {
   const online = devices.filter((d) => d.status === "online").length;
   onlineCountEl.textContent = online;
@@ -342,7 +357,10 @@ function renderPanel() {
   updateSummary();
 
   const sorted = sortedDevices();
-  stackEl.innerHTML = sorted.slice(0, 4).map((device) => avatarHtml(device, "sm")).join("");
+  stackEl.innerHTML = groupByOwner(sorted)
+    .slice(0, 4)
+    .map(({ device, extra }) => `<span class="stack-item">${avatarHtml(device, "sm")}${extra ? `<span class="stack-extra">+${extra}</span>` : ""}</span>`)
+    .join("");
 
   if (devices.length === 0) {
     listEl.innerHTML = `

@@ -480,11 +480,32 @@ body.is-timeline .maplibregl-popup {
   display: none;
 }
 
+.devices__stack .stack-item {
+  position: relative;
+  display: inline-flex;
+  margin-left: -6px;
+}
+
 .devices__stack .avatar {
   --size: 26px;
   font-size: 10px;
-  margin-left: -6px;
   box-shadow: 0 0 0 2px var(--surface-solid), 0 0 0 3.5px var(--ring);
+}
+
+.stack-extra {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  min-width: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--text);
+  box-shadow: 0 0 0 2px var(--surface-solid);
+  color: var(--surface-solid);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
 }
 
 .devices[data-expanded="false"] .devices__stack {
