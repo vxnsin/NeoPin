@@ -25,10 +25,23 @@ body {
   top: -60%;
   width: 300%;
   height: 260%;
-  background: #0a0d12 url("/assets/images/town.svg") repeat;
-  background-size: 1600px 1000px;
+  overflow: hidden;
+  background: #0a0d12;
   transform: rotateX(62deg) rotateZ(-16deg);
   transform-origin: 50% 50%;
+}
+
+/* One tile larger than the plane up and left. login.js shifts it by less than a
+   tile with transform only, so the GPU moves it without repainting the streets. */
+.backdrop__ground {
+  position: absolute;
+  top: -1000px;
+  left: -1600px;
+  right: 0;
+  bottom: 0;
+  background: url("/assets/images/town.svg") repeat;
+  background-size: 1600px 1000px;
+  will-change: transform;
 }
 
 /* The town stays in the dark, only a ping lights up the streets around it for a moment. */

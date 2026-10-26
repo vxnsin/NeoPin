@@ -3,12 +3,18 @@
 const PING_COLORS = ["#d3171e", "#22c55e", "#2563eb", "#7c3aed", "#ea580c", "#0284c7", "#db2777"];
 const SPEED = 110; // ground pixels per second
 const LIGHT_RADIUS = 320; // half the size of .spot__light
+const TILE = { width: 1600, height: 1000 }; // town.svg
 const plane = document.getElementById("plane");
+const ground = document.getElementById("ground");
 const pings = document.createElement("div");
 pings.style.position = "absolute";
 pings.style.inset = "0";
+pings.style.willChange = "transform";
 plane.appendChild(pings);
 let offset = { x: 0, y: 0 };
+
+// Shifting by whole tiles changes nothing on screen, so the ground only ever moves less than one.
+const wrap = (value, size) => ((value % size) + size) % size;
 
 function ping() {
   if (!document.hidden && pings.childElementCount < 5) {
@@ -44,8 +50,8 @@ function fly(previous) {
       x: offset.x + Math.sin(heading) * SPEED * seconds,
       y: offset.y + Math.cos(heading) * SPEED * seconds,
     };
-    plane.style.backgroundPosition = `${offset.x}px ${offset.y}px`;
-    pings.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+    ground.style.transform = `translate3d(${wrap(offset.x, TILE.width)}px, ${wrap(offset.y, TILE.height)}px, 0)`;
+    pings.style.transform = `translate3d(${offset.x}px, ${offset.y}px, 0)`;
     requestAnimationFrame(fly(now));
   };
 }
