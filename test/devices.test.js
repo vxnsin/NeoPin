@@ -32,8 +32,15 @@ test("a new device starts online without a position", () => {
       lastPing: null,
       status: "online",
       avatarUrl: null,
+      deviceType: "phone",
     },
   ]);
+});
+
+test("a device remembers the type it announced", () => {
+  attachSocket(userId, "mac", fakeSocket(), "desktop");
+  attachSocket(userId, "mac", fakeSocket());
+  assert.equal(serializeDevices()[0].deviceType, "desktop");
 });
 
 test("reconnecting returns the socket that was replaced and keeps the position", () => {

@@ -22,16 +22,17 @@ export function onlineDevices(userId) {
 }
 
 // Registers a socket for a device and returns the socket it replaces, if any.
-export function attachSocket(userId, deviceId, socket) {
+export function attachSocket(userId, deviceId, socket, deviceType) {
   const key = keyOf(userId, deviceId);
   let device = devices.get(key);
   if (!device) {
-    device = { id: deviceId, userId, socket: null, position: null, lastPing: null, status: "offline" };
+    device = { id: deviceId, userId, socket: null, position: null, lastPing: null, status: "offline", deviceType: null };
     devices.set(key, device);
   }
   const previous = device.socket;
   device.socket = socket;
   device.status = "online";
+  if (deviceType) device.deviceType = deviceType;
   return previous && previous !== socket ? previous : null;
 }
 
@@ -70,6 +71,7 @@ export function serializeDevices() {
       lastPing: d.lastPing,
       status: d.status,
       avatarUrl: owner?.avatarUrl ?? null,
+      deviceType: d.deviceType ?? "phone",
     };
   });
 }

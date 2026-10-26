@@ -176,6 +176,26 @@ test("linked devices are listed with their state and can be unlinked", async () 
   assert.equal((await fetch(`${s.baseUrl}/api/devices/ghost`, { method: "DELETE", headers: { cookie: luis.cookie } })).status, 404);
 });
 
+test("the device type is stored at login and shown for live and offline devices", async () => {
+  const luis = await s.account("luis");
+  const login = (deviceId, deviceType) =>
+    s.post("/api/auth/login", { username: "luis", password: PASSWORD, deviceId, deviceType });
+  const pad = await login("pad", "tablet");
+  assert.equal(pad.status, 200);
+  assert.equal((await login("bad", "toaster")).status, 400);
+  await s.tokenFor("luis", "plain");
+
+  const list = await (await fetch(`${s.baseUrl}/api/devices`, { headers: { cookie: luis.cookie } })).json();
+  assert.deepEqual(list.map((d) => [d.deviceId, d.deviceType]), [["phone", "phone"], ["pad", "tablet"], ["plain", "phone"]]);
+
+  const token = (await (await login("mac", "desktop")).json()).token;
+  const mac = await s.connect();
+  mac.send({ type: "authenticate", deviceId: "mac", token, deviceType: "desktop" });
+  await mac.next();
+  const devices = await (await fetch(`${s.baseUrl}/api/getData`, { headers: { cookie: luis.cookie } })).json();
+  assert.equal(devices.find((d) => d.deviceId === "mac").deviceType, "desktop");
+});
+
 test("only the admin may open the timeline and devices of another account", async () => {
   const luis = await s.account("luis"); // the first account is the admin
   const anna = await s.account("anna");

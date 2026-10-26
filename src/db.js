@@ -52,6 +52,9 @@ export function initDb(file = config.dbPath) {
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "must_change_password")) {
     db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
   }
+  if (!db.prepare("PRAGMA table_info(tokens)").all().some((c) => c.name === "device_type")) {
+    db.exec("ALTER TABLE tokens ADD COLUMN device_type TEXT");
+  }
   return db;
 }
 

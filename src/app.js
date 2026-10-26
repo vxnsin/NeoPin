@@ -49,6 +49,8 @@ const Position = t.object({
   longitude: t.number().min(-180).max(180),
 });
 
+const DeviceType = t.enum(["phone", "tablet", "desktop"]);
+
 const Device = t.object({
   deviceId: t.string(),
   userId: t.number(),
@@ -57,6 +59,7 @@ const Device = t.object({
   lastPing: t.string().nullable(),
   status: t.enum(["online", "offline"]),
   avatarUrl: t.string().nullable(),
+  deviceType: DeviceType,
 });
 
 const User = t.object({
@@ -71,6 +74,7 @@ const User = t.object({
 const LinkedDevice = t.object({
   deviceId: t.string(),
   linkedAt: t.string(),
+  deviceType: DeviceType,
   status: t.enum(["online", "offline"]),
   lastPing: t.string().nullable(),
   position: Position.nullable(),
@@ -118,6 +122,7 @@ const ClientMessage = t.discriminated("type", {
     type: t.literal("authenticate"),
     deviceId: t.string().min(1).max(64).optional(),
     token: t.string().max(256).optional(),
+    deviceType: DeviceType.optional(),
     viewer: t.boolean().optional(),
   }),
   updatePosition: Position.extend({ type: t.literal("updatePosition") }),
@@ -252,6 +257,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
       const live = getDevice(userId, link.deviceId);
       return {
         ...link,
+        deviceType: live?.deviceType ?? link.deviceType,
         status: live?.status ?? "offline",
         lastPing: live?.lastPing ?? null,
         position: live?.position ?? null,
@@ -341,13 +347,14 @@ export function createApp({ gracefulShutdown = true } = {}) {
           username: t.string().max(64),
           password: t.string().max(256),
           deviceId: t.string().min(1).max(64),
+          deviceType: DeviceType.optional(),
         }),
         response: { 200: t.object({ token: t.string(), user: User }), 401: t.problem(), 429: t.problem() },
       },
       (ctx) => {
         const user = verifyLogin(ctx.body.username, ctx.body.password);
         if (!user) throw problem(401, "invalid-credentials", "Wrong username or password");
-        return { token: issueToken(user.id, ctx.body.deviceId), user: publicUser(user) };
+        return { token: issueToken(user.id, ctx.body.deviceId, ctx.body.deviceType), user: publicUser(user) };
       }
     );
 
@@ -634,7 +641,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         deviceId = msg.deviceId;
         account = user.id;
         role = "device";
-        const replaced = attachSocket(account, deviceId, socket);
+        const replaced = attachSocket(account, deviceId, socket, msg.deviceType);
         const label = `${chalk.whiteBright(user.username)}/${chalk.whiteBright(deviceId)}`;
         if (replaced) {
           console.log(chalk.yellow(`[i] Device ${label} reconnected. Replacing the previous connection.`));

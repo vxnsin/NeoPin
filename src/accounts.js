@@ -91,9 +91,9 @@ export function deleteUser(userId) {
 // Devices that logged in with this account, whether they are connected right now or not.
 export function linkedDevices(userId) {
   return getDb()
-    .prepare("SELECT device_id, created_at FROM tokens WHERE user_id = ? ORDER BY created_at")
+    .prepare("SELECT device_id, created_at, device_type FROM tokens WHERE user_id = ? ORDER BY created_at")
     .all(userId)
-    .map((r) => ({ deviceId: r.device_id, linkedAt: r.created_at }));
+    .map((r) => ({ deviceId: r.device_id, linkedAt: r.created_at, deviceType: r.device_type ?? "phone" }));
 }
 
 export function unlinkDevice(userId, deviceId) {
@@ -107,15 +107,16 @@ export function setPassword(userId, password) {
 }
 
 // One token per device. Logging in again on the same device replaces it.
-export function issueToken(userId, deviceId) {
+export function issueToken(userId, deviceId, deviceType = null) {
   const token = crypto.randomBytes(32).toString("base64url");
   const db = getDb();
   db.prepare("DELETE FROM tokens WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
-  db.prepare("INSERT INTO tokens (token_hash, user_id, device_id, created_at) VALUES (?, ?, ?, ?)").run(
+  db.prepare("INSERT INTO tokens (token_hash, user_id, device_id, created_at, device_type) VALUES (?, ?, ?, ?, ?)").run(
     hashToken(token),
     userId,
     deviceId,
-    new Date().toISOString()
+    new Date().toISOString(),
+    deviceType
   );
   return token;
 }
