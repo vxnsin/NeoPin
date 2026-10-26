@@ -1,4 +1,4 @@
-import { getUser, publicUser } from "./accounts.js";
+import { getUser, linkedDevices, publicUser } from "./accounts.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
 // account and its name, so two people may both own an "iPhone". A record outlives
@@ -61,7 +61,14 @@ export function serializeDevices() {
     if (!owners.has(userId)) owners.set(userId, publicUser(getUser(userId)));
     return owners.get(userId);
   };
-  return allDevices().map((d) => {
+  // A device whose login was revoked (logout, password change, unlink) is gone from the list
+  // unless it is still connected.
+  const linked = new Map();
+  const isLinked = (d) => {
+    if (!linked.has(d.userId)) linked.set(d.userId, new Set(linkedDevices(d.userId).map((l) => l.deviceId)));
+    return linked.get(d.userId).has(d.id);
+  };
+  return allDevices().filter((d) => d.status === "online" || isLinked(d)).map((d) => {
     const owner = ownerOf(d.userId);
     return {
       deviceId: d.id,

@@ -87,3 +87,16 @@ test("timeAgo picks the largest fitting unit", () => {
   assert.equal(timeAgo(new Date(now - 61_000).toISOString()), "1 minute ago");
   assert.equal(timeAgo(new Date(now - 2 * 3_600_000).toISOString()), "2 hours ago");
 });
+
+test("a device that is offline and no longer linked drops out of the list", async () => {
+  const { issueToken } = await import("../src/accounts.js");
+  const socket = fakeSocket();
+  attachSocket(userId, "phone", socket);
+  issueToken(userId, "phone");
+  detachSocket(userId, "phone", socket);
+  assert.equal(serializeDevices().length, 1, "still linked");
+
+  const { setPassword } = await import("../src/accounts.js");
+  setPassword(userId, "another-password");
+  assert.equal(serializeDevices().length, 0, "login revoked");
+});
