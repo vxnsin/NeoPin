@@ -4,14 +4,11 @@
 
 # NeoPin Server
 
-**The self-hosted backend for [NeoPin](https://github.com/vxnsin/NeoPin).**
-Accepts WebSocket connections from your phones, remembers where everyone is, and serves a live web dashboard.
+The backend for the [NeoPin app](https://github.com/vxnsin/NeoPin): phones connect, the server remembers where everyone is and shows it on a web dashboard.
 
-[![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![Express](https://img.shields.io/badge/Express-4-000000?style=flat-square&logo=express&logoColor=white)](https://expressjs.com)
-[![ws](https://img.shields.io/badge/WebSocket-ws%208-010101?style=flat-square)](https://github.com/websockets/ws)
+[![Node.js](https://img.shields.io/badge/Node.js-22.18%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![inkan](https://img.shields.io/badge/built%20with-inkan-c4381f?style=flat-square)](https://github.com/inkanjs/inkan)
 [![License](https://img.shields.io/badge/License-MIT-d3171e?style=flat-square)](LICENSE)
-[![App](https://img.shields.io/badge/App-main%20branch-d3171e?style=flat-square&logo=react&logoColor=white)](https://github.com/vxnsin/NeoPin)
 
 <br>
 
@@ -19,34 +16,27 @@ Accepts WebSocket connections from your phones, remembers where everyone is, and
 
 </div>
 
----
+## How it works
 
-## Contents
+One Node process on one port. Phones and the dashboard both talk to it over a WebSocket, the dashboard login is a normal HTTP form.
 
-- [What it does](#what-it-does)
-- [Quick start](#quick-start)
-- [Docker](#docker)
-- [Configuration](#configuration)
-- [Console commands](#console-commands)
-- [HTTP endpoints](#http-endpoints)
-- [WebSocket protocol](#websocket-protocol)
-- [Project structure](#project-structure)
-- [Tests](#tests)
-- [Good to know](#good-to-know)
+```mermaid
+flowchart LR
+    A[📱 NeoPin app] -- "WebSocket: authenticate, updatePosition" --> S[(🖥️ NeoPin Server)]
+    S -- "dataResponse, requestLocation" --> A
+    D[🌐 Dashboard] -- "POST /login → session cookie" --> S
+    D <-- "WebSocket + cookie" --> S
+```
 
-## What it does
+A device logs in with the shared password and a name. Every position it sends is kept in memory and pushed to all other devices and dashboards, at most twice a second. When someone hits refresh, the server asks every device for a fresh position and waits up to two seconds for the answers.
 
-- **Single process, no database.** Express for HTTP and `ws` for WebSockets on the same port. State lives in memory.
-- **Shared-password auth.** Devices authenticate with the server password. A device that reconnects under the same name replaces its old connection and keeps its last position.
-- **Live updates.** Every position change is broadcast to all devices and dashboards, throttled to twice a second. No polling.
-- **Location relay.** Any client can ask the server to poll all devices; the server fans out `requestLocation`, waits up to 2 seconds for answers and returns the combined list.
-- **Web dashboard.** Log in at `/login.html`, get a Leaflet map with colour-coded markers (online, stale, offline), a device list with jump-to and a live connection indicator.
-- **Session cookies.** The dashboard login issues a random session token, not the password. Login attempts are rate limited.
-- **Interactive console.** Type `help` in the running server to list devices, ping them, kick one or change the password.
+There is no database. Restart the server and all devices and positions are gone.
+
+It is built on [inkan](https://github.com/inkanjs/inkan) with [`@inkanjs/session`](https://github.com/inkanjs/middleware/tree/main/packages/session) for the dashboard login and [`@inkanjs/secure-headers`](https://github.com/inkanjs/middleware/tree/main/packages/secure-headers) for CSP and the other security headers. Every message on the socket is checked against a schema, and anything that doesn't fit closes the connection.
 
 ## Quick start
 
-Node.js 20 or newer.
+Node.js 22.18 or newer.
 
 ```bash
 git clone -b Server https://github.com/vxnsin/NeoPin.git neopin-server
@@ -55,99 +45,119 @@ npm install
 npm start
 ```
 
-On first start a `.env` is written with `PORT=3012` and the default password `neopin123`. **Change it before you expose the server**, either in `.env` or with `changePassword neopin123 <new>` in the console. Then open `http://<your-ip>:3012` in a browser or point the app at `ws://<your-ip>:3012`.
+On first start a `.env` is written with `PORT=3012` and the password `neopin123`. Change it before anyone else can reach the server, in `.env` or with `changePassword neopin123 <new>` in the console.
+
+Then open `http://<your-ip>:3012` in a browser, or enter `ws://<your-ip>:3012` in the app.
 
 <div align="center">
 <img src=".readme/setup.gif" alt="Terminal recording of the setup" width="600">
 </div>
 
-## Docker
-
-The repository ships a `Dockerfile` and a `docker-compose.yml`.
+### Docker
 
 ```bash
 git clone -b Server https://github.com/vxnsin/NeoPin.git neopin-server
 cd neopin-server
-# edit PASSWORD in docker-compose.yml
+# set PASSWORD in docker-compose.yml
 docker compose up -d --build
 ```
 
-For the interactive console attach to the container (`docker attach <container>`, detach with `Ctrl+P Ctrl+Q`). Without a TTY the console is disabled and everything else works normally.
+The console works with `docker attach <container>`, detach again with `Ctrl+P Ctrl+Q`. Without a TTY it is simply off.
+
+## Running it on the internet
+
+Plain `ws://` is fine inside your own network. Anywhere else the password and every position would go over the wire unencrypted, so put a reverse proxy with HTTPS in front (Caddy is the least work) and set:
+
+| Variable | Set to | Why |
+|---|---|---|
+| `TRUST_PROXY` | `true` | Take the client IP and `https` from the proxy's `X-Forwarded-*` headers, so rate limits hit the right address |
+| `SECURE_COOKIES` | `true` | The dashboard cookie is only sent over HTTPS |
+
+The app then connects to `wss://your.domain`.
 
 ## Configuration
 
-Values come from `.env` in the project root. Environment variables override the file.
+Values come from `.env` in the project root, real environment variables win.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `3012` | HTTP and WebSocket port |
-| `PASSWORD` | `neopin123`, written on first start | Shared password for apps and the dashboard |
+| `PASSWORD` | `neopin123` | Shared password for apps and the dashboard |
+| `TRUST_PROXY` | `false` | See above |
+| `SECURE_COOKIES` | `false` | See above |
 
-Timing constants (heartbeat 30 s, location wait 2 s, session lifetime 5 h, login limit 5 per minute) live in `src/config.js`.
+Everything else (heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins per minute, 10 wrong device passwords per minute per IP) lives in `src/config.js`.
 
-## Console commands
+## Console
 
-| Command | Effect |
+| Command | What it does |
 |---|---|
-| `help` | List commands |
+| `help` | Lists the commands |
 | `device-list` | Every known device with status, position and last ping |
-| `sendPing [deviceId]` | Ask one device (or all) for a fresh location |
-| `disconnect <deviceId>` | Close the connection of a device |
-| `changePassword <current> <new>` | Change the password, effective immediately, and log out all dashboards |
-| `sessions-clear` | Log out every dashboard session |
-
-## HTTP endpoints
-
-The dashboard and the API share a session cookie (`neopin_session`, HttpOnly, SameSite=Strict, Secure behind TLS) issued by `POST /login`.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/` | session | Dashboard, redirects to `/login.html` when not logged in |
-| `GET` | `/login.html` | – | Login page |
-| `POST` | `/login` | – | Body `{ "password" }`, sets the session cookie. Rate limited, `429` when exceeded |
-| `GET` | `/logout` | – | Destroys the session |
-| `GET` | `/api/getData` | session | All devices as `[{ deviceId, position, lastPing, status }]` |
-| `POST` | `/api/sendPing` | session | Body `{ "deviceId"? }`, asks one or all devices and returns the updated list |
+| `sendPing [deviceId]` | Asks one device, or all of them, for a fresh position |
+| `disconnect <deviceId>` | Kicks a device. The app won't reconnect on its own until it logs in again |
+| `changePassword <current> <new>` | New password right away. Kicks all devices and logs out all dashboards |
+| `sessions-clear` | Logs out every dashboard |
 
 ## WebSocket protocol
 
-Connect to the same host and port. Messages are JSON. The first message must authenticate.
+Connect to `/`. All messages are JSON, the first one has to be `authenticate`.
 
 **Client → Server**
 
-| Message | Response |
+| Message | Answer |
 |---|---|
-| `{ "type": "authenticate", "deviceId", "password" }` | `{ "successful": true }` and a `dataResponse`, or close code `4000` `Unauthorized` |
-| `{ "type": "authenticate", "viewer": true }` | Same, but for dashboards. Requires a valid session cookie on the upgrade request. Viewers are not listed as devices. |
+| `{ "type": "authenticate", "deviceId", "password" }` | `{ "successful": true }` and a `dataResponse` |
+| `{ "type": "authenticate", "viewer": true }` | The same for the dashboard. Needs the session cookie and the dashboard's own origin. |
+| `{ "type": "updatePosition", "latitude", "longitude" }` | Stored and broadcast as `dataResponse` |
+| `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
+| `{ "type": "getData" }` | `dataResponse` from memory |
 | `{ "type": "ping" }` | `{ "type": "pong" }` |
-| `{ "type": "pingDevices" }` | Fans out `requestLocation` to all other devices, then `dataResponse` |
-| `{ "type": "getData" }` | `dataResponse` from cache |
-| `{ "type": "updatePosition", "latitude", "longitude" }` | none, stores the position and broadcasts `dataResponse` to everyone |
-| `{ "type": "locationError", "message" }` | none, logged |
+| `{ "type": "locationError", "message"? }` | Logged on the console |
 
 **Server → Client**
 
 | Message | Meaning |
 |---|---|
-| `{ "type": "requestLocation", "from"? }` | Reply with `updatePosition` |
-| `{ "type": "dataResponse", "devices": [...] }` | Current device list, sent on every change |
+| `{ "type": "requestLocation", "from"? }` | Please send an `updatePosition` |
+| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, position, lastPing, status }` per device, after every change |
 
-The server also sends WebSocket-level pings every 30 seconds and terminates connections that do not answer.
+**Close codes**
+
+| Code | Reason |
+|---|---|
+| `4000` | Wrong password, too many attempts, kicked from the console, or the password changed. Don't retry with the same login. |
+| `4001` | The same device name connected again, the newer connection wins |
+| `1007` | A message that isn't JSON or doesn't match the protocol |
+
+The server pings every connection every 30 seconds and drops the ones that don't answer.
+
+## HTTP
+
+The dashboard session is an HttpOnly, SameSite=Strict cookie (`neopin_session`) issued by `POST /login`.
+
+| Method | Path | Auth | |
+|---|---|---|---|
+| `GET` | `/` | session | Dashboard, otherwise redirects to `/login.html` |
+| `POST` | `/login` | | `{ "password" }`. `401` when wrong, `429` after 5 tries a minute |
+| `GET` | `/logout` | | Ends the session |
+| `GET` | `/api/getData` | session | All devices |
+| `POST` | `/api/sendPing` | session | `{ "deviceId"? }`, asks one or all devices for a position and answers with the list |
+| `GET` | `/docs`, `/openapi.json` | | API docs and OpenAPI, generated by inkan |
 
 ## Project structure
 
 ```
-server.js            # wiring, banner, shutdown
+server.js          # start, banner
 src/
-├─ config.js         # .env handling, timing constants, password change
-├─ devices.js        # in-memory device registry
-├─ sessions.js       # dashboard session tokens and cookie helpers
-├─ rateLimit.js      # fixed-window limiter for /login
-├─ ws.js             # WebSocket protocol, heartbeat, broadcast
-├─ http.js           # Express routes and static files
-└─ console.js        # interactive commands
-public/              # dashboard (index.html, login.html, styles)
-test/                # node:test suites
+├─ app.js          # inkan app: routes, WebSocket protocol, broadcast
+├─ config.js       # .env, timings, password check and change
+├─ devices.js      # in-memory device registry
+├─ sessions.js     # dashboard sessions (@inkanjs/session)
+├─ rateLimit.js    # counter for wrong device passwords
+└─ console.js      # interactive commands
+public/            # login page, dashboard, styles and scripts
+test/              # node:test
 ```
 
 ## Tests
@@ -156,13 +166,7 @@ test/                # node:test suites
 npm test
 ```
 
-Runs unit tests for the device registry and sessions plus an integration suite that starts the server on a random port and exercises authentication, broadcast, reconnect, rate limiting and the dashboard viewer over real sockets.
-
-## Good to know
-
-- **State is in memory.** A restart forgets all devices and positions. Disconnected devices are kept and marked `offline` until the next restart.
-- **Use TLS in the wild.** Put the server behind a reverse proxy (Caddy, nginx, Traefik) that terminates HTTPS and forwards WebSocket upgrades, then use `wss://` in the app. The password travels in plain text otherwise.
-- **Behind a proxy** the server trusts `X-Forwarded-For` for rate limiting and `X-Forwarded-Proto` for the Secure cookie flag.
+Starts the server on a random port and runs through it with real sockets: device login, wrong passwords and lockout, broadcast, reconnect, location requests, dashboard login, sessions, rate limit and the viewer socket.
 
 ## License
 
