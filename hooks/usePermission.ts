@@ -17,9 +17,10 @@ export default function usePermissions() {
     const requestPermissions = async () => {
       try {
         const location = await Location.requestForegroundPermissionsAsync();
+        // Expo Go has no "always" location key in its Info.plist and throws here.
         const backgroundLocation =
           location.status === "granted"
-            ? await Location.requestBackgroundPermissionsAsync()
+            ? await Location.requestBackgroundPermissionsAsync().catch(() => null)
             : null;
         const notifications = await Notifications.requestPermissionsAsync();
 

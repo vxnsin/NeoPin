@@ -48,7 +48,7 @@ export default function Intro({ onDone }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center", backgroundColor: "#07090d", zIndex: 100 },
+  container: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "#07090d", zIndex: 100 },
   text: { alignItems: "center", marginTop: -36 },
   title: { color: "#ffffff", fontSize: 34, fontWeight: "800", letterSpacing: -0.5 },
   tagline: { color: "#98a2b3", fontSize: 15, marginTop: 6 },

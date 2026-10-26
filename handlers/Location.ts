@@ -14,6 +14,25 @@ export type ReportingOptions = {
 export function startPositionReporting(target: Emitter, options: ReportingOptions = {}): () => void {
   let subscription: Location.LocationSubscription | null = null;
   let cancelled = false;
+  let lastSent = 0;
+  const interval = options.timeInterval ?? 15_000;
+
+  const send = (latitude: number, longitude: number) => {
+    lastSent = Date.now();
+    target.emit({ type: "updatePosition", latitude, longitude });
+  };
+
+  // iOS ignores timeInterval and only reports movement, so a phone that lies still
+  // would go silent. This beat keeps the last ping fresh.
+  const beat = setInterval(async () => {
+    if (cancelled || Date.now() - lastSent < interval) return;
+    try {
+      const { coords } = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      if (!cancelled) send(coords.latitude, coords.longitude);
+    } catch {
+      // no fix right now, the next beat tries again
+    }
+  }, interval);
 
   (async () => {
     const { status } = await Location.getForegroundPermissionsAsync();
@@ -25,13 +44,7 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
         timeInterval: options.timeInterval ?? 15_000,
         distanceInterval: options.distanceInterval ?? 10,
       },
-      (location) => {
-        target.emit({
-          type: "updatePosition",
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-      }
+      (location) => send(location.coords.latitude, location.coords.longitude)
     );
 
     if (cancelled) subscription.remove();
@@ -39,6 +52,7 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
 
   return () => {
     cancelled = true;
+    clearInterval(beat);
     subscription?.remove();
     subscription = null;
   };

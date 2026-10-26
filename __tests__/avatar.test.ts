@@ -5,7 +5,7 @@ import { buildMapHtml } from "../lib/mapHtml";
 jest.mock("expo-image-picker", () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock("expo-image-manipulator", () => ({ ImageManipulator: { manipulate: jest.fn() }, SaveFormat: { JPEG: "jpeg" } }));
 
-const creds = { serverIp: "ws://192.168.1.20:3012", deviceId: "Luis’ iPhone", password: "secret %1" };
+const creds = { serverIp: "ws://192.168.1.20:3012", deviceId: "Luis’ iPhone", token: "secret %1" };
 
 afterEach(() => {
   (global as any).fetch = undefined;
@@ -50,7 +50,7 @@ test("an upload sends the JPEG with the device headers and returns the new URL",
 
 test("a refused upload explains itself", async () => {
   (global as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 401 });
-  await expect(uploadAvatar(creds, new Uint8Array(4))).rejects.toThrow("did not accept the password");
+  await expect(uploadAvatar(creds, new Uint8Array(4))).rejects.toThrow("no longer valid");
 });
 
 // Like React Native's FileReader, which does not know the blob's type either.
@@ -104,4 +104,32 @@ test("names show from zoom 14 and the map controls sit above the device bar", ()
   const html = buildMapHtml(false, 34);
   expect(html).toContain('classList.toggle("show-labels", map.getZoom() >= 14)');
   expect(html).toContain("margin-bottom: 130px");
+});
+
+test("the map page can draw a day and clear it again", () => {
+  const html = buildMapHtml(false);
+  for (const type of ["route", "routeFocus", "routeClear"]) expect(html).toContain(`data.type === "${type}"`);
+  expect(html).toContain('type: "segment"');
+});
+
+test("devices of different accounts with the same name stay apart", () => {
+  const { deviceKey, deviceLabel, isOwnDevice, ownerName } = require("../lib/devices");
+  const mine = { deviceId: "iPhone", userId: 1, owner: { username: "luis", displayName: "Luis" } };
+  const other = { deviceId: "iPhone", userId: 2, owner: { username: "anna", displayName: "Anna" } };
+  expect(deviceKey(mine)).toBe("1:iPhone");
+  expect(deviceKey(mine)).not.toBe(deviceKey(other));
+  expect(isOwnDevice(mine, 1, "iPhone")).toBe(true);
+  expect(isOwnDevice(other, 1, "iPhone")).toBe(false);
+  expect(isOwnDevice({ deviceId: "iPad", userId: 1 }, 1, "iPhone")).toBe(false);
+  expect(deviceLabel(other)).toBe("Anna · iPhone");
+  expect(deviceLabel({ deviceId: "iPad" })).toBe("iPad");
+  expect(ownerName(other)).toBe("Anna");
+});
+
+test("the map keys pins by owner and device and shows both names", () => {
+  const html = buildMapHtml(false);
+  expect(html).toContain("function keyOf(d)");
+  expect(html).toContain("markers[id]");
+  expect(html).toContain("keyOf(x) === data.key");
+  expect(html).toContain("fullName(d)");
 });

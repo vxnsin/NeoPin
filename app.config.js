@@ -30,7 +30,7 @@ export default {
       package: "de.vensin.neopin",
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
-        backgroundColor: "#ffffff",
+        backgroundColor: "#d3171e",
       },
       permissions: [
         "ACCESS_FINE_LOCATION",
@@ -50,6 +50,8 @@ export default {
     },
     plugins: [
       "expo-router",
+      "expo-font",
+      "expo-status-bar",
       [
         "expo-image-picker",
         {

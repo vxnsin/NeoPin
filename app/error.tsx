@@ -10,7 +10,7 @@ import useThemeManager from "@/hooks/useThemeManager";
 import { MaterialIcons as Icon } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useWebSocketContext } from "@/context/WebSocket";
-import { readCredentials } from "@/lib/socket";
+import { readCredentials, socket } from "@/lib/socket";
 import { logout } from "@/lib/logout";
 
 export default function ErrorScreen() {
@@ -40,13 +40,15 @@ export default function ErrorScreen() {
     try {
       const creds = await readCredentials();
       if (!creds) {
-        setErrorMessage("User data not found.");
+        setErrorMessage("You are logged out.");
         setRetrying(false);
         return;
       }
-      await connect(creds.serverIp, creds.deviceId, creds.password);
+      await connect(creds.serverIp, creds.deviceId, creds.token);
       router.replace("/map");
     } catch (error: any) {
+      // A refused token already sent the user back to the login.
+      if (socket.rejected) return;
       console.error("Retry connection error:", error);
       setErrorMessage(error.message);
       setRetrying(false);

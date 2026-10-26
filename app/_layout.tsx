@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { View, Dimensions, StyleSheet, AppState, Platform } from "react-native";
-import { Stack, usePathname } from "expo-router";
+import { AppState, View, Dimensions, StyleSheet } from "react-native";
+import { Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
-import { startWebSocketService, stopWebSocketService } from "@/services/WebSocketService";
+import { socket } from "@/lib/socket";
+import { checkAndApplyUpdate } from "@/lib/updates";
+import { logout } from "@/lib/logout";
 import { startPositionReporting } from "@/handlers/Location";
 import { startBackgroundLocation } from "@/tasks/LocationTask";
 import {
@@ -18,7 +20,28 @@ import {
 
 function ConnectionLifecycle() {
   const { emit, isConnected } = useWebSocketContext();
+  const router = useRouter();
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
+
+  // The server no longer accepts the token (logged out elsewhere, kicked, expired).
+  useEffect(
+    () =>
+      socket.onRejected(() => {
+        logout({ remote: false })
+          .catch(() => {})
+          .finally(() => router.replace("/login"));
+      }),
+    [router]
+  );
+
+  // A new version is fetched and applied as soon as the app is open, not only on the next launch.
+  useEffect(() => {
+    checkAndApplyUpdate();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkAndApplyUpdate();
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     loadSettings().then((s) => setPreset(s.reporting));
@@ -28,25 +51,21 @@ function ConnectionLifecycle() {
   useEffect(() => {
     if (!isConnected) return;
     const stop = startPositionReporting({ emit }, REPORTING_PRESETS[preset]);
-    if (Platform.OS === "ios") {
-      startBackgroundLocation().catch((error) =>
+    const startBackground = () =>
+      startBackgroundLocation(REPORTING_PRESETS[preset]).catch((error) =>
         console.warn("Background location unavailable:", error?.message)
       );
-    }
-    return stop;
-  }, [isConnected, emit, preset]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
+    startBackground();
+    // The permission dialogs send the app to the background and back. Once it is in front again
+    // (and the permissions are granted) the background service can start.
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "background") {
-        startWebSocketService();
-      } else if (state === "active") {
-        stopWebSocketService();
-      }
+      if (state === "active") startBackground();
     });
-    return () => subscription.remove();
-  }, []);
+    return () => {
+      stop();
+      subscription.remove();
+    };
+  }, [isConnected, emit, preset]);
 
   return null;
 }

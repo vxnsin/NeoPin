@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -15,56 +15,51 @@ import { useRouter } from "expo-router";
 import { MaterialIcons } from "@expo/vector-icons";
 import useThemeManager from "@/hooks/useThemeManager";
 import Field from "@/components/Field";
-import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useWebSocketContext } from "@/context/WebSocket";
-import { STORAGE_KEY } from "@/lib/socket";
+import { loginRequest, normalizeServerUrl } from "@/lib/api";
+import { currentDeviceType } from "@/lib/deviceType";
+import { saveCredentials } from "@/lib/credentials";
 
-// "192.168.1.20:3012" is what people type, the socket needs a scheme.
-function normalizeUrl(input: string) {
-  const url = input.trim();
-  return /^wss?:\/\//i.test(url) ? url : `ws://${url}`;
-}
-
-type Errors = { server?: string; password?: string; name?: string };
+type Errors = { server?: string; username?: string; password?: string; name?: string };
 
 const Login = () => {
   const { colors } = useThemeManager();
   const router = useRouter();
-  const { storeValue } = useAsyncStorage(STORAGE_KEY);
   const { connect } = useWebSocketContext();
   const [server, setServer] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [modelName, setModelName] = useState("");
+  // The name is what the server calls this device, its deviceId.
+  const [name, setName] = useState(Device.deviceName || Device.modelName || "My phone");
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState("");
   const [connecting, setConnecting] = useState(false);
 
-  useEffect(() => {
-    setModelName(Device.modelName || "My phone");
-  }, []);
+  const clear = (key: keyof Errors) => setErrors((e) => ({ ...e, [key]: undefined }));
 
-  const handleConnect = async () => {
+  const handleSubmit = async () => {
     if (connecting) return;
-    // The name is what the server calls this device, its deviceId.
     const deviceId = name.trim();
     const url = server.trim();
+    const user = username.trim();
     const next: Errors = {
       server: url ? undefined : "Server address is required",
+      username: user ? undefined : "Username is required",
       password: password ? undefined : "Password is required",
       name: deviceId ? undefined : "Name is required",
     };
     setErrors(next);
     setFailure("");
-    if (next.server || next.password || next.name) return;
+    if (next.server || next.username || next.password || next.name) return;
 
     setConnecting(true);
-    // Log in with the shared socket right away instead of a throwaway test
-    // connection: it has the auth timeout and clean error handling already.
-    const serverUrl = normalizeUrl(url);
+    const serverUrl = normalizeServerUrl(url);
     try {
-      await connect(serverUrl, deviceId, password);
-      await storeValue(JSON.stringify({ deviceId, serverIp: serverUrl, password }));
+      const { token, user: account } = await loginRequest(serverUrl, { username: user, password, deviceId, deviceType: currentDeviceType() });
+      // Connect with the shared socket right away instead of a throwaway test
+      // connection: it has the auth timeout and clean error handling already.
+      await connect(serverUrl, deviceId, token);
+      await saveCredentials({ serverIp: serverUrl, deviceId, token, user: account });
       router.replace("/");
     } catch (error: any) {
       setFailure(error?.message || "Could not connect");
@@ -81,7 +76,9 @@ const Login = () => {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Image source={require("@/assets/images/logo.png")} style={styles.logo} />
         <Text style={[styles.title, { color: colors.primary }]}>NeoPin</Text>
-        <Text style={[styles.lead, { color: colors.muted }]}>Connect this phone to your NeoPin server.</Text>
+        <Text style={[styles.lead, { color: colors.muted }]}>
+          Log in to your NeoPin server.
+        </Text>
 
         <View style={styles.form}>
           <Field
@@ -91,39 +88,53 @@ const Login = () => {
             value={server}
             onChangeText={(text) => {
               setServer(text);
-              setErrors((e) => ({ ...e, server: undefined }));
+              clear("server");
             }}
             keyboardType="url"
             error={errors.server}
             returnKeyType="next"
           />
           <Field
+            label="Username"
+            icon="person-outline"
+            placeholder="username"
+            value={username}
+            onChangeText={(text) => {
+              setUsername(text);
+              clear("username");
+            }}
+            textContentType="username"
+            error={errors.username}
+            returnKeyType="next"
+          />
+          <Field
             label="Password"
             icon="lock-outline"
-            placeholder="Server password"
+            placeholder="Password"
             value={password}
             onChangeText={(text) => {
               setPassword(text);
-              setErrors((e) => ({ ...e, password: undefined }));
+              clear("password");
             }}
+            textContentType="password"
             secret
             error={errors.password}
             returnKeyType="next"
           />
           <Field
-            label="Name"
-            icon="person-outline"
-            placeholder={modelName}
+            label="Device name"
+            icon="smartphone"
+            placeholder="My phone"
             value={name}
             onChangeText={(text) => {
               setName(text);
-              setErrors((e) => ({ ...e, name: undefined }));
+              clear("name");
             }}
             autoCapitalize="words"
             error={errors.name}
-            hint="Everyone on the map sees you under this name."
+            hint="This phone appears on the map under this name."
             returnKeyType="go"
-            onSubmitEditing={handleConnect}
+            onSubmitEditing={handleSubmit}
           />
 
           {failure ? (
@@ -138,7 +149,7 @@ const Login = () => {
               styles.button,
               { backgroundColor: colors.secondary, opacity: connecting ? 0.7 : pressed ? 0.88 : 1 },
             ]}
-            onPress={handleConnect}
+            onPress={handleSubmit}
             disabled={connecting}
             accessibilityRole="button"
           >
@@ -146,7 +157,7 @@ const Login = () => {
               <ActivityIndicator color={colors.onSecondary} />
             ) : (
               <>
-                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>Connect</Text>
+                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>Log in</Text>
                 <MaterialIcons name="arrow-forward" size={20} color={colors.onSecondary} />
               </>
             )}

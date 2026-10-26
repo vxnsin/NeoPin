@@ -1,29 +1,15 @@
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import type { StoredCredentials } from "@/lib/socket";
+import { deviceHeaders, httpBase, type DeviceAuth } from "@/lib/api";
+import type { CropRect } from "@/lib/crop";
+
+export { deviceHeaders, httpBase };
 
 export const AVATAR_SIZE = 128;
 // The server takes no more than this. A 128 px JPEG is a few KiB.
 export const AVATAR_MAX_BYTES = 16 * 1024;
 
-type Credentials = Pick<StoredCredentials, "serverIp" | "deviceId" | "password">;
-
-// The login stores the socket address. The HTTP routes live on the same host and path.
-export function httpBase(socketUrl: string): string {
-  return socketUrl
-    .trim()
-    .replace(/^ws(s?):\/\//i, (_, secure) => (secure ? "https://" : "http://"))
-    .replace(/\/+$/, "");
-}
-
-// Header values have to stay ASCII, device names like "Luis’ iPhone" do not.
-// The server decodes both.
-export function deviceHeaders(creds: Credentials): Record<string, string> {
-  return {
-    "X-Device-Id": encodeURIComponent(creds.deviceId),
-    Authorization: `Bearer ${encodeURIComponent(creds.password)}`,
-  };
-}
+type Credentials = DeviceAuth;
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -47,9 +33,9 @@ export function base64ToBytes(base64: string): Uint8Array {
 function problemMessage(status: number): string {
   switch (status) {
     case 401:
-      return "The server did not accept the password.";
+      return "Your login is no longer valid. Log in again.";
     case 404:
-      return "The server does not know this device yet. Connect first.";
+      return "The server does not know this picture.";
     case 413:
       return "The picture is too large.";
     case 415:
@@ -62,25 +48,28 @@ function problemMessage(status: number): string {
   }
 }
 
-// Lets the user pick a photo, cuts a centred square and shrinks it to 128 px.
-// Resolves with JPEG bytes, or null when the user backed out.
-export async function pickAvatar(): Promise<Uint8Array | null> {
+export type Photo = { uri: string; width: number; height: number };
+
+// Lets the user pick a photo from the library, uncut. Resolves with null when they backed out.
+export async function pickPhoto(): Promise<Photo | null> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"],
-    allowsEditing: true,
-    aspect: [1, 1],
+    allowsEditing: false,
     quality: 1,
   });
   if (result.canceled || !result.assets?.length) return null;
-
   const { uri, width, height } = result.assets[0];
-  const side = Math.min(width, height);
+  return { uri, width, height };
+}
+
+// Cuts the chosen square out of the photo and shrinks it to 128 px. The quality steps
+// down until the JPEG fits what the server takes.
+export async function renderAvatar(photo: Photo, rect: CropRect): Promise<Uint8Array> {
   for (const compress of [0.8, 0.6, 0.4]) {
-    let context = ImageManipulator.manipulate(uri);
-    if (side > 0) {
-      context = context.crop({ originX: Math.floor((width - side) / 2), originY: Math.floor((height - side) / 2), width: side, height: side });
-    }
-    const image = await context.resize({ width: AVATAR_SIZE, height: AVATAR_SIZE }).renderAsync();
+    const image = await ImageManipulator.manipulate(photo.uri)
+      .crop(rect)
+      .resize({ width: AVATAR_SIZE, height: AVATAR_SIZE })
+      .renderAsync();
     const saved = await image.saveAsync({ compress, format: SaveFormat.JPEG, base64: true });
     const bytes = base64ToBytes(saved.base64 ?? "");
     if (bytes.length > 0 && bytes.length <= AVATAR_MAX_BYTES) return bytes;
@@ -92,7 +81,7 @@ export async function uploadAvatar(creds: Credentials, jpeg: Uint8Array): Promis
   const response = await fetch(`${httpBase(creds.serverIp)}/api/avatar`, {
     method: "PUT",
     headers: { ...deviceHeaders(creds), "Content-Type": "image/jpeg" },
-    body: jpeg,
+    body: jpeg as unknown as BodyInit,
   });
   if (!response.ok) throw new Error(problemMessage(response.status));
   const { avatarUrl } = await response.json();
