@@ -170,3 +170,21 @@ test("the Everyone group is created when groups are added to an existing databas
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM group_members").get().n, 2);
   assert.equal(initDb(file).prepare("SELECT COUNT(*) AS n FROM user_groups").get().n, 1, "opening it again adds nothing");
 });
+
+test("username suggestions match the start of the name and leave out members and yourself", async () => {
+  const { luis, anna, tom } = await people();
+  const search = async (user, q, extra = "") => json(await call("GET", "/api/users/search?q=" + encodeURIComponent(q) + extra, undefined, user.cookie));
+
+  assert.deepEqual((await search(luis, "an")).map((u) => u.username), ["anna"]);
+  assert.deepEqual((await search(luis, "ANNA")).map((u) => u.username), ["anna"], "case does not matter");
+  assert.deepEqual((await search(luis, "o")).map((u) => u.username).sort(), ["boss", "tom"], "contains also matches, self left out");
+  assert.deepEqual(await search(luis, "   "), []);
+  assert.equal((await call("GET", "/api/users/search?q=a")).status, 401);
+
+  const group = await newGroup(luis);
+  await join(group, luis, anna);
+  assert.deepEqual((await search(luis, "an", "&groupId=" + group.id)), [], "anna is already in the group");
+  assert.deepEqual((await search(luis, "o", "&groupId=" + group.id)).map((u) => u.username).sort(), ["boss", "tom"]);
+  await call("POST", "/api/groups/" + group.id + "/invites", { username: "tom" }, luis.cookie);
+  assert.deepEqual((await search(luis, "o", "&groupId=" + group.id)).map((u) => u.username), ["boss"], "tom is already invited");
+});

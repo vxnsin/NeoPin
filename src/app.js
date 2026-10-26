@@ -14,6 +14,7 @@ import {
   linkedDevices,
   listUsers,
   publicUser,
+  searchUsers,
   revokeToken,
   setPassword,
   setAvatar,
@@ -476,6 +477,25 @@ export function createApp({ gracefulShutdown = true } = {}) {
         (ctx) => {
           requireAdmin(ctx);
           return listUsers().map((u) => ({ ...publicUser(u), devices: linkedDevices(u.id).length }));
+        }
+      );
+
+      // Suggestions while typing a username to invite. Leaves out yourself and, with a groupId,
+      // the people who are in that group or already invited.
+      api.get(
+        "/users/search",
+        {
+          query: t.object({ q: t.string().max(64), groupId: t.number().optional() }),
+          response: { 200: t.array(User), 401: t.problem() },
+        },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          const exclude = [user.id];
+          const group = ctx.query.groupId === undefined ? null : getGroup(ctx.query.groupId);
+          if (group && (isMember(group.id, user.id) || user.is_admin === 1)) {
+            exclude.push(...audience(group.id));
+          }
+          return searchUsers(ctx.query.q, { excludeIds: exclude }).map(publicUser);
         }
       );
 
