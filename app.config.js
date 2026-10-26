@@ -30,7 +30,7 @@ export default {
       package: "de.vensin.neopin",
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
-        backgroundColor: "#ffffff",
+        backgroundColor: "#d3171e",
       },
       permissions: [
         "ACCESS_FINE_LOCATION",
