@@ -138,8 +138,33 @@ export default function MapScreen() {
     [addMessageListener]
   );
 
-  // Dragging the top of the sheet down closes it.
+  // The backdrop fades and the sheet slides on its own, so the dimming does not ride up with the sheet.
+  const sheetProgress = useRef(new Animated.Value(0)).current;
   const sheetDrag = useRef(new Animated.Value(0)).current;
+  const closeSheet = useRef(() => {
+    Animated.parallel([
+      Animated.timing(sheetProgress, { toValue: 0, duration: 200, useNativeDriver: true }),
+      Animated.timing(sheetDrag, { toValue: 0, duration: 200, useNativeDriver: true }),
+    ]).start(() => setSheet(null));
+  }).current;
+  const closeSheetFromDrag = useRef(() => {
+    Animated.parallel([
+      Animated.timing(sheetProgress, { toValue: 0, duration: 180, useNativeDriver: true }),
+      Animated.timing(sheetDrag, { toValue: 700, duration: 180, useNativeDriver: true }),
+    ]).start(() => {
+      setSheet(null);
+      sheetDrag.setValue(0);
+    });
+  }).current;
+  const sheetOpen = sheet !== null;
+  useEffect(() => {
+    if (!sheetOpen) return;
+    sheetDrag.setValue(0);
+    sheetProgress.setValue(0);
+    Animated.timing(sheetProgress, { toValue: 1, duration: 260, useNativeDriver: true }).start();
+  }, [sheetOpen, sheetProgress, sheetDrag]);
+
+  // Dragging the top of the sheet down closes it.
   const sheetPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
@@ -147,8 +172,7 @@ export default function MapScreen() {
       onPanResponderMove: (_, g) => sheetDrag.setValue(Math.max(0, g.dy)),
       onPanResponderRelease: (_, g) => {
         if (g.dy > 80 || g.vy > 0.8) {
-          setSheet(null);
-          sheetDrag.setValue(0);
+          closeSheetFromDrag();
         } else {
           Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start();
         }
@@ -206,7 +230,7 @@ export default function MapScreen() {
   const focusDevice = (device: Device, close = true) => {
     if (!device.position) return;
     post({ type: "focus", key: deviceKey(device) });
-    if (close) setSheet(null);
+    if (close) closeSheet();
   };
 
   const changePreset = async (next: ReportingPreset) => {
@@ -434,11 +458,13 @@ export default function MapScreen() {
         />
       )}
 
-      <Modal visible={sheet !== null} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
+      <Modal visible={sheet !== null} transparent animationType="none" onRequestClose={closeSheet}>
         <KeyboardAvoidingView style={styles.sheetHost} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <Pressable style={styles.backdrop} onPress={() => setSheet(null)} />
+        <Animated.View style={[styles.backdrop, { opacity: sheetProgress }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} accessibilityLabel="Close" />
+        </Animated.View>
         <Animated.View
-          style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16, transform: [{ translateY: sheetDrag }] }]}
+          style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16, transform: [{ translateY: Animated.add(sheetProgress.interpolate({ inputRange: [0, 1], outputRange: [windowHeight, 0] }), sheetDrag) }] }]}
         >
           <View {...sheetPan.panHandlers} style={styles.grabArea}>
             <View style={[styles.grabber, { backgroundColor: c.muted }]} />
