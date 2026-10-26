@@ -280,6 +280,133 @@ function pinHtml(device) {
   return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}${typeIcon(device, " dtype--badge")}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
 }
 
+// Pins closer than this on the screen merge into one cluster marker.
+const CLUSTER_PX = 56;
+const CLUSTER_MAX_ZOOM = 18;
+const clusterMarkers = new Map();
+const clusterPopup = new maplibregl.Popup({ closeButton: false, offset: 24, maxWidth: "300px", focusAfterOpen: false });
+
+// One representative device per person, the same pick the people list makes.
+function peopleOf(members) {
+  const byUser = new Map();
+  for (const device of members) {
+    if (!byUser.has(device.userId)) byUser.set(device.userId, []);
+    byUser.get(device.userId).push(device);
+  }
+  return [...byUser.values()].map((list) => {
+    list.sort(comparePrimary);
+    return { device: list[0], devices: list };
+  });
+}
+
+function clusterHtml(people) {
+  const shown = people.slice(0, 3);
+  const avatars = shown
+    .map(({ device }) => avatarHtml(device, "sm", { label: ownerName(device), colour: `user:${device.userId}` }))
+    .join("");
+  const badge = people.length > 1 ? `<span class="cluster__count">${people.length}</span>` : "";
+  return `<span class="cluster__avatars">${avatars}</span>${badge}`;
+}
+
+function updateClusters() {
+  const byId = new Map(located().map((d) => [keyOf(d), d]));
+  const points = [...byId.keys()].sort().map((id) => {
+    const d = byId.get(id);
+    const p = map.project([d.position.longitude, d.position.latitude]);
+    return { id, x: p.x, y: p.y };
+  });
+  // The selected device stays a pin of its own, so its popup always has something to sit on.
+  const groups = clusterPoints(points, CLUSTER_PX, new Set(selectedId ? [selectedId] : []));
+  const live = new Set();
+  const hidden = new Set();
+
+  for (const group of groups) {
+    if (group.ids.length < 2) continue;
+    const members = group.ids.map((id) => byId.get(id));
+    const key = group.ids.join("|");
+    live.add(key);
+    group.ids.forEach((id) => hidden.add(id));
+    const lng = members.reduce((s, d) => s + d.position.longitude, 0) / members.length;
+    const lat = members.reduce((s, d) => s + d.position.latitude, 0) / members.length;
+    const people = peopleOf(members);
+
+    let entry = clusterMarkers.get(key);
+    if (!entry) {
+      const el = document.createElement("button");
+      el.type = "button";
+      el.className = "cluster";
+      el.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openCluster(clusterMarkers.get(key));
+      });
+      entry = { marker: new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map), el, key: "", members };
+      clusterMarkers.set(key, entry);
+    }
+    entry.members = members;
+    entry.marker.setLngLat([lng, lat]);
+    const sig = people.map(({ device }) => `${device.userId}|${device.avatarUrl}|${freshness(device)}|${ownerName(device)}`).join(";");
+    if (entry.key !== sig) {
+      entry.el.innerHTML = clusterHtml(people);
+      entry.key = sig;
+      const names = people.map(({ device }) => ownerName(device)).join(", ");
+      entry.el.setAttribute("aria-label", `${people.length === 1 ? names : `${people.length} people: ${names}`}, ${members.length} ${members.length === 1 ? "device" : "devices"} close together`);
+    }
+  }
+
+  for (const [key, entry] of clusterMarkers) {
+    if (!live.has(key)) {
+      entry.marker.remove();
+      clusterMarkers.delete(key);
+    }
+  }
+  for (const [id, entry] of markers) entry.el.classList.toggle("is-clustered", hidden.has(id));
+  if (clusterPopup.isOpen() && clusterMarkers.size === 0) clusterPopup.remove();
+}
+
+// Spread of the members in pixels at the highest zoom, to know whether zooming can pull them apart.
+function spreadAtMaxZoom(bounds) {
+  const a = maplibregl.MercatorCoordinate.fromLngLat(bounds.getSouthWest());
+  const b = maplibregl.MercatorCoordinate.fromLngLat(bounds.getNorthEast());
+  return Math.hypot(b.x - a.x, b.y - a.y) * 512 * 2 ** CLUSTER_MAX_ZOOM;
+}
+
+function openCluster(entry) {
+  const members = entry.members;
+  const first = [members[0].position.longitude, members[0].position.latitude];
+  const bounds = members.reduce((b, d) => b.extend([d.position.longitude, d.position.latitude]), new maplibregl.LngLatBounds(first, first));
+  if (spreadAtMaxZoom(bounds) > CLUSTER_PX && map.getZoom() < CLUSTER_MAX_ZOOM - 0.1) {
+    clusterPopup.remove();
+    fitBoundsTo(bounds, { top: 140, bottom: 100, left: phone.matches ? 60 : mapPadding().left, right: phone.matches ? 60 : 110 }, 700, CLUSTER_MAX_ZOOM);
+    return;
+  }
+  // Zooming cannot separate them: list the people instead.
+  const rows = members
+    .slice()
+    .sort(comparePrimary)
+    .map((device) => {
+      const state = freshness(device);
+      return `
+        <button class="cluster-row" type="button" data-pick="${esc(keyOf(device))}" data-state="${state}">
+          ${avatarHtml(device, "sm", { label: ownerName(device), colour: `user:${device.userId}` })}
+          <span class="cluster-row__text">
+            <strong>${esc(ownerName(device))}</strong>
+            <span>${typeIcon(device)}${esc(device.deviceId)} · ${esc(STATE_LABELS[state])}</span>
+          </span>
+        </button>`;
+    })
+    .join("");
+  clusterPopup.setLngLat(entry.marker.getLngLat()).setHTML(`<div class="cluster-list">${rows}</div>`).addTo(map);
+  clusterPopup.getElement().querySelectorAll("[data-pick]").forEach((button) =>
+    button.addEventListener("click", () => {
+      clusterPopup.remove();
+      select(button.dataset.pick, { zoomIn: false });
+    })
+  );
+}
+
+map.on("zoomend", updateClusters);
+map.on("moveend", updateClusters);
+
 function syncMarkers() {
   const seen = new Set();
   for (const device of located()) {
@@ -319,6 +446,7 @@ function syncMarkers() {
       markers.delete(id);
     }
   }
+  updateClusters();
 }
 
 function popupHtml(device) {
