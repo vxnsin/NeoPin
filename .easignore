@@ -1,0 +1,11 @@
+# Local build output and machine specific files must not go to EAS Build.
+android/build/
+android/.gradle/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+ios/build/
+ios/Pods/
+.expo/
+dist/
+node_modules/
