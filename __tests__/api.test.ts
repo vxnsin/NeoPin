@@ -12,6 +12,10 @@ const respond = (status: number, body: unknown) =>
 test("addresses without a scheme become ws://", () => {
   expect(normalizeServerUrl(" 192.168.1.20:3012 ")).toBe("ws://192.168.1.20:3012");
   expect(normalizeServerUrl("wss://pin.example.com")).toBe("wss://pin.example.com");
+  expect(normalizeServerUrl("https://pin.trycloudflare.com/")).toBe("wss://pin.trycloudflare.com");
+  expect(normalizeServerUrl("pin.trycloudflare.com")).toBe("wss://pin.trycloudflare.com");
+  expect(normalizeServerUrl("localhost:3012")).toBe("ws://localhost:3012");
+  expect(normalizeServerUrl("my-server:3012")).toBe("ws://my-server:3012");
 });
 
 test("device headers carry the token, percent-encoded", () => {

@@ -19,11 +19,16 @@ export class ApiError extends Error {
 }
 
 const REQUEST_TIMEOUT_MS = 10_000;
-
 // "192.168.1.20:3012" is what people type, the socket needs a scheme.
+// Accepts what people paste: ws(s)://, http(s)://, or a bare address. A bare name
+// without a port ("neopin.example.com") is a public host behind TLS, an IP or a
+// host with a port ("192.168.2.128:3012") is a local one.
 export function normalizeServerUrl(input: string): string {
-  const url = input.trim();
-  return /^wss?:\/\//i.test(url) ? url : `ws://${url}`;
+  const url = input.trim().replace(/\/+$/, "");
+  if (/^wss?:\/\//i.test(url)) return url;
+  if (/^https?:\/\//i.test(url)) return url.replace(/^http/i, "ws");
+  const local = /^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?$/i.test(url) || /:\d+$/.test(url);
+  return `${local ? "ws" : "wss"}://${url}`;
 }
 
 // The login stores the socket address. The HTTP routes live on the same host and path.
