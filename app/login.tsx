@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -16,12 +16,10 @@ import { MaterialIcons } from "@expo/vector-icons";
 import useThemeManager from "@/hooks/useThemeManager";
 import Field from "@/components/Field";
 import { useWebSocketContext } from "@/context/WebSocket";
-import { fetchStatus, loginRequest, normalizeServerUrl } from "@/lib/api";
+import { loginRequest, normalizeServerUrl } from "@/lib/api";
 import { saveCredentials } from "@/lib/credentials";
 
 type Errors = { server?: string; username?: string; password?: string; name?: string };
-
-const STATUS_DELAY_MS = 700;
 
 const Login = () => {
   const { colors } = useThemeManager();
@@ -32,29 +30,9 @@ const Login = () => {
   const [password, setPassword] = useState("");
   // The name is what the server calls this device, its deviceId.
   const [name, setName] = useState(Device.deviceName || Device.modelName || "My phone");
-  const [noAccounts, setNoAccounts] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState("");
   const [connecting, setConnecting] = useState(false);
-  const statusRun = useRef(0);
-
-  // A server without any account has to get its admin account in the dashboard first.
-  const checkStatus = (address: string) => {
-    const run = ++statusRun.current;
-    const url = address.trim();
-    if (!url) {
-      setNoAccounts(false);
-      return;
-    }
-    fetchStatus(normalizeServerUrl(url))
-      .then((status) => run === statusRun.current && setNoAccounts(status.registrationOpen))
-      .catch(() => run === statusRun.current && setNoAccounts(false));
-  };
-
-  useEffect(() => {
-    const timer = setTimeout(() => checkStatus(server), STATUS_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [server]);
 
   const clear = (key: keyof Errors) => setErrors((e) => ({ ...e, [key]: undefined }));
 
@@ -111,7 +89,6 @@ const Login = () => {
               setServer(text);
               clear("server");
             }}
-            onBlur={() => checkStatus(server)}
             keyboardType="url"
             error={errors.server}
             returnKeyType="next"
@@ -184,15 +161,6 @@ const Login = () => {
               </>
             )}
           </Pressable>
-
-          {noAccounts && (
-            <View style={[styles.failure, { backgroundColor: colors.subtle }]}>
-              <MaterialIcons name="info-outline" size={18} color={colors.muted} />
-              <Text style={[styles.failureText, { color: colors.primary }]}>
-                Create the admin account in the dashboard first.
-              </Text>
-            </View>
-          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

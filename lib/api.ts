@@ -4,9 +4,8 @@ export type User = {
   displayName: string;
   avatarUrl: string | null;
   isAdmin?: boolean;
+  mustChangePassword?: boolean;
 };
-
-export type ServerStatus = { version: string; registrationOpen: boolean };
 
 export type DeviceAuth = { serverIp: string; deviceId: string; token: string };
 
@@ -89,10 +88,6 @@ async function json<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchStatus(serverUrl: string): Promise<ServerStatus> {
-  return json<ServerStatus>(await request(`${httpBase(serverUrl)}/api/status`, {}, 5_000));
-}
-
 export async function loginRequest(
   serverUrl: string,
   body: { username: string; password: string; deviceId: string }
@@ -113,6 +108,21 @@ export async function logoutRequest(auth: DeviceAuth): Promise<void> {
   } catch {
     // offline or server gone
   }
+}
+
+// Revokes the old token of this device and answers with a fresh one.
+export async function changePasswordRequest(
+  auth: DeviceAuth,
+  currentPassword: string,
+  newPassword: string
+): Promise<{ message: string; token: string }> {
+  return json(
+    await request(`${httpBase(auth.serverIp)}/api/me/password`, {
+      method: "POST",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    })
+  );
 }
 
 export async function fetchMe(auth: DeviceAuth): Promise<User> {

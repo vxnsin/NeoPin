@@ -68,3 +68,12 @@ test("stops are numbered in order and trips keep their index", () => {
 test("a trip without a line is not drawn", () => {
   expect(routeSegments([trip([[1, 2]])])).toEqual([]);
 });
+
+test("a password change is checked before it is sent", () => {
+  const { passwordProblem } = require("../lib/password");
+  expect(passwordProblem("", "newpassword", "newpassword")).toBeDefined();
+  expect(passwordProblem("old", "short", "short")).toMatch(/at least 8/);
+  expect(passwordProblem("old", "newpassword", "different1")).toMatch(/do not match/);
+  expect(passwordProblem("samepassword", "samepassword", "samepassword")).toBeDefined();
+  expect(passwordProblem("old", "newpassword", "newpassword")).toBeUndefined();
+});

@@ -59,3 +59,14 @@ test("the timeline asks for one day of one device with the time zone offset", as
   expect(url).toContain("http://10.0.0.2:3012/api/timeline?deviceId=Luis%E2%80%99%20iPhone&tz=");
   expect(init.headers.Authorization).toBe("Bearer t%2Fk%2B1");
 });
+
+test("a password change sends both passwords with the device headers and returns the new token", async () => {
+  const fetchMock = respond(200, { message: "ok", token: "fresh" });
+  (global as any).fetch = fetchMock;
+  const { changePasswordRequest } = require("../lib/api");
+  await expect(changePasswordRequest(auth, "old", "newpassword")).resolves.toMatchObject({ token: "fresh" });
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://10.0.0.2:3012/api/me/password");
+  expect(JSON.parse(init.body)).toEqual({ currentPassword: "old", newPassword: "newpassword" });
+  expect(init.headers.Authorization).toBe("Bearer t%2Fk%2B1");
+});

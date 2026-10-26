@@ -33,6 +33,7 @@ export function parseSession(raw: string | null): StoredCredentials | null {
         displayName: typeof user.displayName === "string" ? user.displayName : user.username,
         avatarUrl: typeof user.avatarUrl === "string" ? user.avatarUrl : null,
         isAdmin: user.isAdmin === true,
+        mustChangePassword: user.mustChangePassword === true,
       },
     };
   } catch {

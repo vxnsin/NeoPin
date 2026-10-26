@@ -5,6 +5,8 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -23,13 +25,14 @@ import { useWebSocketContext } from "@/context/WebSocket";
 import Avatar from "@/components/Avatar";
 import PulseLogo from "@/components/PulseLogo";
 import TimelinePanel from "@/components/TimelinePanel";
+import PasswordForm from "@/components/PasswordForm";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
 import { STATE_COLORS, freshness, type Device } from "@/lib/devices";
 import { buildMapHtml } from "@/lib/mapHtml";
-import { readCredentials, type StoredCredentials } from "@/lib/socket";
-import { updateStoredUser } from "@/lib/credentials";
+import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
+import { saveCredentials, updateStoredUser } from "@/lib/credentials";
 import { fetchMe, type User } from "@/lib/api";
 import {
   REPORTING_PRESETS,
@@ -183,6 +186,21 @@ export default function MapScreen() {
     const next = { ...creds.user, ...patch };
     setCreds({ ...creds, user: next });
     updateStoredUser(next).catch(() => {});
+  };
+
+  // The old token is revoked. Switch the socket and the stored login to the fresh one.
+  const passwordChanged = async (token: string) => {
+    if (!creds) return;
+    const renewed = { ...creds, token };
+    setCreds(renewed);
+    await saveCredentials(renewed).catch(() => {});
+    socket.connect(renewed.serverIp, renewed.deviceId, token).catch(() => {});
+    fetchMe(renewed)
+      .then((fresh) => {
+        setCreds((current) => (current ? { ...current, user: fresh } : current));
+        updateStoredUser(fresh).catch(() => {});
+      })
+      .catch(() => {});
   };
 
   const changePhoto = async () => {
@@ -345,6 +363,7 @@ export default function MapScreen() {
       )}
 
       <Modal visible={sheet !== null} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
+        <KeyboardAvoidingView style={styles.sheetHost} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <Pressable style={styles.backdrop} onPress={() => setSheet(null)} />
         <View style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16 }]}>
           <View style={[styles.grabber, { backgroundColor: c.muted }]} />
@@ -384,7 +403,15 @@ export default function MapScreen() {
           )}
 
           {sheet === "settings" && creds && (
-            <>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              {creds.user.mustChangePassword ? (
+                <View style={[styles.notice, { backgroundColor: c.subtle }]}>
+                  <MaterialIcons name="info-outline" size={18} color={c.secondary} />
+                  <Text style={[styles.noticeText, { color: c.primary }]}>
+                    This account still uses its generated password. Please change it below.
+                  </Text>
+                </View>
+              ) : null}
               <View style={[styles.profile, { backgroundColor: c.subtle }]}>
                 <Pressable onPress={changePhoto} accessibilityLabel="Change your profile photo" disabled={photoBusy}>
                   <Avatar
@@ -442,13 +469,16 @@ export default function MapScreen() {
               </View>
               <Text style={[styles.presetHint, { color: c.muted }]}>{REPORTING_PRESETS[preset].description}</Text>
 
+              <PasswordForm auth={creds} onChanged={passwordChanged} />
+
               <Pressable style={[styles.logout, { backgroundColor: c.subtle }]} onPress={logout}>
                 <MaterialIcons name="logout" size={20} color={c.secondary} />
                 <Text style={[styles.logoutText, { color: c.secondary }]}>Log out</Text>
               </Pressable>
-            </>
+            </ScrollView>
           )}
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -492,7 +522,10 @@ const styles = StyleSheet.create({
   gear: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
   metaDot: { width: 7, height: 7, borderRadius: 4 },
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
+  sheetHost: { flex: 1, justifyContent: "flex-end" },
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.4)" },
+  notice: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, marginTop: 14 },
+  noticeText: { flex: 1, fontSize: 13.5 },
   sheet: {
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,

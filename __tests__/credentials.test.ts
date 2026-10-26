@@ -3,7 +3,7 @@ jest.mock("@react-native-async-storage/async-storage", () => require("@react-nat
 import { parseSession } from "../lib/credentials";
 
 const user = { id: 1, username: "luis", displayName: "Luis", avatarUrl: null };
-const session = { serverIp: "ws://192.168.1.20:3012", deviceId: "iPhone", token: "abc", user: { ...user, isAdmin: false } };
+const session = { serverIp: "ws://192.168.1.20:3012", deviceId: "iPhone", token: "abc", user: { ...user, isAdmin: false, mustChangePassword: false } };
 
 test("a stored session is read back", () => {
   expect(parseSession(JSON.stringify(session))).toEqual(session);
@@ -26,10 +26,15 @@ test("broken records do not throw", () => {
 
 test("missing display name or picture fall back", () => {
   const parsed = parseSession(JSON.stringify({ ...session, user: { id: 2, username: "anna" } }));
-  expect(parsed?.user).toEqual({ id: 2, username: "anna", displayName: "anna", avatarUrl: null, isAdmin: false });
+  expect(parsed?.user).toEqual({ id: 2, username: "anna", displayName: "anna", avatarUrl: null, isAdmin: false, mustChangePassword: false });
 });
 
 test("the admin flag survives", () => {
   const parsed = parseSession(JSON.stringify({ ...session, user: { ...user, isAdmin: true } }));
   expect(parsed?.user.isAdmin).toBe(true);
+});
+
+test("the must-change-password flag is kept", () => {
+  const parsed = parseSession(JSON.stringify({ ...session, user: { ...user, mustChangePassword: true } }));
+  expect(parsed?.user.mustChangePassword).toBe(true);
 });
