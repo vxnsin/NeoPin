@@ -18,6 +18,7 @@ import {
 import { WebView as NativeWebView, type WebViewMessageEvent } from "react-native-webview";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { checkAndApplyUpdate, updateLabel } from "@/lib/updates";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import useThemeManager from "@/hooks/useThemeManager";
@@ -86,6 +87,7 @@ export default function MapScreen() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [updateNote, setUpdateNote] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
@@ -609,6 +611,20 @@ export default function MapScreen() {
                 <MaterialIcons name="logout" size={20} color={c.secondary} />
                 <Text style={[styles.logoutText, { color: c.secondary }]}>Log out</Text>
               </Pressable>
+              <Pressable
+                style={[styles.versionRow]}
+                onPress={async () => {
+                  const result = await checkAndApplyUpdate();
+                  setUpdateNote(
+                    result === "current" ? "You have the latest version." : result === "failed" ? "Could not check for updates." : result === "unavailable" ? "Updates are off in this build." : "Updating…"
+                  );
+                }}
+                accessibilityLabel="Check for updates"
+              >
+                <Text style={[styles.versionText, { color: c.muted }]}>
+                  {updateNote ?? `Check for updates${updateLabel() ? ` · ${updateLabel()}` : ""}`}
+                </Text>
+              </Pressable>
             </ScrollView>
           )}
         </Animated.View>
@@ -712,4 +728,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   logoutText: { fontSize: 15, fontWeight: "600" },
+  versionRow: { alignItems: "center", paddingVertical: 14 },
+  versionText: { fontSize: 12 },
 });
