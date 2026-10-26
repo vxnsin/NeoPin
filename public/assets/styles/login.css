@@ -3,147 +3,95 @@ body {
   min-height: 100%;
   place-items: center;
   overflow: hidden;
+  background: #07090d;
 }
 
-/* Behind the card: a slowly drifting town map with device markers popping up. */
+/* Behind the card: flying low over a dark town. The ground is a tilted plane,
+   login.js keeps it moving and lets device markers ping on it. */
 .backdrop {
-  --map-bg: #e9ebef;
-  --map-road: #ffffff;
-  --map-road-major: #ffffff;
-  --map-casing: #d6dae1;
-  --map-water: #c9dcf0;
-  --map-park: #d9eadb;
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  background: var(--map-bg);
+  background: #07090d;
+  perspective: 900px;
+  perspective-origin: 50% 20%;
   pointer-events: none;
 }
 
-:root[data-theme="dark"] .backdrop {
-  --map-bg: #0d1016;
-  --map-road: #1b2029;
-  --map-road-major: #252b37;
-  --map-casing: #0d1016;
-  --map-water: #12233a;
-  --map-park: #10201a;
-}
-
-.backdrop__map {
+.backdrop__plane {
   position: absolute;
-  inset: -6%;
-  width: 112%;
-  height: 112%;
-  animation: drift 70s ease-in-out infinite alternate;
+  left: -100%;
+  top: -60%;
+  width: 300%;
+  height: 260%;
+  background: #0a0d12 url("/assets/images/town.svg") repeat;
+  background-size: 1600px 1000px;
+  transform: rotateX(62deg) rotateZ(-16deg);
+  transform-origin: 50% 50%;
 }
 
-.backdrop__map .road path {
-  fill: none;
-  stroke: var(--map-road);
-  stroke-width: 9;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.backdrop__map .road--major path {
-  stroke: var(--map-road-major);
-  stroke-width: 18;
-  filter: drop-shadow(0 0 1px var(--map-casing));
-}
-
-.backdrop__map .water {
-  fill: none;
-  stroke: var(--map-water);
-  stroke-width: 44;
-  stroke-linecap: round;
-}
-
-.backdrop__map .water-fill {
-  fill: var(--map-water);
-}
-
-.backdrop__map .park {
-  fill: var(--map-park);
-}
-
-/* Softens the map towards the card, so the form stays the calmest spot. */
-.backdrop__shade {
+/* The far end fades into the night, the edges darken, the card's spot stays calm. */
+.backdrop__fog {
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--map-bg) 70%, transparent) 0%, transparent 60%);
+  background:
+    linear-gradient(to bottom, #07090d 0%, rgba(7, 9, 13, 0.85) 18%, rgba(7, 9, 13, 0) 55%),
+    radial-gradient(ellipse at 50% 55%, rgba(7, 9, 13, 0.35) 0%, rgba(7, 9, 13, 0) 45%),
+    radial-gradient(ellipse at 50% 60%, rgba(7, 9, 13, 0) 55%, rgba(7, 9, 13, 0.8) 100%);
 }
 
-.blip {
-  --blip: var(--brand);
+/* A device reporting in: a dot on the ground with rings spreading out. */
+.ping {
+  --ping: var(--brand);
   position: absolute;
-  width: 18px;
-  height: 18px;
-  margin: -9px 0 0 -9px;
-  border: 3px solid #ffffff;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border: 5px solid #ffffff;
   border-radius: 50%;
-  background: var(--blip);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.35);
-  animation: blip-in 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) both, blip-out 0.6s ease 3.4s forwards;
+  background: var(--ping);
+  box-shadow: 0 0 24px 4px var(--ping);
+  animation: ping-in 0.6s cubic-bezier(0.2, 1.6, 0.4, 1) both, ping-out 0.8s ease 4.2s forwards;
 }
 
-.blip--large {
-  width: 24px;
-  height: 24px;
-  margin: -12px 0 0 -12px;
-}
-
-.blip::after {
+.ping::before,
+.ping::after {
   content: "";
   position: absolute;
-  inset: -3px;
-  border: 2px solid var(--blip);
+  inset: -5px;
+  border: 3px solid var(--ping);
   border-radius: 50%;
-  animation: blip-ripple 1.8s ease-out 0.3s 2 both;
+  animation: ping-ring 2.2s ease-out 0.3s 2 both;
 }
 
-@keyframes drift {
-  from {
-    transform: translate(-2%, -1.5%) scale(1);
-  }
-  to {
-    transform: translate(2%, 1.5%) scale(1.06);
-  }
+.ping::after {
+  animation-delay: 1.1s;
 }
 
-@keyframes blip-in {
+@keyframes ping-in {
   from {
     opacity: 0;
-    transform: scale(0) translateY(8px);
+    transform: scale(0);
   }
 }
 
-@keyframes blip-out {
+@keyframes ping-out {
   to {
     opacity: 0;
-    transform: scale(0.6);
+    transform: scale(0.4);
   }
 }
 
-@keyframes blip-ripple {
+@keyframes ping-ring {
   from {
-    opacity: 0.8;
+    opacity: 0.9;
     transform: scale(1);
   }
   to {
     opacity: 0;
-    transform: scale(3);
+    transform: scale(5);
   }
-}
-
-.theme-toggle {
-  position: fixed;
-  top: max(16px, env(safe-area-inset-top));
-  right: 16px;
-  z-index: 2;
-  background: var(--surface);
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(12px);
 }
 
 .login {
@@ -157,9 +105,10 @@ body {
   padding: 36px 32px 32px;
   border: 1px solid var(--border);
   border-radius: 24px;
-  background: var(--surface);
+  background: rgba(16, 19, 26, 0.78);
   box-shadow: var(--shadow-lg);
-  backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
   animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 

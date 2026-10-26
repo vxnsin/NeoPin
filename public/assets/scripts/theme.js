@@ -14,8 +14,11 @@
     }
   };
 
+  // A page can keep its own theme, the login stays dark.
+  const locked = root.hasAttribute("data-theme-locked");
+
   const apply = (theme) => {
-    if (root.dataset.theme === theme) return;
+    if (locked || root.dataset.theme === theme) return;
     root.dataset.theme = theme;
     root.dispatchEvent(new CustomEvent("themechange", { detail: theme }));
   };

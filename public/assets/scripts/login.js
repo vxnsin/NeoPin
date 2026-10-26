@@ -1,25 +1,43 @@
-// Device markers pop up on the background map now and then, like phones reporting in.
-const BLIP_COLORS = ["#d3171e", "#22c55e", "#2563eb", "#7c3aed", "#ea580c", "#0284c7", "#db2777"];
-const backdrop = document.getElementById("backdrop");
+// The background flies over a dark town: the ground keeps sliding towards the
+// viewer, and now and then a device pings on it and travels along.
+const PING_COLORS = ["#d3171e", "#22c55e", "#2563eb", "#7c3aed", "#ea580c", "#0284c7", "#db2777"];
+const SPEED = { x: 14, y: 46 }; // ground pixels per second
+const plane = document.getElementById("plane");
+const pings = document.createElement("div");
+pings.style.position = "absolute";
+pings.style.inset = "0";
+plane.appendChild(pings);
+let offset = { x: 0, y: 0 };
 
-function blip() {
-  if (document.hidden || backdrop.childElementCount > 9) return;
-  const x = 4 + Math.random() * 92;
-  const y = 6 + Math.random() * 88;
-  // Keep the middle free, the card sits there.
-  if (x > 33 && x < 67 && y > 22 && y < 78) return;
+function ping() {
+  if (document.hidden || pings.childElementCount > 7) return;
   const el = document.createElement("span");
-  el.className = Math.random() < 0.3 ? "blip blip--large" : "blip";
-  el.style.left = `${x}%`;
-  el.style.top = `${y}%`;
-  el.style.setProperty("--blip", BLIP_COLORS[Math.floor(Math.random() * BLIP_COLORS.length)]);
-  backdrop.appendChild(el);
-  setTimeout(() => el.remove(), 4200);
+  el.className = "ping";
+  // Spots on the tilted ground that show left and right of the card, not under it.
+  const left = Math.random() < 0.5;
+  const x = left ? 36 + Math.random() * 7 : 57 + Math.random() * 15;
+  const y = 18 + Math.random() * 28;
+  el.style.left = `calc(${x}% - ${offset.x}px)`;
+  el.style.top = `calc(${y}% - ${offset.y}px)`;
+  el.style.setProperty("--ping", PING_COLORS[Math.floor(Math.random() * PING_COLORS.length)]);
+  pings.appendChild(el);
+  setTimeout(() => el.remove(), 5200);
+}
+
+function fly(previous) {
+  return (now) => {
+    const seconds = Math.min(0.1, (now - previous) / 1000);
+    offset = { x: offset.x + SPEED.x * seconds, y: offset.y + SPEED.y * seconds };
+    plane.style.backgroundPosition = `${offset.x}px ${offset.y}px`;
+    pings.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+    requestAnimationFrame(fly(now));
+  };
 }
 
 if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-  for (let i = 0; i < 4; i++) setTimeout(blip, i * 250);
-  setInterval(blip, 700);
+  requestAnimationFrame(fly(performance.now()));
+  for (let i = 0; i < 3; i++) setTimeout(ping, 300 + i * 400);
+  setInterval(ping, 900);
 }
 
 const form = document.getElementById("loginForm");

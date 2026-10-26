@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark" data-theme-locked>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark" />
     <title>NeoPin · Sign in</title>
     <script src="/assets/scripts/theme.js"></script>
     <link rel="stylesheet" href="/assets/styles/theme.css" />
@@ -16,47 +16,14 @@
       <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></symbol>
       <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></symbol>
       <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.39-1.61" /><path d="M2 2l20 20" /></symbol>
-      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></symbol>
-      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
     </svg>
 
-    <!-- A drifting sketch of a town; login.js lets device markers pop up on it. -->
-    <div class="backdrop" id="backdrop" aria-hidden="true">
-      <svg class="backdrop__map" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-        <rect class="park" x="590" y="110" width="210" height="140" rx="26" />
-        <rect class="park" x="1230" y="640" width="250" height="170" rx="30" />
-        <rect class="park" x="120" y="380" width="150" height="190" rx="22" />
-        <circle class="water-fill" cx="1010" cy="200" r="70" />
-        <path class="water" d="M-50 720 C200 650 380 800 620 730 S1000 560 1250 620 S1550 760 1700 700" />
-        <g class="road">
-          <path d="M0 120 L1600 170" />
-          <path d="M0 520 L1600 470" />
-          <path d="M180 0 L240 1000" />
-          <path d="M760 0 L700 1000" />
-          <path d="M1350 0 L1420 1000" />
-          <path d="M0 640 C400 600 800 560 1600 600" />
-          <path d="M300 400 L650 520 L820 460" />
-          <path d="M1200 380 L1500 420" />
-          <path d="M560 820 L980 900" />
-          <path d="M40 960 L620 870" />
-          <path d="M1000 980 C1100 880 1300 900 1600 860" />
-          <path d="M600 0 C640 120 560 260 620 380" />
-        </g>
-        <g class="road road--major">
-          <path d="M-50 300 C300 260 600 380 900 330 S1400 220 1700 280" />
-          <path d="M420 -50 C460 200 380 450 470 700 S520 950 500 1050" />
-          <path d="M1100 -50 C1060 250 1180 500 1120 750 S1080 950 1150 1050" />
-          <path d="M-50 860 C500 820 1100 900 1700 800" />
-        </g>
-      </svg>
-      <div class="backdrop__shade"></div>
+    <!-- Flying low over a dark town; login.js moves the ground and lets device markers ping on it. -->
+    <div class="backdrop" aria-hidden="true">
+      <div class="backdrop__plane" id="plane"></div>
+      <div class="backdrop__fog"></div>
     </div>
-
-    <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Switch between light and dark mode">
-      <svg class="icon theme-icon--dark"><use href="#i-moon" /></svg>
-      <svg class="icon theme-icon--light"><use href="#i-sun" /></svg>
-    </button>
 
     <main class="login">
       <div class="login__card">
