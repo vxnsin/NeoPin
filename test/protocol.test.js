@@ -183,6 +183,8 @@ test("the dashboard page needs a session, the login page does not", async () => 
 
   const loginPage = await fetch(`${baseUrl}/login`);
   assert.equal(loginPage.status, 200);
+  const oldLink = await fetch(`${baseUrl}/login.html`, { redirect: "manual" });
+  assert.equal(oldLink.headers.get("location"), "/login");
   assert.match(loginPage.headers.get("content-security-policy"), /script-src 'self'/);
 
   const cookie = await sessionCookie();
