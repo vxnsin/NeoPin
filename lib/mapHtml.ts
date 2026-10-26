@@ -54,14 +54,15 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .offline { --ring: ${STATE_COLORS.offline}; }
     .offline.avatar { background: ${STATE_COLORS.offline} !important; }
     .offline.avatar > * { filter: grayscale(1); opacity: .7; }
-    .pin .online.avatar::after { content: ""; position: absolute; inset: -4.5px; border-radius: 50%; border: 2px solid ${STATE_COLORS.online}; animation: ripple 2.4s ease-out infinite; }
+    .pin .online.avatar::after { content: ""; position: absolute; inset: -4.5px; border-radius: 50%; border: 2px solid ${STATE_COLORS.online}; animation: ripple 2.4s ease-out infinite; will-change: transform, opacity; backface-visibility: hidden; }
+    #map.is-moving .pin .online.avatar::after, #map.is-moving .self::after { animation-play-state: paused; }
     .label { position: absolute; top: calc(100% + 9px); max-width: 140px; overflow: hidden; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--text);
       box-shadow: var(--shadow); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
       opacity: 0; transform: translateY(-4px); transition: opacity .2s, transform .2s; pointer-events: none; }
     .show-labels .label, .pin.selected .label { opacity: 1; transform: none; }
     .offline .label { color: var(--muted); }
     .self { width: 20px; height: 20px; border-radius: 50%; background: #d3171e; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15), 0 2px 8px rgba(0,0,0,.35); }
-    .self::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: #d3171e; opacity: .35; animation: halo 2s ease-out infinite; z-index: -1; }
+    .self::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: #d3171e; opacity: .35; animation: halo 2s ease-out infinite; z-index: -1; will-change: transform, opacity; backface-visibility: hidden; }
 
     .maplibregl-popup-content { padding: 12px 14px; border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); font: 13px/1.4 system-ui, sans-serif; }
     .maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--surface); }
@@ -147,6 +148,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       document.getElementById("map").classList.toggle("show-labels", map.getZoom() >= ${LABEL_ZOOM});
     }
     map.on("zoom", updateLabels);
+    map.on("movestart", function () { map.getContainer().classList.add("is-moving"); });
+    map.on("moveend", function () { map.getContainer().classList.remove("is-moving"); });
     updateLabels();
     map.on("error", function (e) { report("error", e.error && e.error.message); });
     // The OpenFreeMap styles name a few patterns their sprite does not have.
