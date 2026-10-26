@@ -427,14 +427,14 @@ body.is-timeline .maplibregl-popup {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  /* MapLibre positions markers with transform, so the zoom uses the separate scale property. */
-  transition: scale 0.15s ease;
+  /* Markers are positioned with transform and any scale would shift them, so only the ring grows. */
+  transition: box-shadow 0.15s ease;
 }
 
 .tl-marker:hover,
 .tl-marker.is-active {
   z-index: 5;
-  scale: 1.25;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 40%, transparent), var(--shadow-md);
 }
 
 /* Devices, bottom left, like the list in Apple's Find My. */
@@ -1090,12 +1090,12 @@ body.is-timeline .cluster {
   background: var(--surface-solid);
   box-shadow: var(--shadow-md);
   cursor: pointer;
-  transition: scale 0.15s ease;
+  transition: box-shadow 0.15s ease;
 }
 
+/* No scale here: it would also scale the position MapLibre gives the marker and the marker slides. */
 .cluster:hover {
-  /* scale, not transform: MapLibre positions the marker with transform. */
-  scale: 1.06;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 45%, transparent), var(--shadow-md);
 }
 
 .cluster__avatars {
