@@ -54,6 +54,10 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .offline { --ring: ${STATE_COLORS.offline}; }
     .offline.avatar { background: ${STATE_COLORS.offline} !important; }
     .offline.avatar > * { filter: grayscale(1); opacity: .7; }
+    /* Two rings that only fade in and out: opacity animates on the GPU without repainting the map. */
+    .pin .online.avatar::before, .pin .online.avatar::after { content: ""; position: absolute; border-radius: 50%; border: 2px solid ${STATE_COLORS.online}; opacity: 0; pointer-events: none; animation: breathe 2.6s ease-in-out infinite; }
+    .pin .online.avatar::before { inset: -4.5px; }
+    .pin .online.avatar::after { inset: -10px; animation-delay: .45s; }
     #map.is-moving .self::after { animation-play-state: paused; }
     .label { position: absolute; top: calc(100% + 9px); max-width: 140px; overflow: hidden; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--text);
       box-shadow: var(--shadow); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
@@ -74,6 +78,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .stop.active { z-index: 6; background: #0f172a; scale: 1.25; }
     .dark .stop.active { background: #fff; color: #0f172a; border-color: #0f172a; }
 
+    @keyframes breathe { 0%, 100% { opacity: 0; } 45% { opacity: .85; } }
     @keyframes ripple { 0% { transform: scale(1); opacity: .75; } 25%, 100% { transform: scale(1.4); opacity: 0; } }
     @keyframes halo { 0% { transform: scale(1); opacity: .4; } 30%, 100% { transform: scale(2.4); opacity: 0; } }
   </style>
@@ -221,51 +226,6 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       sync();
     }
 
-    // The pulse ring around online pins is drawn by the map itself. DOM animations over a WebGL
-    // canvas stutter in a WebView, a map image that redraws with the map does not.
-    var PULSE = 140;
-    var pulseOn = false;
-    var pulseImage = {
-      width: PULSE, height: PULSE, data: new Uint8Array(PULSE * PULSE * 4),
-      onAdd: function () { var c = document.createElement("canvas"); c.width = c.height = PULSE; this.ctx = c.getContext("2d"); },
-      render: function () {
-        var t = (performance.now() % 3200) / 3200;
-        var ctx = this.ctx;
-        ctx.clearRect(0, 0, PULSE, PULSE);
-        if (t < 0.45) {
-          var p = t / 0.45;
-          ctx.beginPath();
-          ctx.arc(PULSE / 2, PULSE / 2, 52 + 16 * p, 0, Math.PI * 2);
-          ctx.lineWidth = 4;
-          ctx.globalAlpha = 0.8 * (1 - p);
-          ctx.strokeStyle = "${STATE_COLORS.online}";
-          ctx.stroke();
-        }
-        this.data = ctx.getImageData(0, 0, PULSE, PULSE).data;
-        if (pulseOn) map.triggerRepaint();
-        return true;
-      }
-    };
-    function updatePulse() {
-      var features = devices
-        .filter(function (d) { return d.position && state(d) === "online"; })
-        .map(function (d) { return { type: "Feature", properties: {}, geometry: { type: "Point", coordinates: [d.position.longitude, d.position.latitude] } }; });
-      pulseOn = features.length > 0;
-      var data = { type: "FeatureCollection", features: features };
-      try {
-        if (!map.hasImage("pulse")) map.addImage("pulse", pulseImage, { pixelRatio: 2 });
-        if (map.getSource("pulse")) map.getSource("pulse").setData(data);
-        else map.addSource("pulse", { type: "geojson", data: data });
-        if (!map.getLayer("pulse-ring")) {
-          // The avatar sits about 33 px above the point the pin is anchored to.
-          map.addLayer({ id: "pulse-ring", type: "symbol", source: "pulse",
-            layout: { "icon-image": "pulse", "icon-allow-overlap": true, "icon-ignore-placement": true, "icon-offset": [0, -33] } });
-        }
-        if (pulseOn) map.triggerRepaint();
-      } catch (e) { /* the style is still loading, style.load tries again */ }
-    }
-    map.on("style.load", updatePulse);
-
     function sync() {
       var seen = {};
       devices.forEach(function (d) {
@@ -298,7 +258,6 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       } else if (popup.isOpen()) {
         popup.remove();
       }
-      updatePulse();
     }
 
     function lngLat(p) { return [p[1], p[0]]; }

@@ -10,8 +10,8 @@ test("the inline map script is valid JavaScript in both themes", () => {
   }
 });
 
-test("the pulse ring is drawn by the map and not by a DOM animation", () => {
+test("the online ring only animates opacity, which never repaints the map", () => {
   const html = buildMapHtml(true, 0);
-  expect(html).toContain('id: "pulse-ring"');
-  expect(html).not.toContain(".online.avatar::after");
+  expect(html).toContain("@keyframes breathe { 0%, 100% { opacity: 0; } 45% { opacity: .85; } }");
+  expect(html).not.toContain("pulse-ring");
 });

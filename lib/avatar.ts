@@ -1,6 +1,7 @@
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { deviceHeaders, httpBase, type DeviceAuth } from "@/lib/api";
+import type { CropRect } from "@/lib/crop";
 
 export { deviceHeaders, httpBase };
 
@@ -47,25 +48,28 @@ function problemMessage(status: number): string {
   }
 }
 
-// Lets the user pick a photo, cuts a centred square and shrinks it to 128 px.
-// Resolves with JPEG bytes, or null when the user backed out.
-export async function pickAvatar(): Promise<Uint8Array | null> {
+export type Photo = { uri: string; width: number; height: number };
+
+// Lets the user pick a photo from the library, uncut. Resolves with null when they backed out.
+export async function pickPhoto(): Promise<Photo | null> {
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"],
-    allowsEditing: true,
-    aspect: [1, 1],
+    allowsEditing: false,
     quality: 1,
   });
   if (result.canceled || !result.assets?.length) return null;
-
   const { uri, width, height } = result.assets[0];
-  const side = Math.min(width, height);
+  return { uri, width, height };
+}
+
+// Cuts the chosen square out of the photo and shrinks it to 128 px. The quality steps
+// down until the JPEG fits what the server takes.
+export async function renderAvatar(photo: Photo, rect: CropRect): Promise<Uint8Array> {
   for (const compress of [0.8, 0.6, 0.4]) {
-    let context = ImageManipulator.manipulate(uri);
-    if (side > 0) {
-      context = context.crop({ originX: Math.floor((width - side) / 2), originY: Math.floor((height - side) / 2), width: side, height: side });
-    }
-    const image = await context.resize({ width: AVATAR_SIZE, height: AVATAR_SIZE }).renderAsync();
+    const image = await ImageManipulator.manipulate(photo.uri)
+      .crop(rect)
+      .resize({ width: AVATAR_SIZE, height: AVATAR_SIZE })
+      .renderAsync();
     const saved = await image.saveAsync({ compress, format: SaveFormat.JPEG, base64: true });
     const bytes = base64ToBytes(saved.base64 ?? "");
     if (bytes.length > 0 && bytes.length <= AVATAR_MAX_BYTES) return bytes;

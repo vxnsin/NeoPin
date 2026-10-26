@@ -28,9 +28,11 @@ import PulseLogo from "@/components/PulseLogo";
 import TimelinePanel from "@/components/TimelinePanel";
 import PasswordForm from "@/components/PasswordForm";
 import ProfileForm from "@/components/ProfileForm";
+import AvatarCropper from "@/components/AvatarCropper";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
-import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
+import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
+import type { CropRect } from "@/lib/crop";
 import {
   DEVICE_ICONS,
   STATE_COLORS,
@@ -86,6 +88,7 @@ export default function MapScreen() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
@@ -262,22 +265,45 @@ export default function MapScreen() {
       .catch(() => {});
   };
 
+  // Pick a photo, then cut the square in the crop view. The settings sheet closes meanwhile,
+  // two modals do not stack reliably on iOS.
   const changePhoto = async () => {
     if (!creds || photoBusy) return;
     setPhotoError("");
     setPhotoBusy(true);
     try {
-      const jpeg = await pickAvatar();
-      // The server sends the new avatarUrl to everyone, this screen included.
-      if (jpeg) {
-        const avatarUrl = await uploadAvatar(creds, jpeg);
-        changeUser({ avatarUrl });
+      const photo = await pickPhoto();
+      if (photo) {
+        setSheet(null);
+        setCropPhoto(photo);
       }
+    } catch (error: any) {
+      setPhotoError(error?.message || "The photo could not be opened.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const saveCrop = async (rect: CropRect) => {
+    const photo = cropPhoto;
+    setCropPhoto(null);
+    setSheet("settings");
+    if (!creds || !photo) return;
+    setPhotoBusy(true);
+    try {
+      const jpeg = await renderAvatar(photo, rect);
+      // The server sends the new avatarUrl to everyone, this screen included.
+      changeUser({ avatarUrl: await uploadAvatar(creds, jpeg) });
     } catch (error: any) {
       setPhotoError(error?.message || "The photo could not be saved.");
     } finally {
       setPhotoBusy(false);
     }
+  };
+
+  const cancelCrop = () => {
+    setCropPhoto(null);
+    setSheet("settings");
   };
 
   const deletePhoto = async () => {
@@ -454,6 +480,8 @@ export default function MapScreen() {
           onClose={() => setTimelineOpen(false)}
         />
       )}
+
+      <AvatarCropper photo={cropPhoto} onCancel={cancelCrop} onSave={saveCrop} />
 
       <Modal visible={sheet !== null} transparent animationType="none" onRequestClose={closeSheet}>
         <KeyboardAvoidingView style={styles.sheetHost} behavior={Platform.OS === "ios" ? "padding" : undefined}>
