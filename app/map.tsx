@@ -29,6 +29,7 @@ import PulseLogo from "@/components/PulseLogo";
 import TimelinePanel from "@/components/TimelinePanel";
 import PasswordForm from "@/components/PasswordForm";
 import ProfileForm from "@/components/ProfileForm";
+import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
@@ -49,7 +50,16 @@ import {
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
-import { fetchMe, type User } from "@/lib/api";
+import { fetchGroups, fetchInvites, fetchMe, type Group, type Invite, type User } from "@/lib/api";
+import {
+  badgeText,
+  filterByGroup,
+  loadGroupFilter,
+  pendingCount,
+  resolveGroupFilter,
+  saveGroupFilter,
+  showGroupChips,
+} from "@/lib/groups";
 import {
   REPORTING_PRESETS,
   getReportingPreset,
@@ -71,7 +81,7 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-type Sheet = "devices" | "settings" | null;
+type Sheet = "devices" | "settings" | "groups" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
@@ -90,6 +100,9 @@ export default function MapScreen() {
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [groupFilter, setGroupFilter] = useState<number | null>(null);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
@@ -100,13 +113,16 @@ export default function MapScreen() {
   const requestedOnce = useRef(false);
   const user = creds?.user ?? null;
   // The account picture is the one every device of it shows. It loads even before the own device is listed.
-  const avatarSources = useMemo<Device[]>(
-    () =>
-      user?.avatarUrl
-        ? [...devices, { deviceId: "", position: null, lastPing: null, status: "offline", avatarUrl: user.avatarUrl }]
-        : devices,
-    [devices, user?.avatarUrl]
-  );
+  const avatarSources = useMemo<Device[]>(() => {
+    const extra: Device[] = [];
+    const add = (avatarUrl?: string | null) => {
+      if (avatarUrl) extra.push({ deviceId: "", position: null, lastPing: null, status: "offline", avatarUrl });
+    };
+    add(user?.avatarUrl);
+    // Group members show their picture in the groups sheet even without a device.
+    groups.forEach((group) => group.members.forEach((member) => add(member.avatarUrl)));
+    return [...devices, ...extra];
+  }, [devices, user?.avatarUrl, groups]);
   const avatarFor = useAvatars(avatarSources, creds);
   // Built once, later theme changes go in as messages so the map does not reload.
   const mapHtml = useMemo(() => buildMapHtml(theme.isDark, insets.bottom), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -137,13 +153,48 @@ export default function MapScreen() {
     return () => clearInterval(ticker);
   }, []);
 
+  const credsRef = useRef(creds);
+  credsRef.current = creds;
+
+  // Groups and invitations decide who is visible. A group that vanished drops the filter back to All.
+  const loadGroups = useCallback(async () => {
+    const auth = credsRef.current;
+    if (!auth) return;
+    try {
+      const [nextGroups, nextInvites] = await Promise.all([fetchGroups(auth), fetchInvites(auth)]);
+      setGroups(nextGroups);
+      setInvites(nextInvites);
+      setGroupFilter((current) => {
+        const next = resolveGroupFilter(current, nextGroups);
+        if (next !== current) saveGroupFilter(next);
+        return next;
+      });
+    } catch {
+      // keep what is shown
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGroupFilter().then(setGroupFilter);
+  }, []);
+
+  useEffect(() => {
+    if (creds?.token) loadGroups();
+  }, [creds?.serverIp, creds?.token, loadGroups]);
+
   useEffect(
     () =>
       addMessageListener((data) => {
         if (data.type === "dataResponse" && Array.isArray(data.devices)) setDevices(data.devices);
+        else if (data.type === "groupsChanged") loadGroups();
       }),
-    [addMessageListener]
+    [addMessageListener, loadGroups]
   );
+
+  const chooseGroup = (id: number | null) => {
+    setGroupFilter(id);
+    saveGroupFilter(id);
+  };
 
   // The backdrop fades and the sheet slides on its own, so the dimming does not ride up with the sheet.
   const sheetProgress = useRef(new Animated.Value(0)).current;
@@ -190,7 +241,8 @@ export default function MapScreen() {
 
   // The map gets each device with its picture as a data URI, it cannot send the login headers itself.
   // This phone is the "you are here" dot already, so its own device gets no second pin.
-  const mapDevices = devices
+  const visibleDevices = filterByGroup(devices, groupFilter, user?.id);
+  const mapDevices = visibleDevices
     .filter((device) => !isOwnDevice(device, user?.id, creds?.deviceId))
     .map((device) => ({ ...device, key: deviceKey(device), avatar: avatarFor(device.avatarUrl) }));
   const mapDevicesKey = JSON.stringify(mapDevices);
@@ -332,13 +384,14 @@ export default function MapScreen() {
   const me = devices.find(isMine);
   const profileAvatar = user?.avatarUrl ?? null;
   const panelHeight = Math.round(windowHeight * 0.55);
-  const people = groupPeople(devices, user?.id);
-  const online = devices.filter((d) => d.status === "online").length;
+  const pending = pendingCount(invites);
+  const people = groupPeople(visibleDevices, user?.id);
+  const online = visibleDevices.filter((d) => d.status === "online").length;
   const summary = !isConnected
     ? "Reconnecting…"
-    : devices.length === 0
+    : visibleDevices.length === 0
       ? "Connected · nobody yet"
-      : `${people.length} ${people.length === 1 ? "person" : "people"} · ${online} of ${devices.length} ${devices.length === 1 ? "device" : "devices"} online`;
+      : `${people.length} ${people.length === 1 ? "person" : "people"} · ${online} of ${visibleDevices.length} ${visibleDevices.length === 1 ? "device" : "devices"} online`;
 
   // One row per person. Tapping focuses their primary device and opens the list of their devices.
   const togglePerson = (person: Person) => {
@@ -464,9 +517,10 @@ export default function MapScreen() {
           style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setSheet("settings")}
           hitSlop={6}
-          accessibilityLabel="Settings"
+          accessibilityLabel={pending > 0 ? `Settings, ${pending} pending invitations` : "Settings"}
         >
           <MaterialIcons name="settings" size={20} color={c.primary} />
+          {pending > 0 && <View style={[styles.dot, { backgroundColor: c.secondary, borderColor: c.raised }]} />}
         </Pressable>
       </Pressable>
       )}
@@ -498,7 +552,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : "People"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -511,16 +565,39 @@ export default function MapScreen() {
               )}
               <Pressable
                 style={[styles.headerButton, { backgroundColor: c.subtle }]}
-                onPress={() => setSheet(sheet === "settings" ? "devices" : "settings")}
-                accessibilityLabel={sheet === "settings" ? "Back to people" : "Settings"}
+                onPress={() => setSheet(sheet === "devices" ? "settings" : sheet === "settings" ? "devices" : "settings")}
+                accessibilityLabel={sheet === "devices" ? "Settings" : sheet === "settings" ? "Back to people" : "Back to settings"}
               >
-                <MaterialIcons name={sheet === "settings" ? "people-outline" : "settings"} size={20} color={c.primary} />
+                <MaterialIcons
+                  name={sheet === "devices" ? "settings" : sheet === "settings" ? "people-outline" : "arrow-back"}
+                  size={20}
+                  color={c.primary}
+                />
               </Pressable>
             </View>
           </View>
 
           {sheet === "devices" && (
             <>
+              {showGroupChips(groups) && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
+                  {[{ id: null as number | null, name: "All" }, ...groups].map((group) => {
+                    const active = group.id === groupFilter;
+                    return (
+                      <Pressable
+                        key={group.id ?? "all"}
+                        onPress={() => chooseGroup(group.id)}
+                        style={[styles.groupChip, { backgroundColor: active ? c.secondary : c.subtle }]}
+                        accessibilityState={{ selected: active }}
+                      >
+                        <Text style={[styles.groupChipText, { color: active ? c.onSecondary : c.primary }]} numberOfLines={1}>
+                          {group.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
               <Text style={[styles.sheetMeta, { color: c.muted }]}>{summary}</Text>
               <ScrollView style={styles.deviceList}>
                 {people.length === 0 && (
@@ -529,6 +606,19 @@ export default function MapScreen() {
                 {people.map(personRow)}
               </ScrollView>
             </>
+          )}
+
+          {sheet === "groups" && creds && (
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <GroupsPanel
+                auth={creds}
+                userId={creds.user.id}
+                groups={groups}
+                invites={invites}
+                avatarFor={avatarFor}
+                onChanged={loadGroups}
+              />
+            </ScrollView>
           )}
 
           {sheet === "settings" && creds && (
@@ -585,6 +675,21 @@ export default function MapScreen() {
               {editingProfile ? (
                 <ProfileForm auth={creds} user={creds.user} onSaved={(saved) => changeUser(saved)} onClose={() => setEditingProfile(false)} />
               ) : null}
+
+              <Pressable
+                style={[styles.groupsEntry, { backgroundColor: c.subtle }]}
+                onPress={() => setSheet("groups")}
+                accessibilityLabel={pending > 0 ? `Groups, ${pending} pending invitations` : "Groups"}
+              >
+                <MaterialIcons name="group" size={20} color={c.primary} />
+                <Text style={[styles.groupsEntryText, { color: c.primary }]}>Groups</Text>
+                {pending > 0 && (
+                  <View style={[styles.badge, { backgroundColor: c.secondary }]}>
+                    <Text style={[styles.badgeText, { color: c.onSecondary }]}>{badgeText(pending)}</Text>
+                  </View>
+                )}
+                <MaterialIcons name="chevron-right" size={22} color={c.muted} />
+              </Pressable>
 
               <Text style={[styles.sectionTitle, { color: c.muted }]}>Position updates</Text>
               <View style={styles.presetRow}>
@@ -687,6 +792,15 @@ const styles = StyleSheet.create({
   grabArea: { paddingTop: 4, paddingBottom: 16, marginTop: -4 },
   grabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, opacity: 0.35 },
   sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  dot: { position: "absolute", top: 5, right: 5, width: 11, height: 11, borderRadius: 6, borderWidth: 2 },
+  chipScroll: { flexGrow: 0, marginTop: 10 },
+  chips: { gap: 8, alignItems: "center" },
+  groupChip: { height: 34, maxWidth: 180, paddingHorizontal: 14, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  groupChipText: { fontSize: 13.5, fontWeight: "600" },
+  groupsEntry: { flexDirection: "row", alignItems: "center", gap: 12, height: 52, paddingHorizontal: 16, borderRadius: 14, marginTop: 14 },
+  groupsEntryText: { flex: 1, fontSize: 15, fontWeight: "600" },
+  badge: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  badgeText: { fontSize: 12, fontWeight: "800" },
   sheetTitle: { fontSize: 24, fontWeight: "800", letterSpacing: -0.3 },
   sheetMeta: { fontSize: 13, marginTop: 2, marginBottom: 8 },
   headerActions: { flexDirection: "row", gap: 8 },

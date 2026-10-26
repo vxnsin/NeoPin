@@ -40,6 +40,7 @@ export function registerHandlers(ws: Socket) {
         ws.emit({ type: "pong" });
         break;
 
+      case "groupsChanged":
       case "dataResponse":
         break;
 
