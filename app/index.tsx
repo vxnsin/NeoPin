@@ -1,21 +1,38 @@
-import React, { useEffect, useState } from "react";
-import { View, StyleSheet } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import useThemeManager from "@/hooks/useThemeManager";
 import { useWebSocketContext } from "@/context/WebSocket";
-import Loader from "@/components/Loader";
+import Intro from "@/components/Intro";
+import PulseLogo from "@/components/PulseLogo";
 import usePermissions from "@/hooks/usePermission";
 import { readCredentials, socket } from "@/lib/socket";
+
+const INTRO_KEY = "introSeen";
 
 export default function Index() {
   const theme = useThemeManager();
   const router = useRouter();
   const { connect } = useWebSocketContext();
-  const [loaded, setLoaded] = useState(false);
+  // null while we look up whether this is the first start.
+  const [showIntro, setShowIntro] = useState<boolean | null>(null);
 
   usePermissions();
 
   useEffect(() => {
+    AsyncStorage.getItem(INTRO_KEY)
+      .then((seen) => setShowIntro(!seen))
+      .catch(() => setShowIntro(false));
+  }, []);
+
+  const finishIntro = useCallback(() => {
+    AsyncStorage.setItem(INTRO_KEY, "1").catch(() => {});
+    setShowIntro(false);
+  }, []);
+
+  useEffect(() => {
+    if (showIntro !== false) return;
     let active = true;
 
     (async () => {
@@ -24,13 +41,9 @@ export default function Index() {
         if (active) router.replace("/login");
         return;
       }
-      if (socket.connected) {
-        if (active) setLoaded(true);
-        return;
-      }
       try {
-        await connect(creds.serverIp, creds.deviceId, creds.password);
-        if (active) setLoaded(true);
+        if (!socket.connected) await connect(creds.serverIp, creds.deviceId, creds.password);
+        if (active) router.replace("/map");
       } catch (error: any) {
         if (!active) return;
         router.replace({
@@ -47,26 +60,19 @@ export default function Index() {
     return () => {
       active = false;
     };
-  }, [connect, router]);
+  }, [showIntro, connect, router]);
+
+  if (showIntro) return <Intro onDone={finishIntro} />;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
-      <Loader
-        text="Connecting"
-        loop={true}
-        duration={14050}
-        instant={loaded}
-        onComplete={() => router.replace("/map")}
-      />
+      <PulseLogo size={84} />
+      <Text style={[styles.text, { color: theme.colors.muted }]}>Connecting to your server…</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
+  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20 },
+  text: { marginTop: -24, fontSize: 15, fontWeight: "500" },
 });

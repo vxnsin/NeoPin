@@ -51,6 +51,14 @@ export default {
     plugins: [
       "expo-router",
       [
+        "expo-image-picker",
+        {
+          photosPermission: "NeoPin uses the photo you pick as your profile picture on your own server.",
+          cameraPermission: false,
+          microphonePermission: false,
+        },
+      ],
+      [
         "expo-location",
         {
           isIosBackgroundLocationEnabled: true,

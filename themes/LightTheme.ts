@@ -8,6 +8,9 @@ const LightTheme: Theme = {
     primary: "#000000",
     secondary: "#d3171e",
     onSecondary: "#FFFFFF",
+    raised: "#ffffff",
+    subtle: "#f2f4f7",
+    muted: "#5b6577",
   },
 };
 

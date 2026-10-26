@@ -8,6 +8,9 @@ const DarkTheme: Theme = {
     primary: "#FFFFFF",
     secondary: "#d3171e",
     onSecondary: "#FFFFFF",
+    raised: "#161a22",
+    subtle: "#1e232d",
+    muted: "#98a2b3",
   },
 };
 
