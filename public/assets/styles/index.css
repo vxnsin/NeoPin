@@ -684,7 +684,8 @@ body.is-timeline .maplibregl-popup {
   inset: -4.5px;
   border-radius: 50%;
   border: 2px solid var(--online);
-  animation: ripple 2.4s ease-out infinite;
+  animation: ripple 6s ease-out infinite;
+  pointer-events: none;
   /* Own compositor layer, so only the GPU animates it and the map does not repaint around it. */
   will-change: transform, opacity;
   backface-visibility: hidden;
@@ -733,13 +734,15 @@ body.is-timeline .maplibregl-popup {
   color: var(--text-muted);
 }
 
+/* One short pulse, then rest: most of the time nothing animates, which keeps panning smooth. */
 @keyframes ripple {
-  from {
+  0% {
     transform: scale(1);
-    opacity: 0.8;
+    opacity: 0.75;
   }
-  to {
-    transform: scale(1.45);
+  25%,
+  100% {
+    transform: scale(1.4);
     opacity: 0;
   }
 }
