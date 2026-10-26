@@ -277,3 +277,164 @@
 .cropper .row__edit-actions {
   width: 100%;
 }
+
+/* Notification dots and group chips */
+.notify-dot {
+  width: 9px;
+  height: 9px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 0 2px var(--surface-solid);
+}
+
+.notify-dot[hidden] {
+  display: none;
+}
+
+.notify-dot--tile {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  margin: 0;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips[hidden] {
+  display: none;
+}
+
+.chip {
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--brand-soft);
+  color: var(--brand);
+}
+
+/* Group dialog */
+.gsection {
+  margin: 0;
+  padding: 14px 16px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.group {
+  margin: 4px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.group__head strong {
+  font-size: 15px;
+}
+
+.group .rows {
+  padding: 0 8px;
+}
+
+.group__form {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px 12px;
+}
+
+.group__form .select {
+  flex: 1;
+  min-width: 0;
+}
+
+.group .form-error {
+  padding: 0 12px 8px;
+}
+
+.row__text .tag {
+  margin-left: 6px;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.row--pending .row__text {
+  opacity: 0.8;
+}
+
+.group__form[hidden] {
+  display: none;
+}
+
+/* Suggestions under the invite input */
+.combo {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.combo__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  max-height: 232px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  list-style: none;
+}
+
+.combo__list[hidden] {
+  display: none;
+}
+
+.combo__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.combo__option .avatar {
+  margin: 3px;
+}
+
+.combo__option:hover,
+.combo__option[aria-selected="true"] {
+  background: var(--brand-soft);
+}

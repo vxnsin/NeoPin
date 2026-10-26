@@ -23,7 +23,11 @@ const mapEl = document.getElementById("map");
 const phone = window.matchMedia("(max-width: 767px)");
 
 const markers = new Map();
+// Everything the server sends, and the part that passes the group filter.
+let allDevices = [];
 let devices = [];
+// A group id, or null for everybody.
+let groupFilter = null;
 let selectedId = null;
 let socket = null;
 let reconnectTimer = null;
@@ -579,11 +583,12 @@ function renderPanel() {
     .join("");
 
   if (devices.length === 0) {
+    const filtered = allDevices.length > 0;
     listEl.innerHTML = `
       <li class="empty">
         <span class="empty__icon"><svg class="icon"><use href="#i-phone" /></svg></span>
-        <strong>No devices yet</strong>
-        Sign in with the NeoPin app and the phone shows up here.
+        <strong>${filtered ? "Nobody here yet" : "No devices yet"}</strong>
+        ${filtered ? "No one in this group has shared a device." : "Sign in with the NeoPin app and the phone shows up here."}
       </li>`;
     return;
   }
@@ -675,8 +680,27 @@ refreshButton.addEventListener("click", () => {
 
 // Live data
 
+function filterDevices() {
+  return groupFilter === null ? allDevices : allDevices.filter((d) => d.groupIds?.includes(groupFilter));
+}
+
+function setGroupFilter(id) {
+  groupFilter = id;
+  try {
+    if (typeof me !== "undefined" && me) localStorage.setItem(`neopin.group.${me.id}`, id === null ? "all" : String(id));
+  } catch {
+    // storage can be blocked, the filter just does not stick
+  }
+  devices = filterDevices();
+  if (selectedId && !devices.some((d) => keyOf(d) === selectedId)) selectedId = null;
+  render();
+  if (located().length > 0) fitAll(true);
+  if (typeof renderChips === "function") renderChips();
+}
+
 function receive(list) {
-  devices = list;
+  allDevices = list;
+  devices = filterDevices();
   if (selectedId && !devices.some((d) => keyOf(d) === selectedId)) selectedId = null;
   render();
   if (!fittedOnce && located().length > 0 && !document.body.classList.contains("is-timeline")) {
@@ -706,6 +730,11 @@ function connect() {
       return;
     }
     if (data.type === "dataResponse") receive(data.devices || []);
+    // Groups, invites or members changed: the devices in view may change with them.
+    if (data.type === "groupsChanged") {
+      socket.send(JSON.stringify({ type: "getData" }));
+      document.dispatchEvent(new Event("groupschanged"));
+    }
   });
   socket.addEventListener("close", (event) => {
     if (event.code === 4000) {
