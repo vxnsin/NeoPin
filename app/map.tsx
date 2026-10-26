@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,9 +15,16 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import useThemeManager from "@/hooks/useThemeManager";
+import { useAvatars } from "@/hooks/useAvatars";
 import { useWebSocketContext } from "@/context/WebSocket";
+import Avatar from "@/components/Avatar";
+import PulseLogo from "@/components/PulseLogo";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
+import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
+import { STATE_COLORS, freshness, type Device } from "@/lib/devices";
+import { buildMapHtml } from "@/lib/mapHtml";
+import { readCredentials, type StoredCredentials } from "@/lib/socket";
 import {
   REPORTING_PRESETS,
   getReportingPreset,
@@ -26,30 +32,13 @@ import {
   type ReportingPreset,
 } from "@/lib/settings";
 
-type Device = {
-  deviceId: string;
-  position: { latitude: number; longitude: number } | null;
-  lastPing: string | null;
-  status: "online" | "offline";
-};
+const STATE_ORDER = { online: 0, stale: 1, offline: 2 };
 
-const STALE_AFTER_MS = 10 * 60 * 1000;
-
-function freshness(device: Device): "online" | "stale" | "offline" | "unknown" {
-  if (device.status !== "online") return "offline";
-  if (!device.lastPing) return "unknown";
-  return Date.now() - new Date(device.lastPing).getTime() > STALE_AFTER_MS ? "stale" : "online";
-}
-
-const STATE_COLORS = {
-  online: "#2ecc71",
-  stale: "#f1c40f",
-  offline: "#9aa0a6",
-  unknown: "#3498db",
-};
+type Sheet = "devices" | "settings" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
+  const c = theme.colors;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { emit, addMessageListener, isConnected } = useWebSocketContext();
@@ -58,17 +47,24 @@ export default function MapScreen() {
   const [webViewLoaded, setWebViewLoaded] = useState(false);
   const [minLoadingTimeFinished, setMinLoadingTimeFinished] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [creds, setCreds] = useState<StoredCredentials | null>(null);
+  const [sheet, setSheet] = useState<Sheet>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
   const [, setTick] = useState(0);
   const requestedOnce = useRef(false);
+  const avatarFor = useAvatars(devices, creds);
+  // Built once, later theme changes go in as messages so the map does not reload.
+  const mapHtml = useMemo(() => buildMapHtml(theme.isDark, insets.bottom), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const post = useCallback((payload: object) => {
     webviewRef.current?.postMessage(JSON.stringify(payload));
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setMinLoadingTimeFinished(true), 1500);
+    readCredentials().then(setCreds);
+    const timer = setTimeout(() => setMinLoadingTimeFinished(true), 1200);
     return () => clearTimeout(timer);
   }, []);
 
@@ -80,13 +76,21 @@ export default function MapScreen() {
   useEffect(
     () =>
       addMessageListener((data) => {
-        if (data.type === "dataResponse" && Array.isArray(data.devices)) {
-          setDevices(data.devices);
-          post({ type: "devices", devices: data.devices });
-        }
+        if (data.type === "dataResponse" && Array.isArray(data.devices)) setDevices(data.devices);
       }),
-    [addMessageListener, post]
+    [addMessageListener]
   );
+
+  // The map gets each device with its picture as a data URI, it cannot send the login headers itself.
+  const mapDevices = devices.map((device) => ({ ...device, avatar: avatarFor(device.avatarUrl) }));
+  const mapDevicesKey = JSON.stringify(mapDevices);
+  useEffect(() => {
+    if (webViewLoaded) post({ type: "devices", devices: JSON.parse(mapDevicesKey) });
+  }, [webViewLoaded, mapDevicesKey, post]);
+
+  useEffect(() => {
+    if (webViewLoaded) post({ type: "theme", dark: theme.isDark });
+  }, [webViewLoaded, theme.isDark, post]);
 
   useEffect(() => {
     if (!webViewLoaded) return;
@@ -110,8 +114,7 @@ export default function MapScreen() {
       requestedOnce.current = true;
       emit({ type: "pingDevices" });
     }
-    if (webViewLoaded && isConnected) post({ type: "devices", devices });
-  }, [webViewLoaded, isConnected, emit, post, devices]);
+  }, [webViewLoaded, isConnected, emit]);
 
   const showLoader = !webViewLoaded || !minLoadingTimeFinished;
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -123,8 +126,8 @@ export default function MapScreen() {
 
   const focusDevice = (device: Device) => {
     if (!device.position) return;
-    post({ type: "focus", latitude: device.position.latitude, longitude: device.position.longitude });
-    setMenuOpen(false);
+    post({ type: "focus", deviceId: device.deviceId });
+    setSheet(null);
   };
 
   const changePreset = async (next: ReportingPreset) => {
@@ -132,121 +135,250 @@ export default function MapScreen() {
     await setReportingPreset(next);
   };
 
+  const changePhoto = async () => {
+    if (!creds || photoBusy) return;
+    setPhotoError("");
+    setPhotoBusy(true);
+    try {
+      const jpeg = await pickAvatar();
+      // The server sends the new avatarUrl to everyone, this screen included.
+      if (jpeg) await uploadAvatar(creds, jpeg);
+    } catch (error: any) {
+      setPhotoError(error?.message || "The photo could not be saved.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const deletePhoto = async () => {
+    if (!creds || photoBusy) return;
+    setPhotoError("");
+    setPhotoBusy(true);
+    try {
+      await removeAvatar(creds);
+    } catch (error: any) {
+      setPhotoError(error?.message || "The photo could not be removed.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   const logout = async () => {
-    setMenuOpen(false);
+    setSheet(null);
     await signOut();
     router.replace("/login");
   };
 
-  const statusColor = isConnected ? STATE_COLORS.online : STATE_COLORS.stale;
-  const statusText = isConnected ? "Live" : "Reconnecting…";
-  const c = theme.colors;
+  const me = devices.find((d) => d.deviceId === creds?.deviceId);
+  const sorted = [...devices].sort(
+    (a, b) =>
+      Number(b.deviceId === creds?.deviceId) - Number(a.deviceId === creds?.deviceId) ||
+      STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
+      a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
+  );
+  const online = devices.filter((d) => d.status === "online").length;
+  const summary = !isConnected
+    ? "Reconnecting…"
+    : devices.length === 0
+      ? "Connected · no devices yet"
+      : `${online} of ${devices.length} connected`;
+
+  const deviceRow = (device: Device) => {
+    const state = freshness(device);
+    const isMe = device.deviceId === creds?.deviceId;
+    return (
+      <Pressable
+        key={device.deviceId}
+        style={({ pressed }) => [styles.deviceRow, pressed && { backgroundColor: c.subtle }]}
+        onPress={() => focusDevice(device)}
+        accessibilityLabel={`${device.deviceId}, ${state}`}
+      >
+        <Avatar name={device.deviceId} uri={avatarFor(device.avatarUrl)} state={state} gapColor={c.raised} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
+            {device.deviceId}
+            {isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
+          </Text>
+          <View style={styles.metaRow}>
+            <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[state] }]} />
+            <Text style={[styles.deviceMeta, { color: c.muted }]}>
+              {state === "offline" ? "Offline · " : ""}
+              {device.lastPing ? timeAgo(device.lastPing) : "no position yet"}
+            </Text>
+          </View>
+        </View>
+        {device.position && <MaterialIcons name="near-me" size={20} color={c.muted} />}
+      </Pressable>
+    );
+  };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: c.surface }]}>
       <Animated.View style={[styles.loader, { backgroundColor: c.surface, opacity: fadeAnim }]} pointerEvents={showLoader ? "auto" : "none"}>
-        <ActivityIndicator size="large" color={c.primary} />
-        <Text style={[styles.loaderText, { color: c.primary }]}>Loading Map...</Text>
+        <PulseLogo size={72} />
       </Animated.View>
 
       <WebView
         ref={webviewRef}
-        source={{ html: mapHTML }}
-        style={[styles.webview, showLoader && { opacity: 0 }]}
+        source={{ html: mapHtml }}
+        style={[styles.webview, { backgroundColor: c.surface }, showLoader && { opacity: 0 }]}
         onLoad={() => setWebViewLoaded(true)}
+        originWhitelist={["*"]}
         geolocationEnabled
         onMessage={(event) => {
           try {
             const data = JSON.parse(event.nativeEvent.data);
-            if (data.type === "error") console.error("WebView Error:", data.message);
+            if (data.type === "error") console.warn("Map:", data.message);
           } catch {
             // ignore
           }
         }}
       />
 
-      <View style={[styles.statusPill, { top: insets.top + 12, backgroundColor: c.surface }]}>
-        <View style={[styles.dot, { backgroundColor: statusColor }]} />
-        <Text style={[styles.statusText, { color: c.primary }]}>{statusText}</Text>
-        <Text style={[styles.statusMeta, { color: c.primary }]}>
-          {devices.filter((d) => d.status === "online").length}/{devices.length} online
-        </Text>
-      </View>
-
+      {/* The device bar, like the one at the bottom of Apple's Find My. */}
       <Pressable
-        style={[styles.menuButton, { top: insets.top + 8, backgroundColor: c.secondary }]}
-        onPress={() => setMenuOpen(true)}
-        accessibilityLabel="Menu"
+        style={[styles.bar, { bottom: insets.bottom + 12, backgroundColor: c.raised }]}
+        onPress={() => setSheet("devices")}
+        accessibilityLabel={`Devices, ${summary}`}
       >
-        <MaterialIcons name="menu" size={28} color={c.onSecondary} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.barTitle, { color: c.primary }]}>Devices</Text>
+          <View style={styles.metaRow}>
+            <View style={[styles.metaDot, { backgroundColor: isConnected ? STATE_COLORS.online : STATE_COLORS.stale }]} />
+            <Text style={[styles.deviceMeta, { color: c.muted }]}>{summary}</Text>
+          </View>
+        </View>
+        <View style={styles.stack}>
+          {sorted.slice(0, 4).map((device, index) => (
+            <View key={device.deviceId} style={{ marginLeft: index === 0 ? 0 : -10 }}>
+              <Avatar name={device.deviceId} uri={avatarFor(device.avatarUrl)} state={freshness(device)} size={26} gapColor={c.raised} />
+            </View>
+          ))}
+        </View>
+        <Pressable
+          style={[styles.gear, { backgroundColor: c.subtle }]}
+          onPress={() => setSheet("settings")}
+          hitSlop={6}
+          accessibilityLabel="Settings"
+        >
+          <MaterialIcons name="settings" size={20} color={c.primary} />
+        </Pressable>
       </Pressable>
 
-      <Modal visible={menuOpen} transparent animationType="slide" onRequestClose={() => setMenuOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setMenuOpen(false)} />
-        <View style={[styles.sheet, { backgroundColor: c.surface, paddingBottom: insets.bottom + 16 }]}>
+      <Modal visible={sheet !== null} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
+        <Pressable style={styles.backdrop} onPress={() => setSheet(null)} />
+        <View style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16 }]}>
+          <View style={[styles.grabber, { backgroundColor: c.muted }]} />
+
           <View style={styles.sheetHeader}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>Devices</Text>
-            <Pressable onPress={refresh} hitSlop={10}>
-              <MaterialIcons name="refresh" size={24} color={c.primary} />
-            </Pressable>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : "Devices"}</Text>
+            <View style={styles.headerActions}>
+              {sheet === "devices" && (
+                <Pressable
+                  style={[styles.headerButton, { backgroundColor: c.subtle }]}
+                  onPress={refresh}
+                  accessibilityLabel="Ask every device for a fresh position"
+                >
+                  <MaterialIcons name="refresh" size={20} color={c.primary} />
+                </Pressable>
+              )}
+              <Pressable
+                style={[styles.headerButton, { backgroundColor: c.subtle }]}
+                onPress={() => setSheet(sheet === "settings" ? "devices" : "settings")}
+                accessibilityLabel={sheet === "settings" ? "Back to devices" : "Settings"}
+              >
+                <MaterialIcons name={sheet === "settings" ? "people-outline" : "settings"} size={20} color={c.primary} />
+              </Pressable>
+            </View>
           </View>
 
-          <ScrollView style={styles.deviceList}>
-            {devices.length === 0 && (
-              <Text style={[styles.empty, { color: c.primary }]}>No devices connected yet.</Text>
-            )}
-            {devices.map((device) => {
-              const state = freshness(device);
-              return (
-                <Pressable
-                  key={device.deviceId}
-                  style={({ pressed }) => [styles.deviceRow, pressed && { backgroundColor: c.onSurface }]}
-                  onPress={() => focusDevice(device)}
-                >
-                  <View style={[styles.dot, { backgroundColor: STATE_COLORS[state] }]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.deviceName, { color: c.primary }]}>{device.deviceId}</Text>
-                    <Text style={[styles.deviceMeta, { color: c.primary }]}>
-                      {device.status} · {timeAgo(device.lastPing)}
-                    </Text>
+          {sheet === "devices" && (
+            <>
+              <Text style={[styles.sheetMeta, { color: c.muted }]}>{summary}</Text>
+              <ScrollView style={styles.deviceList}>
+                {sorted.length === 0 && (
+                  <Text style={[styles.empty, { color: c.muted }]}>No devices yet.</Text>
+                )}
+                {sorted.map(deviceRow)}
+              </ScrollView>
+            </>
+          )}
+
+          {sheet === "settings" && creds && (
+            <>
+              <View style={[styles.profile, { backgroundColor: c.subtle }]}>
+                <Pressable onPress={changePhoto} accessibilityLabel="Change your profile photo" disabled={photoBusy}>
+                  <Avatar
+                    name={creds.deviceId}
+                    uri={avatarFor(me?.avatarUrl)}
+                    state={me ? freshness(me) : "offline"}
+                    size={52}
+                    gapColor={c.subtle}
+                  />
+                  <View style={[styles.cameraBadge, { backgroundColor: c.secondary, borderColor: c.subtle }]}>
+                    {photoBusy ? (
+                      <ActivityIndicator size="small" color={c.onSecondary} />
+                    ) : (
+                      <MaterialIcons name="photo-camera" size={13} color={c.onSecondary} />
+                    )}
                   </View>
-                  {device.position && <MaterialIcons name="my-location" size={20} color={c.primary} />}
                 </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text style={[styles.sectionTitle, { color: c.primary }]}>Position updates</Text>
-          <View style={styles.presetRow}>
-            {(Object.keys(REPORTING_PRESETS) as ReportingPreset[]).map((key) => {
-              const active = key === preset;
-              return (
-                <Pressable
-                  key={key}
-                  onPress={() => changePreset(key)}
-                  style={[
-                    styles.presetChip,
-                    { borderColor: active ? c.secondary : c.onSurface, backgroundColor: active ? c.secondary : "transparent" },
-                  ]}
-                >
-                  <Text style={[styles.presetLabel, { color: active ? c.onSecondary : c.primary }]}>
-                    {REPORTING_PRESETS[key].label}
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
+                    {creds.deviceId}
                   </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={[styles.presetHint, { color: c.primary }]}>{REPORTING_PRESETS[preset].description}</Text>
+                  <View style={styles.profileActions}>
+                    <Pressable onPress={changePhoto} disabled={photoBusy} hitSlop={8}>
+                      <Text style={[styles.link, { color: c.secondary }]}>{me?.avatarUrl ? "Change photo" : "Add a photo"}</Text>
+                    </Pressable>
+                    {me?.avatarUrl ? (
+                      <Pressable onPress={deletePhoto} disabled={photoBusy} hitSlop={8}>
+                        <Text style={[styles.link, { color: c.muted }]}>Remove</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                  {photoError ? <Text style={[styles.error, { color: c.secondary }]}>{photoError}</Text> : null}
+                </View>
+              </View>
 
-          <Pressable style={[styles.logout, { borderColor: c.onSurface }]} onPress={logout}>
-            <MaterialIcons name="logout" size={20} color={c.secondary} />
-            <Text style={[styles.logoutText, { color: c.secondary }]}>Disconnect and log out</Text>
-          </Pressable>
+              <Text style={[styles.sectionTitle, { color: c.muted }]}>Position updates</Text>
+              <View style={styles.presetRow}>
+                {(Object.keys(REPORTING_PRESETS) as ReportingPreset[]).map((key) => {
+                  const active = key === preset;
+                  return (
+                    <Pressable
+                      key={key}
+                      onPress={() => changePreset(key)}
+                      style={[styles.presetChip, { backgroundColor: active ? c.secondary : c.subtle }]}
+                    >
+                      <Text style={[styles.presetLabel, { color: active ? c.onSecondary : c.primary }]}>
+                        {REPORTING_PRESETS[key].label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Text style={[styles.presetHint, { color: c.muted }]}>{REPORTING_PRESETS[preset].description}</Text>
+
+              <Pressable style={[styles.logout, { backgroundColor: c.subtle }]} onPress={logout}>
+                <MaterialIcons name="logout" size={20} color={c.secondary} />
+                <Text style={[styles.logoutText, { color: c.secondary }]}>Disconnect and log out</Text>
+              </Pressable>
+            </>
+          )}
         </View>
       </Modal>
     </View>
   );
 }
+
+const shadow = {
+  elevation: 6,
+  shadowColor: "#000",
+  shadowOpacity: 0.22,
+  shadowRadius: 14,
+  shadowOffset: { width: 0, height: 6 },
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -258,175 +390,73 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     zIndex: 10,
   },
-  loaderText: { marginTop: 10, fontSize: 16, fontWeight: "bold" },
   webview: { flex: 1 },
-  statusPill: {
+  bar: {
     position: "absolute",
     left: 12,
+    right: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    elevation: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
+    gap: 12,
+    minHeight: 68,
+    paddingLeft: 18,
+    paddingRight: 10,
+    paddingVertical: 10,
+    borderRadius: 22,
+    ...shadow,
   },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  statusText: { fontSize: 13, fontWeight: "600" },
-  statusMeta: { fontSize: 12, opacity: 0.6 },
-  menuButton: {
-    position: "absolute",
-    right: 12,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    elevation: 4,
-  },
+  barTitle: { fontSize: 17, fontWeight: "700" },
+  stack: { flexDirection: "row", alignItems: "center" },
+  gear: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
+  metaDot: { width: 7, height: 7, borderRadius: 4 },
   backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)" },
   sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    maxHeight: "80%",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    maxHeight: "85%",
   },
-  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
-  sheetTitle: { fontSize: 20, fontWeight: "700" },
-  deviceList: { maxHeight: 260 },
-  empty: { opacity: 0.6, paddingVertical: 12 },
-  deviceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderRadius: 12, paddingHorizontal: 8 },
-  deviceName: { fontSize: 16, fontWeight: "600" },
-  deviceMeta: { fontSize: 12, opacity: 0.6, textTransform: "capitalize" },
-  sectionTitle: { fontSize: 14, fontWeight: "600", marginTop: 16, marginBottom: 8, opacity: 0.8 },
+  grabber: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, opacity: 0.35, marginBottom: 12 },
+  sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  sheetTitle: { fontSize: 24, fontWeight: "800", letterSpacing: -0.3 },
+  sheetMeta: { fontSize: 13, marginTop: 2, marginBottom: 8 },
+  headerActions: { flexDirection: "row", gap: 8 },
+  headerButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  deviceList: { maxHeight: 420 },
+  empty: { paddingVertical: 14 },
+  deviceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, borderRadius: 14, paddingHorizontal: 6 },
+  deviceName: { fontSize: 15.5, fontWeight: "600" },
+  deviceMeta: { fontSize: 12.5 },
+  profile: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14, borderRadius: 18, marginTop: 14 },
+  cameraBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileActions: { flexDirection: "row", gap: 16, marginTop: 4 },
+  link: { fontSize: 13.5, fontWeight: "600" },
+  error: { fontSize: 12, marginTop: 4 },
+  sectionTitle: { fontSize: 13, fontWeight: "600", marginTop: 20, marginBottom: 8 },
   presetRow: { flexDirection: "row", gap: 8 },
-  presetChip: { flex: 1, borderWidth: 1, borderRadius: 999, paddingVertical: 10, alignItems: "center" },
+  presetChip: { flex: 1, borderRadius: 12, paddingVertical: 11, alignItems: "center" },
   presetLabel: { fontSize: 13, fontWeight: "600" },
-  presetHint: { fontSize: 12, opacity: 0.6, marginTop: 8 },
+  presetHint: { fontSize: 12, marginTop: 8 },
   logout: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    marginTop: 20,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 22,
+    height: 50,
+    borderRadius: 14,
   },
   logoutText: { fontSize: 15, fontWeight: "600" },
 });
-
-const mapHTML = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <style>
-    * { margin: 0; padding: 0; }
-    html, body, #map { height: 100%; width: 100%; background: #000; }
-    .leaflet-control-zoom { display: none !important; }
-    .leaflet-control-attribution { font-size: 9px; background: rgba(255,255,255,0.75); }
-    .pin { background: transparent; border: none; }
-    .pin span { display: block; width: 18px; height: 18px; margin: 2px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,0.5); }
-    .pin.online span { background: ${STATE_COLORS.online}; }
-    .pin.stale span { background: ${STATE_COLORS.stale}; }
-    .pin.offline span { background: ${STATE_COLORS.offline}; }
-    .pin.unknown span { background: ${STATE_COLORS.unknown}; }
-    .pin.self span { background: #ffffff; border-color: #d3171e; }
-    .leaflet-popup-content { font: 13px system-ui, sans-serif; }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-  <script>
-    var map = L.map('map', { center: [51.505, -0.09], zoom: 10, minZoom: 2, maxZoom: 19, zoomControl: false });
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-      noWrap: true, detectRetina: true, maxZoom: 19
-    }).addTo(map);
-
-    var STALE_MS = ${STALE_AFTER_MS};
-    var selfMarker = null;
-    var markers = {};
-
-    function icon(state) {
-      return L.divIcon({ className: 'pin ' + state, html: '<span></span>', iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -12] });
-    }
-    function ago(ts) {
-      if (!ts) return 'never';
-      var s = Math.max(0, Math.floor((Date.now() - new Date(ts)) / 1000));
-      if (s < 60) return s + 's ago';
-      if (s < 3600) return Math.floor(s / 60) + ' min ago';
-      if (s < 86400) return Math.floor(s / 3600) + ' h ago';
-      return Math.floor(s / 86400) + ' d ago';
-    }
-    // Device names come from other phones, never put them into HTML unescaped.
-    function esc(text) {
-      return String(text).replace(/[&<>"']/g, function (c) {
-        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-      });
-    }
-    function state(d) {
-      if (d.status !== 'online') return 'offline';
-      if (!d.lastPing) return 'unknown';
-      return Date.now() - new Date(d.lastPing) > STALE_MS ? 'stale' : 'online';
-    }
-
-    function updateSelf(lat, lng, center) {
-      if (!selfMarker) {
-        selfMarker = L.marker([lat, lng], { icon: icon('self'), zIndexOffset: 1000 }).addTo(map).bindPopup('<b>You</b>');
-        map.setView([lat, lng], 13);
-      } else {
-        selfMarker.setLatLng([lat, lng]);
-        if (center) map.setView([lat, lng], Math.max(map.getZoom(), 13));
-      }
-    }
-
-    function updateDevices(devices) {
-      var seen = {};
-      devices.forEach(function (d) {
-        if (!d.position) return;
-        seen[d.deviceId] = true;
-        var latlng = [d.position.latitude, d.position.longitude];
-        var st = state(d);
-        var popup = '<b>' + esc(d.deviceId) + '</b><br>' + esc(d.status) + ' &middot; ' + ago(d.lastPing);
-        if (markers[d.deviceId]) {
-          markers[d.deviceId].setLatLng(latlng).setIcon(icon(st)).bindPopup(popup);
-        } else {
-          markers[d.deviceId] = L.marker(latlng, { icon: icon(st), title: d.deviceId }).addTo(map).bindPopup(popup);
-        }
-      });
-      Object.keys(markers).forEach(function (id) {
-        if (!seen[id]) { map.removeLayer(markers[id]); delete markers[id]; }
-      });
-    }
-
-    function handle(raw) {
-      try {
-        var data = JSON.parse(raw);
-        if (data.type === 'self') updateSelf(data.latitude, data.longitude, data.center);
-        else if (data.type === 'devices') updateDevices(data.devices || []);
-        else if (data.type === 'focus') map.flyTo([data.latitude, data.longitude], Math.max(map.getZoom(), 15));
-      } catch (e) {
-        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'error', message: String(e) }));
-      }
-    }
-    window.addEventListener('message', function (e) { handle(e.data); });
-    document.addEventListener('message', function (e) { handle(e.data); });
-
-    var clicks = 0;
-    map.on('click', function (e) {
-      clicks++;
-      if (clicks >= 2) { map.setView(e.latlng, map.getZoom() + 1, { animate: true }); clicks = 0; }
-      setTimeout(function () { clicks = 0; }, 1000);
-    });
-  </script>
-</body>
-</html>
-`;

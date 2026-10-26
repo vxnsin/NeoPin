@@ -1,16 +1,20 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
   StyleSheet,
-  TouchableOpacity,
   Text,
-  Animated,
+  View,
 } from "react-native";
-import useThemeManager from "@/hooks/useThemeManager";
-import { MaterialIcons as Icon } from "@expo/vector-icons";
-import FloatingInput from "@/components/FloatingInput";
 import * as Device from "expo-device";
 import { useRouter } from "expo-router";
+import { MaterialIcons } from "@expo/vector-icons";
+import useThemeManager from "@/hooks/useThemeManager";
+import Field from "@/components/Field";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useWebSocketContext } from "@/context/WebSocket";
 import { STORAGE_KEY } from "@/lib/socket";
@@ -21,160 +25,157 @@ function normalizeUrl(input: string) {
   return /^wss?:\/\//i.test(url) ? url : `ws://${url}`;
 }
 
+type Errors = { server?: string; password?: string; name?: string };
+
 const Login = () => {
-  const colors = useThemeManager();
-  const [username, setUsername] = useState("");
-  const [serverIp, setServerIp] = useState("");
-  const [serverPassword, setServerPassword] = useState("");
-  const [deviceName, setDeviceName] = useState("");
-  const [connectionStatus, setConnectionStatus] = useState("");
-  const [errors, setErrors] = useState({
-    username: false,
-    serverIp: false,
-    serverPassword: false,
-  });
-  const animations = {
-    username: useRef(new Animated.Value(0)).current,
-    serverIp: useRef(new Animated.Value(0)).current,
-    serverPassword: useRef(new Animated.Value(0)).current,
-  };
+  const { colors } = useThemeManager();
   const router = useRouter();
   const { storeValue } = useAsyncStorage(STORAGE_KEY);
   const { connect } = useWebSocketContext();
+  const [server, setServer] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [modelName, setModelName] = useState("");
+  const [errors, setErrors] = useState<Errors>({});
+  const [failure, setFailure] = useState("");
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    setDeviceName(Device.modelName || "Unknown Device");
+    setModelName(Device.modelName || "My phone");
   }, []);
 
-  const handleUsernameChange = (text: string) => {
-    setUsername(text);
-    if (errors.username && text.trim() !== "") {
-      setErrors((prev) => ({ ...prev, username: false }));
-    }
-  };
-
-  const handleServerIpChange = (text: string) => {
-    setServerIp(text);
-    if (errors.serverIp && text.trim() !== "") {
-      setErrors((prev) => ({ ...prev, serverIp: false }));
-    }
-  };
-
-  const handleServerPasswordChange = (text: string) => {
-    setServerPassword(text);
-    if (errors.serverPassword && text.trim() !== "") {
-      setErrors((prev) => ({ ...prev, serverPassword: false }));
-    }
-  };
-
   const handleConnect = async () => {
-    setErrors({ username: false, serverIp: false, serverPassword: false });
-    const deviceId = username.trim();
-    const url = serverIp.trim();
-    const newErrors = {
-      username: !deviceId,
-      serverIp: !url,
-      serverPassword: !serverPassword,
-    };
-    if (newErrors.username || newErrors.serverIp || newErrors.serverPassword) {
-      setErrors(newErrors);
-      setConnectionStatus("Please fill in all fields");
-      return;
-    }
     if (connecting) return;
+    // The name is what the server calls this device, its deviceId.
+    const deviceId = name.trim();
+    const url = server.trim();
+    const next: Errors = {
+      server: url ? undefined : "Server address is required",
+      password: password ? undefined : "Password is required",
+      name: deviceId ? undefined : "Name is required",
+    };
+    setErrors(next);
+    setFailure("");
+    if (next.server || next.password || next.name) return;
+
     setConnecting(true);
-    setConnectionStatus("Connecting...");
     // Log in with the shared socket right away instead of a throwaway test
     // connection: it has the auth timeout and clean error handling already.
     const serverUrl = normalizeUrl(url);
     try {
-      await connect(serverUrl, deviceId, serverPassword);
-      await storeValue(JSON.stringify({ deviceId, serverIp: serverUrl, password: serverPassword }));
+      await connect(serverUrl, deviceId, password);
+      await storeValue(JSON.stringify({ deviceId, serverIp: serverUrl, password }));
       router.replace("/");
     } catch (error: any) {
-      setConnectionStatus("Connection failed: " + error.message);
+      setFailure(error?.message || "Could not connect");
     } finally {
       setConnecting(false);
     }
   };
+
   return (
-    <View
-      style={[styles.container, { backgroundColor: colors.colors.surface }]}
+    <KeyboardAvoidingView
+      style={[styles.screen, { backgroundColor: colors.surface }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <Icon
-        name="wifi-tethering"
-        size={100}
-        color={colors.colors.primary}
-        style={styles.iconTop}
-      />
-      <FloatingInput
-        label="Hostname"
-        customPlaceholder="ws://127.0.0.1:3012"
-        value={serverIp}
-        onChangeText={handleServerIpChange}
-        secure={false}
-        animatedValue={animations.serverIp}
-        icon="list"
-        colors={colors}
-        error={errors.serverIp}
-        errorMessage="Hostname is required"
-      />
-      <FloatingInput
-        label="Password"
-        value={serverPassword}
-        onChangeText={handleServerPasswordChange}
-        secure={true}
-        animatedValue={animations.serverPassword}
-        icon="lock"
-        colors={colors}
-        error={errors.serverPassword}
-        errorMessage="Password is required"
-      />
-      <FloatingInput
-        label="Username"
-        customPlaceholder={deviceName}
-        value={username}
-        onChangeText={handleUsernameChange}
-        secure={false}
-        animatedValue={animations.username}
-        icon="person"
-        colors={colors}
-        error={errors.username}
-        errorMessage="Username is required"
-      />
-      <TouchableOpacity
-        style={[styles.button, { backgroundColor: colors.colors.secondary }]}
-        onPress={handleConnect}
-        disabled={connecting}
-      >
-        <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
-          {connecting ? "Connecting..." : "Connect to Server"}
-        </Text>
-      </TouchableOpacity>
-      {connectionStatus && !connecting ? (
-        <Text style={[styles.status, { color: colors.colors.primary }]}>{connectionStatus}</Text>
-      ) : null}
-    </View>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <Image source={require("@/assets/images/logo.png")} style={styles.logo} />
+        <Text style={[styles.title, { color: colors.primary }]}>NeoPin</Text>
+        <Text style={[styles.lead, { color: colors.muted }]}>Connect this phone to your NeoPin server.</Text>
+
+        <View style={styles.form}>
+          <Field
+            label="Server address"
+            icon="dns"
+            placeholder="192.168.1.20:3012"
+            value={server}
+            onChangeText={(text) => {
+              setServer(text);
+              setErrors((e) => ({ ...e, server: undefined }));
+            }}
+            keyboardType="url"
+            error={errors.server}
+            returnKeyType="next"
+          />
+          <Field
+            label="Password"
+            icon="lock-outline"
+            placeholder="Server password"
+            value={password}
+            onChangeText={(text) => {
+              setPassword(text);
+              setErrors((e) => ({ ...e, password: undefined }));
+            }}
+            secret
+            error={errors.password}
+            returnKeyType="next"
+          />
+          <Field
+            label="Name"
+            icon="person-outline"
+            placeholder={modelName}
+            value={name}
+            onChangeText={(text) => {
+              setName(text);
+              setErrors((e) => ({ ...e, name: undefined }));
+            }}
+            autoCapitalize="words"
+            error={errors.name}
+            hint="Everyone on the map sees you under this name."
+            returnKeyType="go"
+            onSubmitEditing={handleConnect}
+          />
+
+          {failure ? (
+            <View style={[styles.failure, { backgroundColor: colors.subtle }]}>
+              <MaterialIcons name="error-outline" size={18} color={colors.secondary} />
+              <Text style={[styles.failureText, { color: colors.primary }]}>{failure}</Text>
+            </View>
+          ) : null}
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.button,
+              { backgroundColor: colors.secondary, opacity: connecting ? 0.7 : pressed ? 0.88 : 1 },
+            ]}
+            onPress={handleConnect}
+            disabled={connecting}
+            accessibilityRole="button"
+          >
+            {connecting ? (
+              <ActivityIndicator color={colors.onSecondary} />
+            ) : (
+              <>
+                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>Connect</Text>
+                <MaterialIcons name="arrow-forward" size={20} color={colors.onSecondary} />
+              </>
+            )}
+          </Pressable>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  iconTop: { position: "absolute", top: 100 },
+  screen: { flex: 1 },
+  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 110 },
+  logo: { width: 84, height: 84, marginBottom: 14 },
+  title: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
+  lead: { fontSize: 15, marginTop: 6, marginBottom: 30, textAlign: "center" },
+  form: { width: "100%", maxWidth: 420 },
+  failure: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 12, marginBottom: 14 },
+  failureText: { flex: 1, fontSize: 13.5 },
   button: {
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 28,
-    marginTop: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 54,
+    borderRadius: 14,
+    marginTop: 6,
   },
-  buttonText: { fontSize: 18, fontWeight: "bold" },
-  status: { fontSize: 14, marginTop: 16, textAlign: "center" },
+  buttonText: { fontSize: 17, fontWeight: "700" },
 });
 
 export default Login;

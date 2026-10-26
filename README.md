@@ -24,12 +24,12 @@ Every phone runs the NeoPin app and connects to your server over a WebSocket, au
 flowchart LR
     A[📱 Phone A<br/>NeoPin app] <-- WebSocket --> S[(🖥️ NeoPin Server<br/>Node.js + inkan)]
     B[📱 Phone B<br/>NeoPin app] <-- WebSocket --> S
-    S <-- WebSocket + session cookie --> D[🌐 Web dashboard<br/>Leaflet map]
+    S <-- WebSocket + session cookie --> D[🌐 Web dashboard<br/>MapLibre map]
 ```
 
 The app sends its position when it moves and answers when the server asks for a fresh one. On Android a foreground service keeps the connection alive in the background, on iOS the system wakes a background location task. How often positions are sent is up to you: battery saver, balanced or precise.
 
-On the map a device is green while it is online, yellow when its last position is older than ten minutes and grey once it is offline.
+App and dashboard draw the same map, vector tiles from [OpenFreeMap](https://openfreemap.org) on MapLibre, light or dark with the system. Every device is a round picture or its initials, inside a ring that is green while it reports, yellow once its last position is older than ten minutes and grey when it is offline. Zoom in far enough and the names show under the pins. Like in Find My, the bar at the bottom opens the list of all devices, and the gear holds your profile picture, the update presets and the logout.
 
 Nothing is written to disk and no third-party service sees your positions. Restart the server and everything is gone.
 
@@ -73,9 +73,9 @@ The app uses native modules (background service, location, device info), so Expo
 
 | Field | Example |
 |---|---|
-| Hostname | `ws://192.168.1.20:3012`, or `wss://` behind a TLS proxy |
+| Server address | `192.168.1.20:3012`, or `wss://neopin.example.com` behind a TLS proxy |
 | Password | the `PASSWORD` from the server's `.env` |
-| Username | any unique name, this is how the device shows up on the map |
+| Name | any unique name, this is how the device shows up on the map |
 
 The app remembers the login and connects on its own next time. Allow location access "all the time", otherwise updates stop as soon as the screen locks.
 
@@ -120,26 +120,30 @@ All messages are JSON over a single WebSocket. The first message must authentica
 ```
 app/
 ├─ _layout.tsx        # socket provider, position reporter, background service toggle
-├─ index.tsx          # auto-connect with stored credentials
-├─ login.tsx          # hostname / password / username form
-├─ map.tsx            # map, status pill, device list, settings, logout
+├─ index.tsx          # intro on the first start, then auto-connect
+├─ login.tsx          # server address / password / name form
+├─ map.tsx            # map, device bar, device list and settings sheets
 └─ error.tsx          # connection error screen with retry
-components/           # FloatingInput, Loader, Footer
+components/           # Avatar, Field, Intro, PulseLogo, Footer
 context/WebSocket.tsx # exposes the shared socket to screens
 lib/
 ├─ SocketClient.ts    # reconnecting WebSocket client with heartbeat and queue
 ├─ socket.ts          # the one shared client instance + stored credentials
+├─ mapHtml.ts         # the MapLibre page inside the WebView
+├─ devices.ts         # status colours, initials, avatar colours
+├─ avatar.ts          # pick, shrink and upload the profile picture
+├─ logout.ts          # close the socket, stop background work, forget the login
 ├─ settings.ts        # position update presets
 └─ time.ts            # "x min ago"
 handlers/             # server message handlers, position reporting
-hooks/                # useWebSocket, useAsyncStorage, usePermission, useThemeManager
+hooks/                # useWebSocket, useAvatars, useAsyncStorage, usePermission, useThemeManager
 services/             # Android foreground service
 tasks/                # iOS background location task
 themes/               # light and dark palettes
 __tests__/            # Jest tests
 ```
 
-`npm test` runs the tests for the socket client (login, reconnect, queue, heartbeat) against a fake WebSocket.
+`npm test` runs the tests for the socket client (login, reconnect, queue, heartbeat) against a fake WebSocket and for the profile picture upload.
 
 ## Roadmap
 
