@@ -280,6 +280,91 @@ function pinHtml(device) {
   return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}${typeIcon(device, " dtype--badge")}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
 }
 
+// The pulse ring around online pins is drawn by the map itself. A DOM animation over the
+// WebGL canvas stutters, an image that redraws with the map stays smooth.
+const PULSE = 180;
+let pulseOn = false;
+let pulseRing = { offset: -34, radius: 26, colour: "#22c55e" };
+const pulseImage = {
+  width: PULSE,
+  height: PULSE,
+  data: new Uint8Array(PULSE * PULSE * 4),
+  onAdd() {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = PULSE;
+    this.ctx = canvas.getContext("2d");
+  },
+  render() {
+    const t = (performance.now() % 3200) / 3200;
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, PULSE, PULSE);
+    if (t < 0.45) {
+      const p = t / 0.45;
+      ctx.beginPath();
+      ctx.arc(PULSE / 2, PULSE / 2, (pulseRing.radius + 2 + 9 * p) * 2, 0, Math.PI * 2);
+      ctx.lineWidth = 4;
+      ctx.globalAlpha = 0.8 * (1 - p);
+      ctx.strokeStyle = pulseRing.colour;
+      ctx.stroke();
+    }
+    this.data = ctx.getImageData(0, 0, PULSE, PULSE).data;
+    if (pulseOn) map.triggerRepaint();
+    return true;
+  },
+};
+
+// Where the avatar sits relative to the point a pin is anchored to depends on the CSS,
+// so it is measured from a real pin.
+function measurePulse() {
+  for (const { el } of markers.values()) {
+    const bubble = el.querySelector(".pin__bubble");
+    const avatar = el.querySelector(".avatar");
+    if (!bubble || !avatar) continue;
+    const fromBottom = bubble.offsetHeight - (avatar.offsetTop + avatar.offsetHeight / 2);
+    pulseRing.offset = -(8 + fromBottom);
+    pulseRing.radius = bubble.offsetWidth / 2;
+    break;
+  }
+  pulseRing.colour = getComputedStyle(document.documentElement).getPropertyValue("--online").trim() || "#22c55e";
+}
+
+function updatePulse() {
+  const features = located()
+    .filter((device) => freshness(device) === "online")
+    .map((device) => ({
+      type: "Feature",
+      properties: {},
+      geometry: { type: "Point", coordinates: [device.position.longitude, device.position.latitude] },
+    }));
+  pulseOn = features.length > 0;
+  measurePulse();
+  const data = { type: "FeatureCollection", features };
+  try {
+    if (!map.hasImage("pulse")) map.addImage("pulse", pulseImage, { pixelRatio: 2 });
+    if (map.getSource("pulse")) map.getSource("pulse").setData(data);
+    else map.addSource("pulse", { type: "geojson", data });
+    if (!map.getLayer("pulse-ring")) {
+      map.addLayer({
+        id: "pulse-ring",
+        type: "symbol",
+        source: "pulse",
+        layout: {
+          "icon-image": "pulse",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+          "icon-offset": [0, pulseRing.offset],
+        },
+      });
+    } else {
+      map.setLayoutProperty("pulse-ring", "icon-offset", [0, pulseRing.offset]);
+    }
+    if (pulseOn) map.triggerRepaint();
+  } catch {
+    // the style is still loading, style.load tries again
+  }
+}
+map.on("style.load", updatePulse);
+
 function syncMarkers() {
   const seen = new Set();
   for (const device of located()) {
@@ -319,6 +404,7 @@ function syncMarkers() {
       markers.delete(id);
     }
   }
+  updatePulse();
 }
 
 function popupHtml(device) {
