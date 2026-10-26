@@ -1,5 +1,9 @@
 node_modules
 .env
 .git
+.github
 .readme
+.vscode
 test
+data
+*.log

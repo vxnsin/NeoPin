@@ -3,20 +3,39 @@ import path from "path";
 import chalk from "chalk";
 import { inkan, problem, rateLimit, reply, serveStatic, t } from "@vxnsin/inkan";
 import { secureHeaders } from "@inkanjs/secure-headers";
-import { config, passwordMatches, rootDir } from "./config.js";
+import { config, rootDir } from "./config.js";
 import {
-  attachSocket,
-  avatarUrl,
+  avatarFor,
   clearAvatar,
+  createUser,
+  deleteUser,
+  getUser,
+  issueToken,
+  linkedDevices,
+  listUsers,
+  publicUser,
+  revokeToken,
+  setPassword,
+  setAvatar,
+  unlinkDevice,
+  updateUser,
+  userForToken,
+  verifyLogin,
+} from "./accounts.js";
+import {
+  allDevices,
+  attachSocket,
   detachSocket,
   getDevice,
   onlineDevices,
+  removeDevice,
   serializeDevices,
-  setAvatar,
   updatePosition,
 } from "./devices.js";
+import { daysWithData, positionsBetween, recordPosition } from "./history.js";
 import { createAttemptLimiter } from "./rateLimit.js";
-import { isSignedIn, sessionPlugin, signIn } from "./sessions.js";
+import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
+import { buildTimeline, dayRange } from "./timeline.js";
 
 const CLOSE_POLICY = 4000;
 const CLOSE_REPLACED = 4001;
@@ -31,12 +50,67 @@ const Position = t.object({
   longitude: t.number().min(-180).max(180),
 });
 
+const DeviceType = t.enum(["phone", "tablet", "desktop"]);
+
 const Device = t.object({
   deviceId: t.string(),
+  userId: t.number(),
+  owner: t.object({ username: t.string(), displayName: t.string() }),
   position: Position.nullable(),
   lastPing: t.string().nullable(),
   status: t.enum(["online", "offline"]),
   avatarUrl: t.string().nullable(),
+  deviceType: DeviceType,
+});
+
+const User = t.object({
+  id: t.number(),
+  username: t.string(),
+  displayName: t.string(),
+  isAdmin: t.boolean(),
+  mustChangePassword: t.boolean(),
+  avatarUrl: t.string().nullable(),
+});
+
+const LinkedDevice = t.object({
+  deviceId: t.string(),
+  linkedAt: t.string(),
+  deviceType: DeviceType,
+  status: t.enum(["online", "offline"]),
+  lastPing: t.string().nullable(),
+  position: Position.nullable(),
+});
+
+const Visit = t.object({
+  type: t.literal("visit"),
+  start: t.number(),
+  end: t.number(),
+  durationMs: t.number(),
+  lat: t.number(),
+  lon: t.number(),
+  pointCount: t.number(),
+});
+
+const Trip = t.object({
+  type: t.literal("trip"),
+  start: t.number(),
+  end: t.number(),
+  durationMs: t.number(),
+  distanceM: t.number(),
+  mode: t.enum(["walking", "cycling", "driving"]),
+  path: t.array(t.array(t.number())),
+});
+
+const Timeline = t.object({
+  date: t.string(),
+  deviceId: t.string(),
+  summary: t.object({
+    visits: t.number(),
+    distanceM: t.number(),
+    movingMs: t.number(),
+    pointCount: t.number(),
+  }),
+  segments: t.array(t.union(Visit, Trip)),
 });
 
 const Message = t.object({ message: t.string() });
@@ -48,7 +122,8 @@ const ClientMessage = t.discriminated("type", {
   authenticate: t.object({
     type: t.literal("authenticate"),
     deviceId: t.string().min(1).max(64).optional(),
-    password: t.string().max(256).optional(),
+    token: t.string().max(256).optional(),
+    deviceType: DeviceType.optional(),
     viewer: t.boolean().optional(),
   }),
   updatePosition: Position.extend({ type: t.literal("updatePosition") }),
@@ -94,25 +169,29 @@ function sameOrigin(req) {
 }
 
 export function createApp({ gracefulShutdown = true } = {}) {
-  const viewers = new Set();
+  // Dashboard sockets, each with the account it belongs to.
+  const viewers = new Map();
   const authFailures = createAttemptLimiter(config.deviceAuthLimit);
   let broadcastTimer = null;
 
-  // Sends the current device list to every device and dashboard, at most twice a second.
+  // Sends the device list to every device and dashboard, at most twice a second.
   function broadcastDevices() {
     if (broadcastTimer) return;
     broadcastTimer = setTimeout(() => {
       broadcastTimer = null;
       const payload = { type: "dataResponse", devices: serializeDevices() };
       for (const device of onlineDevices()) send(device.socket, payload);
-      for (const viewer of viewers) send(viewer, payload);
+      for (const viewer of viewers.keys()) send(viewer, payload);
     }, BROADCAST_THROTTLE_MS);
   }
 
   // Asks devices for a fresh fix and resolves once they answered or the wait is over.
-  function requestLocation(targetId, excludeId) {
+  // `only` narrows it to one device, `except` leaves the asking device out.
+  function requestLocation({ only = null, except = null } = {}) {
     const targets = onlineDevices().filter(
-      (d) => d.id !== excludeId && (!targetId || d.id === targetId)
+      (d) =>
+        !(except && d.userId === except.userId && d.id === except.deviceId) &&
+        (!only || (d.id === only.deviceId && (only.userId === undefined || d.userId === only.userId)))
     );
     const waits = targets.map(
       (device) =>
@@ -128,28 +207,81 @@ export function createApp({ gracefulShutdown = true } = {}) {
           };
           const timer = setTimeout(done, config.locationWaitMs);
           socket.on("message", onMessage);
-          send(socket, { type: "requestLocation", from: excludeId });
+          send(socket, { type: "requestLocation", from: except?.deviceId });
         })
     );
     return Promise.all(waits).then(() => targets.length);
   }
 
-  // Devices speak HTTP with the same password as on the socket: the device id in
-  // X-Device-Id, the password as a bearer token. Wrong guesses count against the
-  // same per-IP limit as failed socket logins. Both are percent-encoded, because
-  // names like "Luis’ iPhone" are no valid header values as they are.
-  function deviceFromHeaders(ctx) {
+  // The dashboard is signed in with its session cookie, the app with the device
+  // token it got at login: the device name in X-Device-Id and the token as a
+  // bearer. Both are percent-encoded, because names like "Luis’ iPhone" are no
+  // valid header values as they are. Wrong tokens count against the per-IP limit.
+  function deviceAuth(ctx) {
     if (authFailures.blocked(ctx.ip)) throw problem(429, "too-many-attempts", "Too many attempts");
     const deviceId = decodeHeader(ctx.headers["x-device-id"]);
     const auth = ctx.headers.authorization;
-    const password = typeof auth === "string" && auth.startsWith("Bearer ") ? decodeHeader(auth.slice(7)) : null;
-    if (typeof deviceId !== "string" || !deviceId || !passwordMatches(password)) {
-      if (password !== null) authFailures.fail(ctx.ip);
-      throw problem(401, "unauthorized", "Send X-Device-Id and the server password as a bearer token");
+    const token = typeof auth === "string" && auth.startsWith("Bearer ") ? decodeHeader(auth.slice(7)) : null;
+    const user = deviceId && token ? userForToken(token, deviceId) : null;
+    if (!user) {
+      if (token !== null) authFailures.fail(ctx.ip);
+      throw problem(401, "unauthorized", "Log in first");
     }
-    const device = getDevice(deviceId);
-    if (!device) throw problem(404, "unknown-device", `Device ${deviceId} has never connected`);
-    return device;
+    return { user, deviceId, token };
+  }
+
+  function currentUser(ctx) {
+    const id = sessionUserId(ctx.session);
+    const user = id === null ? null : getUser(id);
+    if (user) return { user, deviceId: null, token: null };
+    if (ctx.headers.authorization) return deviceAuth(ctx);
+    throw problem(401, "unauthorized", "Log in first");
+  }
+
+  function requireAdmin(ctx) {
+    const { user } = currentUser(ctx);
+    if (!user.is_admin) throw problem(403, "forbidden", "Only the admin can do this");
+    return user;
+  }
+
+  // Whose data a request is about: the signed-in account, or for the admin any account.
+  function targetUserId(ctx, requested) {
+    const { user } = currentUser(ctx);
+    if (requested === undefined || requested === user.id) return user.id;
+    if (!user.is_admin) throw problem(403, "forbidden", "You can only see your own devices");
+    if (!getUser(requested)) throw problem(404, "unknown-user", "No such account");
+    return requested;
+  }
+
+
+  // Shared by "edit my profile" and the admin editing someone else.
+  const ProfileBody = t.object({
+    username: t.string().max(64).optional(),
+    displayName: t.string().max(64).optional(),
+  });
+  function applyProfile(userId, body) {
+    try {
+      const updated = updateUser(userId, body);
+      broadcastDevices();
+      return publicUser(updated);
+    } catch (error) {
+      if (error.code === "taken") throw problem(409, "username-taken", error.message);
+      if (error.code === "invalid") throw problem(400, "invalid-account", error.message);
+      throw error;
+    }
+  }
+
+  function linkedDevicesOf(userId) {
+    return linkedDevices(userId).map((link) => {
+      const live = getDevice(userId, link.deviceId);
+      return {
+        ...link,
+        deviceType: live?.deviceType ?? link.deviceType,
+        status: live?.status ?? "offline",
+        lastPing: live?.lastPing ?? null,
+        position: live?.position ?? null,
+      };
+    });
   }
 
   const app = inkan({
@@ -188,25 +320,88 @@ export function createApp({ gracefulShutdown = true } = {}) {
       "cache-control": "no-cache",
     });
 
-  app.get("/", (ctx) => (isSignedIn(ctx.session) ? page("index.html") : ctx.redirect("/login")));
+  const signedIn = (ctx) => {
+    const id = sessionUserId(ctx.session);
+    return id !== null && getUser(id) !== null;
+  };
+
+  app.get("/", (ctx) => (signedIn(ctx) ? page("index.html") : ctx.redirect("/login")));
   app.get("/index.html", (ctx) => ctx.redirect("/"));
   app.get("/login", () => page("login.html"));
   // Old links and bookmarks still find the login.
   app.get("/login.html", (ctx) => ctx.redirect("/login"));
   app.register(serveStatic({ dir: path.join(publicDir, "assets"), prefix: "/assets", immutable: () => false }));
 
+  // What the login screens need before anyone is signed in.
+  app.get(
+    "/api/status",
+    { response: { 200: t.object({ version: t.string() }) } },
+    () => ({ version: config.version })
+  );
+
+  // Everything that takes a password shares one limit per IP.
   app.register((scope) => {
     scope.register(rateLimit({ max: config.loginRateLimit.max, window: config.loginRateLimit.windowMs }));
+
+    // Dashboard login: sets the session cookie.
     scope.post(
       "/login",
       {
-        body: t.object({ password: t.string().max(256) }),
-        response: { 200: Message, 401: t.problem(), 429: t.problem() },
+        body: t.object({ username: t.string().max(64), password: t.string().max(256) }),
+        response: { 200: t.object({ message: t.string(), user: User }), 401: t.problem(), 429: t.problem() },
       },
       (ctx) => {
-        if (!passwordMatches(ctx.body.password)) throw problem(401, "invalid-password", "Invalid password");
-        signIn(ctx.session);
-        return { message: "Login successful" };
+        const user = verifyLogin(ctx.body.username, ctx.body.password);
+        if (!user) throw problem(401, "invalid-credentials", "Wrong username or password");
+        signIn(ctx.session, user.id);
+        return { message: "Login successful", user: publicUser(user) };
+      }
+    );
+
+    // App login: answers with the token the device uses from now on.
+    scope.post(
+      "/api/auth/login",
+      {
+        body: t.object({
+          username: t.string().max(64),
+          password: t.string().max(256),
+          deviceId: t.string().min(1).max(64),
+          deviceType: DeviceType.optional(),
+        }),
+        response: { 200: t.object({ token: t.string(), user: User }), 401: t.problem(), 429: t.problem() },
+      },
+      (ctx) => {
+        const user = verifyLogin(ctx.body.username, ctx.body.password);
+        if (!user) throw problem(401, "invalid-credentials", "Wrong username or password");
+        return { token: issueToken(user.id, ctx.body.deviceId, ctx.body.deviceType), user: publicUser(user) };
+      }
+    );
+
+    // Changing the password asks for the current one, so a stolen session or token is not enough.
+    scope.post(
+      "/api/me/password",
+      {
+        body: t.object({ currentPassword: t.string().max(256), newPassword: t.string().max(256) }),
+        response: {
+          200: t.object({ message: t.string(), token: t.string().optional() }),
+          400: t.problem(),
+          401: t.problem(),
+          429: t.problem(),
+        },
+      },
+      (ctx) => {
+        const { user, deviceId } = currentUser(ctx);
+        if (!verifyLogin(user.username, ctx.body.currentPassword)) {
+          throw problem(401, "invalid-credentials", "The current password is wrong");
+        }
+        if (ctx.body.newPassword.length < 8) throw problem(400, "weak-password", "The password needs at least 8 characters");
+        setPassword(user.id, ctx.body.newPassword);
+        console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} changed the password.`));
+        // Every other device has to log in again. The one asking keeps working with a fresh token.
+        for (const device of onlineDevices(user.id)) {
+          if (device.id !== deviceId) device.socket.close(CLOSE_POLICY, "Password changed");
+        }
+        return { message: "Password changed", ...(deviceId ? { token: issueToken(user.id, deviceId) } : {}) };
       }
     );
   });
@@ -218,16 +413,137 @@ export function createApp({ gracefulShutdown = true } = {}) {
 
   app.register(
     (api) => {
-      api.onRequest((ctx) => {
-        if (!isSignedIn(ctx.session)) throw problem(401, "unauthorized", "Log in first");
-      });
+      api.get("/me", { response: { 200: User, 401: t.problem() } }, (ctx) => publicUser(currentUser(ctx).user));
 
-      api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, () => serializeDevices());
+      // Every device that is linked to the account, connected or not.
+      api.get("/devices", { response: { 200: t.array(LinkedDevice), 401: t.problem() } }, (ctx) =>
+        linkedDevicesOf(currentUser(ctx).user.id)
+      );
+
+      api.delete(
+        "/devices/:deviceId",
+        { response: { 204: t.empty(), 401: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          if (!unlinkDevice(user.id, ctx.params.deviceId)) throw problem(404, "unknown-device", "No such linked device");
+          getDevice(user.id, ctx.params.deviceId)?.socket?.close(CLOSE_POLICY, "Device removed");
+          removeDevice(user.id, ctx.params.deviceId);
+          broadcastDevices();
+          return reply(204);
+        }
+      );
+
+      // Account management, for the admin (the first account).
+      api.get(
+        "/users",
+        { response: { 200: t.array(User.extend({ devices: t.number() })), 401: t.problem(), 403: t.problem() } },
+        (ctx) => {
+          requireAdmin(ctx);
+          return listUsers().map((u) => ({ ...publicUser(u), devices: linkedDevices(u.id).length }));
+        }
+      );
+
+      // The admin looks at the devices of any account, e.g. to open their timeline.
+      api.get(
+        "/users/:id/devices",
+        { response: { 200: t.array(LinkedDevice), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          requireAdmin(ctx);
+          const id = Number(ctx.params.id);
+          if (!getUser(id)) throw problem(404, "unknown-user", "No such account");
+          return linkedDevicesOf(id);
+        }
+      );
+
+      api.post(
+        "/users",
+        {
+          body: t.object({
+            username: t.string().max(64),
+            password: t.string().max(256),
+            displayName: t.string().max(64).optional(),
+          }),
+          response: { 201: User, 400: t.problem(), 401: t.problem(), 403: t.problem(), 409: t.problem() },
+        },
+        (ctx) => {
+          requireAdmin(ctx);
+          try {
+            const user = createUser(ctx.body);
+            console.log(chalk.cyan(`[i] Account ${chalk.whiteBright(user.username)} created in the dashboard.`));
+            return reply(201, publicUser(user));
+          } catch (error) {
+            if (error.code === "taken") throw problem(409, "username-taken", error.message);
+            if (error.code === "invalid") throw problem(400, "invalid-account", error.message);
+            throw error;
+          }
+        }
+      );
+
+      // The admin edits any account: name, username and, to help someone who is locked out, a new password.
+      api.patch(
+        "/users/:id",
+        {
+          body: ProfileBody.extend({ password: t.string().max(256).optional() }),
+          response: { 200: User, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem(), 409: t.problem() },
+        },
+        (ctx) => {
+          requireAdmin(ctx);
+          const id = Number(ctx.params.id);
+          if (!getUser(id)) throw problem(404, "unknown-user", "No such account");
+          const { password, ...profile } = ctx.body;
+          if (password !== undefined && password.length < 8) throw problem(400, "weak-password", "The password needs at least 8 characters");
+          const updated = applyProfile(id, profile);
+          if (password !== undefined) {
+            setPassword(id, password);
+            disconnectAccount(id, "Password changed");
+          }
+          return updated;
+        }
+      );
+
+      api.delete(
+        "/users/:id",
+        { response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const admin = requireAdmin(ctx);
+          const target = getUser(Number(ctx.params.id));
+          if (!target) throw problem(404, "unknown-user", "No such account");
+          if (target.id === admin.id) throw problem(400, "own-account", "The admin cannot remove itself");
+          disconnectAccount(target.id, "Account removed");
+          for (const device of allDevices(target.id)) removeDevice(target.id, device.id);
+          deleteUser(target.id);
+          return reply(204);
+        }
+      );
+
+      api.patch(
+        "/me",
+        {
+          body: ProfileBody,
+          response: { 200: User, 400: t.problem(), 401: t.problem(), 409: t.problem() },
+        },
+        (ctx) => applyProfile(currentUser(ctx).user.id, ctx.body)
+      );
+
+      api.post(
+        "/auth/logout",
+        { response: { 200: Message, 401: t.problem() } },
+        (ctx) => {
+          const { token } = deviceAuth(ctx);
+          revokeToken(token);
+          return { message: "Logged out" };
+        }
+      );
+
+      api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, (ctx) => {
+        currentUser(ctx);
+        return serializeDevices();
+      });
 
       api.post(
         "/sendPing",
         {
-          body: t.object({ deviceId: t.string().max(64).optional() }).optional(),
+          body: t.object({ deviceId: t.string().max(64).optional(), userId: t.number().optional() }).optional(),
           response: {
             200: t.object({ message: t.string(), devices: t.array(Device) }),
             202: Message,
@@ -236,12 +552,14 @@ export function createApp({ gracefulShutdown = true } = {}) {
           },
         },
         async (ctx) => {
-          const deviceId = ctx.body?.deviceId;
+          currentUser(ctx);
+          const { deviceId, userId } = ctx.body ?? {};
           if (onlineDevices().length === 0) return reply(202, { message: "No devices connected" });
-          if (deviceId && !getDevice(deviceId)?.socket) {
+          const only = deviceId ? { deviceId, userId } : null;
+          if (only && !onlineDevices().some((d) => d.id === deviceId && (userId === undefined || d.userId === userId))) {
             throw problem(404, "device-not-connected", `Device ${deviceId} is not connected`);
           }
-          const asked = await requestLocation(deviceId || null, null);
+          const asked = await requestLocation({ only });
           broadcastDevices();
           return {
             message: deviceId ? `Location request sent to ${deviceId}` : `Location request sent to ${asked} devices`,
@@ -249,68 +567,98 @@ export function createApp({ gracefulShutdown = true } = {}) {
           };
         }
       );
+
+      // The day view: stays and trips, built from the stored fixes of one device.
+      api.get(
+        "/timeline",
+        {
+          query: t.object({
+            deviceId: t.string().max(64),
+            date: t.string().max(10),
+            tz: t.number().optional(),
+            userId: t.number().optional(),
+          }),
+          response: { 200: Timeline, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const userId = targetUserId(ctx, ctx.query.userId);
+          const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
+          if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
+          const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
+          return { date: ctx.query.date, deviceId: ctx.query.deviceId, ...buildTimeline(points) };
+        }
+      );
+
+      // Which days have anything to show.
+      api.get(
+        "/timeline/days",
+        {
+          query: t.object({ deviceId: t.string().max(64), tz: t.number().optional(), userId: t.number().optional() }),
+          response: { 200: t.array(t.string()), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => daysWithData(targetUserId(ctx, ctx.query.userId), ctx.query.deviceId, ctx.query.tz ?? 0)
+      );
     },
     {},
     { prefix: "/api" }
   );
 
-  // Profile pictures: the device uploads its own, the dashboard and other devices read them.
-  app.register(
-    (avatars) => {
-      avatars.register(rateLimit({ max: config.avatarRateLimit.max, window: config.avatarRateLimit.windowMs }));
+  // Profile pictures belong to the account. Set from the app or the dashboard, everyone signed in can see them.
+  app.register((avatars) => {
+    avatars.register(rateLimit({ max: config.avatarRateLimit.max, window: config.avatarRateLimit.windowMs }));
 
-      avatars.put(
-        "/api/avatar",
-        {
-          body: t.binary().max(AVATAR_MAX_BYTES).accept(...AVATAR_TYPES),
-          response: {
-            200: t.object({ avatarUrl: t.string() }),
-            400: t.problem(),
-            401: t.problem(),
-            404: t.problem(),
-            413: t.problem(),
-            415: t.problem(),
-            429: t.problem(),
-          },
+    avatars.put(
+      "/api/avatar",
+      {
+        body: t.binary().max(AVATAR_MAX_BYTES).accept(...AVATAR_TYPES),
+        response: {
+          200: t.object({ avatarUrl: t.string() }),
+          400: t.problem(),
+          401: t.problem(),
+          413: t.problem(),
+          415: t.problem(),
+          429: t.problem(),
         },
-        (ctx) => {
-          const device = deviceFromHeaders(ctx);
-          const type = String(ctx.headers["content-type"]).split(";")[0].trim().toLowerCase();
-          if (!looksLike(type, ctx.body)) throw problem(400, "not-an-image", `The body is no ${type}`);
-          setAvatar(device.id, Buffer.from(ctx.body), type);
-          console.log(chalk.cyan(`[i] Device ${chalk.whiteBright(device.id)} has a new profile picture.`));
-          broadcastDevices();
-          return { avatarUrl: avatarUrl(device) };
-        }
-      );
+      },
+      (ctx) => {
+        const { user } = currentUser(ctx);
+        const type = String(ctx.headers["content-type"]).split(";")[0].trim().toLowerCase();
+        if (!looksLike(type, ctx.body)) throw problem(400, "not-an-image", `The body is no ${type}`);
+        const updated = setAvatar(user.id, Buffer.from(ctx.body), type);
+        console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} has a new profile picture.`));
+        broadcastDevices();
+        return { avatarUrl: publicUser(updated).avatarUrl };
+      }
+    );
 
-      avatars.delete(
-        "/api/avatar",
-        { response: { 204: t.empty(), 401: t.problem(), 404: t.problem(), 429: t.problem() } },
-        (ctx) => {
-          clearAvatar(deviceFromHeaders(ctx).id);
-          broadcastDevices();
-          return reply(204);
-        }
-      );
+    avatars.delete(
+      "/api/avatar",
+      { response: { 204: t.empty(), 401: t.problem(), 429: t.problem() } },
+      (ctx) => {
+        const { user } = currentUser(ctx);
+        clearAvatar(user.id);
+        broadcastDevices();
+        return reply(204);
+      }
+    );
 
-      avatars.get("/avatars/:deviceId", (ctx) => {
-        if (!isSignedIn(ctx.session)) deviceFromHeaders(ctx);
-        const avatar = getDevice(ctx.params.deviceId)?.avatar;
-        if (!avatar) throw problem(404, "no-avatar", "This device has no profile picture");
-        return reply(200, avatar.data, {
-          "content-type": avatar.type,
-          // The URL carries the version, a new picture gets a new URL.
-          "cache-control": "private, max-age=31536000, immutable",
-        });
+    avatars.get("/avatars/:userId", (ctx) => {
+      currentUser(ctx);
+      const avatar = avatarFor(Number(ctx.params.userId));
+      if (!avatar) throw problem(404, "no-avatar", "No profile picture");
+      return reply(200, avatar.data, {
+        "content-type": avatar.type,
+        // The URL carries the version, a new picture gets a new URL.
+        "cache-control": "private, max-age=31536000, immutable",
       });
-    }
-  );
+    });
+  });
 
   app.ws(
     "/",
     { origins: "*", message: ClientMessage, maxMessage: 16 * 1024, heartbeat: config.heartbeatMs },
     (socket, ctx) => {
+      let account = null;
       let deviceId = null;
       let role = null;
 
@@ -320,16 +668,19 @@ export function createApp({ gracefulShutdown = true } = {}) {
         if (msg.type !== "authenticate") return refuse("Unauthorized");
 
         if (msg.viewer) {
-          if (!isSignedIn(ctx.session) || !sameOrigin(ctx.req)) return refuse("Unauthorized");
+          const id = sessionUserId(ctx.session);
+          if (id === null || !getUser(id) || !sameOrigin(ctx.req)) return refuse("Unauthorized");
           role = "viewer";
-          viewers.add(socket);
+          account = id;
+          viewers.set(socket, id);
           send(socket, { successful: true });
           send(socket, { type: "dataResponse", devices: serializeDevices() });
           return;
         }
 
         if (authFailures.blocked(ctx.ip)) return refuse("Too many attempts");
-        if (!msg.deviceId || !passwordMatches(msg.password)) {
+        const user = msg.deviceId && msg.token ? userForToken(msg.token, msg.deviceId) : null;
+        if (!user) {
           authFailures.fail(ctx.ip);
           console.log(
             chalk.red(`[Failed] Unauthorized connection attempt from ${chalk.whiteBright(msg.deviceId || "Unknown")}`)
@@ -338,14 +689,16 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
 
         deviceId = msg.deviceId;
+        account = user.id;
         role = "device";
-        const replaced = attachSocket(deviceId, socket);
+        const replaced = attachSocket(account, deviceId, socket, msg.deviceType);
+        const label = `${chalk.whiteBright(user.username)}/${chalk.whiteBright(deviceId)}`;
         if (replaced) {
-          console.log(chalk.yellow(`[i] Device ${chalk.whiteBright(deviceId)} reconnected. Replacing the previous connection.`));
+          console.log(chalk.yellow(`[i] Device ${label} reconnected. Replacing the previous connection.`));
           replaced.replaced = true;
           replaced.close(CLOSE_REPLACED, "Replaced by a newer connection");
         } else {
-          console.log(chalk.greenBright(`[+] Device ${chalk.whiteBright(deviceId)} connected.`));
+          console.log(chalk.greenBright(`[+] Device ${label} connected.`));
         }
         send(socket, { successful: true });
         broadcastDevices();
@@ -360,12 +713,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
             send(socket, { type: "dataResponse", devices: serializeDevices() });
             break;
           case "pingDevices":
-            await requestLocation(null, deviceId);
+            await requestLocation({ except: { userId: account, deviceId } });
             send(socket, { type: "dataResponse", devices: serializeDevices() });
             break;
           case "updatePosition":
             if (role !== "device") return;
-            updatePosition(deviceId, msg.latitude, msg.longitude);
+            updatePosition(account, deviceId, msg.latitude, msg.longitude);
+            recordPosition(account, deviceId, msg.latitude, msg.longitude);
             broadcastDevices();
             break;
           case "locationError":
@@ -384,7 +738,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           viewers.delete(socket);
           return;
         }
-        if (role === "device" && !socket.replaced && detachSocket(deviceId, socket)) {
+        if (role === "device" && !socket.replaced && detachSocket(account, deviceId, socket)) {
           console.log(chalk.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected. Marked offline.`));
           broadcastDevices();
         }
@@ -392,15 +746,21 @@ export function createApp({ gracefulShutdown = true } = {}) {
     }
   );
 
+  function disconnectAccount(userId, reason) {
+    for (const device of onlineDevices(userId)) device.socket.close(CLOSE_POLICY, reason);
+    for (const [viewer, id] of viewers) if (userId === undefined || id === userId) viewer.close(CLOSE_POLICY, reason);
+  }
+
   return {
     app,
     broadcastDevices,
     requestLocation,
-    disconnectDevice(id, reason = "Disconnected by server") {
-      getDevice(id)?.socket?.close(CLOSE_POLICY, reason);
+    disconnectDevice(userId, id, reason = "Disconnected by server") {
+      getDevice(userId, id)?.socket?.close(CLOSE_POLICY, reason);
     },
-    disconnectAllDevices(reason) {
-      for (const device of onlineDevices()) device.socket.close(CLOSE_POLICY, reason);
+    // Closes every device socket and dashboard of one account, or of everyone.
+    disconnectUser(userId, reason = "Logged out by server") {
+      disconnectAccount(userId, reason);
     },
     resetAuthFailures: () => authFailures.reset(),
     stop() {

@@ -1,82 +1,101 @@
-import crypto from "crypto";
+import { getUser, inferDeviceType, linkedDevices, listUsers, publicUser } from "./accounts.js";
+import { lastPosition } from "./history.js";
 
-// In-memory device registry. A device record outlives its socket, so a
-// reconnecting device keeps its last position and shows as online again.
+// In-memory device registry. A device belongs to one account and is known by that
+// account and its name, so two people may both own an "iPhone". A record outlives
+// its socket, so a reconnecting device keeps its last position and shows as online again.
 
 const devices = new Map();
 
-export function getDevice(deviceId) {
-  return devices.get(deviceId);
+const keyOf = (userId, deviceId) => `${userId}:${deviceId}`;
+
+export function getDevice(userId, deviceId) {
+  return devices.get(keyOf(userId, deviceId));
 }
 
-export function allDevices() {
-  return Array.from(devices.values());
+export function allDevices(userId) {
+  const all = Array.from(devices.values());
+  return userId === undefined ? all : all.filter((d) => d.userId === userId);
 }
 
-export function onlineDevices() {
-  return allDevices().filter((d) => d.status === "online" && d.socket);
+export function onlineDevices(userId) {
+  return allDevices(userId).filter((d) => d.status === "online" && d.socket);
 }
 
 // Registers a socket for a device and returns the socket it replaces, if any.
-export function attachSocket(deviceId, socket) {
-  let device = devices.get(deviceId);
+export function attachSocket(userId, deviceId, socket, deviceType) {
+  const key = keyOf(userId, deviceId);
+  let device = devices.get(key);
   if (!device) {
-    device = { id: deviceId, socket: null, position: null, lastPing: null, status: "offline", avatar: null };
-    devices.set(deviceId, device);
+    device = { id: deviceId, userId, socket: null, position: null, lastPing: null, status: "offline", deviceType: null };
+    devices.set(key, device);
   }
   const previous = device.socket;
   device.socket = socket;
   device.status = "online";
+  if (deviceType) device.deviceType = deviceType;
   return previous && previous !== socket ? previous : null;
 }
 
 // Marks a device offline, but only if the closing socket is still the active one.
-export function detachSocket(deviceId, socket) {
-  const device = devices.get(deviceId);
+export function detachSocket(userId, deviceId, socket) {
+  const device = devices.get(keyOf(userId, deviceId));
   if (!device || device.socket !== socket) return false;
   device.socket = null;
   device.status = "offline";
   return true;
 }
 
-export function updatePosition(deviceId, latitude, longitude) {
-  const device = devices.get(deviceId);
+export function updatePosition(userId, deviceId, latitude, longitude) {
+  const device = devices.get(keyOf(userId, deviceId));
   if (!device) return null;
   device.position = { latitude, longitude };
   device.lastPing = new Date().toISOString();
   return device;
 }
 
-// Pictures live in memory like everything else. The version is part of the URL,
-// so browsers may cache a picture for good and still see a new one right away.
-export function setAvatar(deviceId, data, type) {
-  const device = devices.get(deviceId);
-  if (!device) return null;
-  const version = crypto.createHash("sha256").update(data).digest("base64url").slice(0, 12);
-  device.avatar = { data, type, version };
-  return device;
-}
-
-export function clearAvatar(deviceId) {
-  const device = devices.get(deviceId);
-  if (!device) return null;
-  device.avatar = null;
-  return device;
-}
-
-export function avatarUrl(device) {
-  if (!device?.avatar) return null;
-  return `/avatars/${encodeURIComponent(device.id)}?v=${device.avatar.version}`;
-}
-
+// Everyone signed in sees every device. The picture and the name belong to the
+// account that owns the device, so all devices of one person look alike.
+// The list is built from the linked devices in the database, so it survives a server
+// restart: a device that has not connected yet shows as offline with its last stored
+// position. A device whose login was revoked is gone unless it is still connected.
 export function serializeDevices() {
-  return allDevices().map((d) => ({
-    deviceId: d.id,
-    position: d.position,
-    lastPing: d.lastPing,
-    status: d.status,
-    avatarUrl: avatarUrl(d),
-  }));
+  const rows = new Map();
+
+  for (const user of listUsers()) {
+    const owner = publicUser(user);
+    for (const link of linkedDevices(user.id)) {
+      const live = devices.get(keyOf(user.id, link.deviceId));
+      const stored = live?.position ? null : lastPosition(user.id, link.deviceId);
+      rows.set(keyOf(user.id, link.deviceId), {
+        deviceId: link.deviceId,
+        userId: user.id,
+        owner: { username: owner.username, displayName: owner.displayName },
+        position: live?.position ?? (stored ? { latitude: stored.lat, longitude: stored.lon } : null),
+        lastPing: live?.lastPing ?? (stored ? new Date(stored.ts).toISOString() : null),
+        status: live?.status ?? "offline",
+        avatarUrl: owner.avatarUrl,
+        deviceType: live?.deviceType ?? link.deviceType ?? "phone",
+      });
+    }
+  }
+
+  // Connected devices without a stored login (should not happen, but never hide a live one).
+  for (const d of allDevices()) {
+    if (d.status !== "online" || rows.has(keyOf(d.userId, d.id))) continue;
+    const owner = publicUser(getUser(d.userId));
+    rows.set(keyOf(d.userId, d.id), {
+      deviceId: d.id,
+      userId: d.userId,
+      owner: { username: owner?.username ?? "", displayName: owner?.displayName ?? "" },
+      position: d.position,
+      lastPing: d.lastPing,
+      status: d.status,
+      avatarUrl: owner?.avatarUrl ?? null,
+      deviceType: d.deviceType ?? inferDeviceType(d.id),
+    });
+  }
+  return [...rows.values()];
 }
 
 export function timeAgo(timestamp) {
@@ -95,6 +114,10 @@ export function timeAgo(timestamp) {
     }
   }
   return `${seconds} seconds ago`;
+}
+
+export function removeDevice(userId, deviceId) {
+  devices.delete(keyOf(userId, deviceId));
 }
 
 export function resetDevices() {

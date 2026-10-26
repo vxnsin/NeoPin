@@ -13,8 +13,6 @@ const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
 const onlineCountEl = document.getElementById("onlineCount");
 const totalCountEl = document.getElementById("totalCount");
-const clockEl = document.getElementById("clock");
-const dateEl = document.getElementById("date");
 const listEl = document.getElementById("deviceList");
 const stackEl = document.getElementById("avatarStack");
 const panel = document.getElementById("devicesPanel");
@@ -33,6 +31,22 @@ let fittedOnce = false;
 let toastTimer = null;
 
 // Device names come from the phones, never put them into HTML unescaped.
+// Device names are only unique per account, so a device is known by owner and name.
+const keyOf = (device) => `${device.userId}:${device.deviceId}`;
+const isOwn = (device) => typeof me !== "undefined" && me !== null && device.userId === me.id;
+const ownerName = (device) => device.owner?.displayName || device.owner?.username || "";
+// "Luis · iPhone"
+const fullName = (device) => (ownerName(device) ? `${ownerName(device)} · ${device.deviceId}` : device.deviceId);
+
+const TYPE_ICONS = { phone: "i-phone", tablet: "i-tablet", desktop: "i-laptop" };
+const TYPE_LABELS = { phone: "Phone", tablet: "Tablet", desktop: "Computer" };
+
+// Older servers send no type, those devices are phones.
+function typeIcon(device, extra = "") {
+  const type = TYPE_ICONS[device.deviceType] ? device.deviceType : "phone";
+  return `<svg class="icon dtype${extra}" role="img" aria-label="${TYPE_LABELS[type]}"><use href="#${TYPE_ICONS[type]}" /></svg>`;
+}
+
 function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -68,12 +82,13 @@ function colourClass(name) {
 }
 
 // The picture comes from avatarUrl only, so where it is stored can change without touching this.
-function avatarHtml(device, size = "") {
+// A person's row passes their own name for the letters and colour, pins use the device's.
+function avatarHtml(device, size = "", { label = device.deviceId, colour = keyOf(device) } = {}) {
   const inner = device.avatarUrl
     ? `<img src="${esc(device.avatarUrl)}" alt="" decoding="async" />`
-    : `<span>${esc(initials(device.deviceId))}</span>`;
+    : `<span>${esc(initials(label))}</span>`;
   const sizeClass = size ? ` avatar--${size}` : "";
-  return `<span class="avatar${sizeClass} ${colourClass(device.deviceId)}" data-state="${freshness(device)}">${inner}</span>`;
+  return `<span class="avatar${sizeClass} ${colourClass(colour)}" data-state="${freshness(device)}">${inner}</span>`;
 }
 
 function metaText(device) {
@@ -108,13 +123,47 @@ function hideLoader() {
   document.getElementById("loader").classList.add("is-hidden");
 }
 
-function updateClock() {
-  const now = new Date();
-  clockEl.textContent = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  dateEl.textContent = now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+// Map
+
+// The stock dark style is nearly black, so roads and water are hard to tell apart. This
+// lifts them into a slate palette.
+const DARK_TUNE = {
+  background: { "background-color": "#161c27" },
+  water: { "fill-color": "#1f3a57" },
+  waterway: { "line-color": "#1f3a57" },
+  landcover_wood: { "fill-color": "#1c2f2a" },
+  landuse_park: { "fill-color": "#1c2f2a" },
+  landuse_residential: { "fill-color": "#1a2130" },
+  building: { "fill-color": "#262f40" },
+  highway_path: { "line-color": "#35415a" },
+  highway_minor: { "line-color": "#3d4a62" },
+  highway_major_casing: { "line-color": "#202838" },
+  highway_major_inner: { "line-color": "#53607a" },
+  highway_major_subtle: { "line-color": "#46536c" },
+  highway_motorway_casing: { "line-color": "#2a3448" },
+  highway_motorway_subtle: { "line-color": "#46536c" },
+  railway: { "line-color": "#46536c" },
+  boundary_state: { "line-color": "#56637d" },
+  boundary_country_z0_4: { "line-color": "#6a7893" },
+  "boundary_country_z0-4": { "line-color": "#6a7893" },
+  "boundary_country_z5-": { "line-color": "#6a7893" },
+  highway_name_other: { "text-color": "#a3aec3" },
+  highway_name_motorway: { "text-color": "#b4bfd3" },
+  water_name: { "text-color": "#8fa6c4", "text-halo-color": "rgba(10,14,22,0.7)" },
+};
+for (const id of ["other", "suburb", "village", "town", "city", "city_large", "state", "country_other", "country_minor", "country_major"]) {
+  DARK_TUNE["place_" + id] = { "text-color": "#c4cde0", "text-halo-color": "rgba(10,14,22,0.8)" };
 }
 
-// Map
+function tuneDark(style) {
+  for (const layer of style.layers) {
+    const paint = DARK_TUNE[layer.id];
+    if (paint) layer.paint = Object.assign({}, layer.paint, paint);
+  }
+  return style;
+}
+
+const transformStyle = (dark) => (_previous, next) => (dark ? tuneDark(next) : next);
 
 const map = new maplibregl.Map({
   container: "map",
@@ -125,6 +174,9 @@ const map = new maplibregl.Map({
   dragRotate: false,
   pitchWithRotate: false,
 });
+if (window.neopinTheme.get() === "dark") {
+  map.setStyle(MAP_STYLES.dark, { diff: false, transformStyle: transformStyle(true) });
+}
 map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
 
@@ -153,11 +205,15 @@ map.on("styleimagemissing", (event) => {
 
 const updateLabels = () => mapEl.classList.toggle("show-labels", map.getZoom() >= LABEL_ZOOM);
 map.on("zoom", updateLabels);
+// Pause the pulse rings while the map moves.
+map.on("movestart", () => map.getContainer().classList.add("is-moving"));
+map.on("moveend", () => map.getContainer().classList.remove("is-moving"));
 updateLabels();
 
 document.documentElement.addEventListener("themechange", (event) => {
   // Markers are DOM elements and survive the style swap.
-  map.setStyle(MAP_STYLES[event.detail]);
+  // No diffing: a diff would quietly remove the timeline's own source instead of reloading.
+  map.setStyle(MAP_STYLES[event.detail], { diff: false, transformStyle: transformStyle(event.detail === "dark") });
 });
 
 // Always above the pin, select() moves the map so there is room for it.
@@ -189,6 +245,17 @@ function mapPadding() {
   return { top: 120, bottom: 80, left: expanded ? box.right + 70 : 90, right: 110 };
 }
 
+// The map keeps the padding of its last move and adds new padding on top when it fits bounds.
+// Measuring against a flat map and then easing there keeps repeated fits right.
+function fitBoundsTo(bounds, padding, duration, maxZoom = 15) {
+  const kept = map.getPadding();
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+  const camera = map.cameraForBounds(bounds, { padding, maxZoom });
+  map.setPadding(kept);
+  // With the padding set, the middle of the bounds belongs in the middle of the free area.
+  if (camera) map.easeTo({ center: bounds.getCenter(), zoom: camera.zoom, padding, duration });
+}
+
 function located() {
   return devices.filter((d) => d.position);
 }
@@ -206,17 +273,17 @@ function fitAll(animate) {
     return;
   }
   const bounds = points.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
-  map.fitBounds(bounds, { padding, maxZoom: 15, duration });
+  fitBoundsTo(bounds, padding, duration);
 }
 
 function pinHtml(device) {
-  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}</span><span class="pin__label">${esc(device.deviceId)}</span></span>`;
+  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}${typeIcon(device, " dtype--badge")}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
 }
 
 function syncMarkers() {
   const seen = new Set();
   for (const device of located()) {
-    const id = device.deviceId;
+    const id = keyOf(device);
     const state = freshness(device);
     const lngLat = [device.position.longitude, device.position.latitude];
     seen.add(id);
@@ -236,11 +303,11 @@ function syncMarkers() {
     }
 
     entry.marker.setLngLat(lngLat);
-    const key = `${state}|${device.avatarUrl}`;
+    const key = `${state}|${device.deviceType}|${device.avatarUrl}|${fullName(device)}`;
     if (entry.key !== key) {
       entry.el.innerHTML = pinHtml(device);
       entry.el.dataset.state = state;
-      entry.el.setAttribute("aria-label", `${device.deviceId}, ${STATE_LABELS[state]}`);
+      entry.el.setAttribute("aria-label", `${fullName(device)}, ${STATE_LABELS[state]}`);
       entry.key = key;
     }
     entry.el.classList.toggle("is-selected", id === selectedId);
@@ -264,8 +331,8 @@ function popupHtml(device) {
       <div class="popup__head">
         ${avatarHtml(device, "lg")}
         <div>
-          <strong class="popup__name">${esc(device.deviceId)}</strong>
-          <span class="popup__state">${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}</span>
+          <strong class="popup__name">${esc(fullName(device))}</strong>
+          <span class="popup__state">${typeIcon(device)}${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}</span>
         </div>
       </div>
       <p class="popup__coords">${coords}</p>
@@ -274,24 +341,25 @@ function popupHtml(device) {
 }
 
 function syncPopup() {
-  const device = devices.find((d) => d.deviceId === selectedId);
+  const device = devices.find((d) => keyOf(d) === selectedId);
   if (!device?.position) {
     if (popup.isOpen()) popup.remove();
     return;
   }
   popup.setLngLat([device.position.longitude, device.position.latitude]).setHTML(popupHtml(device));
   if (!popup.isOpen()) popup.addTo(map);
-  popup.getElement().querySelector("[data-ping]")?.addEventListener("click", (event) => pingDevice(device.deviceId, event.currentTarget));
+  popup.getElement().querySelector("[data-ping]")?.addEventListener("click", (event) => pingDevice(device, event.currentTarget));
 }
 
-async function pingDevice(deviceId, button) {
+async function pingDevice(device, button) {
+  const labelled = !button.classList.contains("icon-btn");
   button.disabled = true;
-  button.textContent = "Asking…";
+  if (labelled) button.textContent = "Asking…";
   try {
     const response = await fetch("/api/sendPing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId }),
+      body: JSON.stringify({ deviceId: device.deviceId, userId: device.userId }),
     });
     if (response.status === 401) return (window.location.href = "/login");
     if (!response.ok) toast("The device is not connected right now.");
@@ -301,18 +369,71 @@ async function pingDevice(deviceId, button) {
   // The answer arrives over the socket and redraws the popup.
   if (button.isConnected) {
     button.disabled = false;
-    button.textContent = "Ask for a fresh position";
+    if (labelled) button.textContent = "Ask for a fresh position";
   }
 }
 
 // Device panel
 
-function sortedDevices() {
-  return [...devices].sort(
-    (a, b) =>
-      STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
-      a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
+const TYPE_RANK = { phone: 0, tablet: 1, desktop: 2 };
+
+// The device that stands for a person: the one online, else phone over tablet over
+// computer, else the one that reported last.
+function comparePrimary(a, b) {
+  return (
+    (a.status === "online" ? 0 : 1) - (b.status === "online" ? 0 : 1) ||
+    (TYPE_RANK[a.deviceType] ?? 0) - (TYPE_RANK[b.deviceType] ?? 0) ||
+    (Date.parse(b.lastPing) || 0) - (Date.parse(a.lastPing) || 0) ||
+    a.deviceId.localeCompare(b.deviceId)
   );
+}
+
+// One entry per person, the own account first, then by how alive their primary device is.
+function groupByUser() {
+  const groups = new Map();
+  for (const device of devices) {
+    if (!groups.has(device.userId)) groups.set(device.userId, { userId: device.userId, name: ownerName(device), devices: [] });
+    groups.get(device.userId).devices.push(device);
+  }
+  for (const group of groups.values()) {
+    group.devices.sort(comparePrimary);
+    group.primary = group.devices[0];
+  }
+  return [...groups.values()].sort(
+    (a, b) =>
+      (isOwn(b.primary) ? 1 : 0) - (isOwn(a.primary) ? 1 : 0) ||
+      STATE_ORDER[freshness(a.primary)] - STATE_ORDER[freshness(b.primary)] ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+}
+
+const personAvatar = (group, size = "") => avatarHtml(group.primary, size, { label: group.name, colour: `user:${group.userId}` });
+const openUsers = new Set();
+
+// "iPhone · online" or "iPad · 5 min ago", with a hint when there are more devices.
+function personMeta(group) {
+  const device = group.primary;
+  const state = freshness(device);
+  const when = state === "online" ? "online" : state === "stale" ? "no recent position" : device.lastPing ? timeAgo(device.lastPing) : "offline";
+  const more = group.devices.length - 1;
+  return `${device.deviceId} · ${when}${more ? ` · +${more} ${more === 1 ? "device" : "devices"}` : ""}`;
+}
+
+function subDeviceHtml(device) {
+  const selected = keyOf(device) === selectedId;
+  const askable = device.status === "online";
+  return `
+    <li class="subdevice" data-state="${freshness(device)}">
+      <button class="device device--sub${selected ? " is-selected" : ""}" type="button" data-id="${esc(keyOf(device))}"
+        data-state="${freshness(device)}" data-located="${Boolean(device.position)}" aria-pressed="${selected}">
+        ${typeIcon(device, " dtype--row")}
+        <span class="device__text">
+          <span class="device__name">${esc(device.deviceId)}</span>
+          <span class="device__meta">${esc(metaText(device))}</span>
+        </span>
+      </button>
+      ${askable ? `<button class="icon-btn subdevice__ask" type="button" data-ask="${esc(keyOf(device))}" aria-label="Ask ${esc(device.deviceId)} for a fresh position" title="Ask for a fresh position"><svg class="icon"><use href="#i-refresh" /></svg></button>` : ""}
+    </li>`;
 }
 
 function renderPanel() {
@@ -321,8 +442,13 @@ function renderPanel() {
   totalCountEl.textContent = devices.length;
   updateSummary();
 
-  const sorted = sortedDevices();
-  stackEl.innerHTML = sorted.slice(0, 4).map((device) => avatarHtml(device, "sm")).join("");
+  const groups = groupByUser();
+  stackEl.innerHTML = groups
+    .slice(0, 4)
+    .map((group) => {
+      return `<span class="stack-item">${personAvatar(group, "sm")}</span>`;
+    })
+    .join("");
 
   if (devices.length === 0) {
     listEl.innerHTML = `
@@ -334,20 +460,23 @@ function renderPanel() {
     return;
   }
 
-  listEl.innerHTML = sorted
-    .map((device) => {
-      const selected = device.deviceId === selectedId;
+  listEl.innerHTML = groups
+    .map((group) => {
+      const open = openUsers.has(group.userId);
+      const holdsSelection = group.devices.some((d) => keyOf(d) === selectedId);
+      const subs = open ? `<ul class="person__devices" role="list">${group.devices.map(subDeviceHtml).join("")}</ul>` : "";
       return `
-        <li>
-          <button class="device${selected ? " is-selected" : ""}" type="button" data-id="${esc(device.deviceId)}"
-            data-state="${freshness(device)}" data-located="${Boolean(device.position)}" aria-pressed="${selected}">
-            ${avatarHtml(device)}
+        <li class="person${open ? " is-open" : ""}">
+          <button class="device person__head${holdsSelection ? " is-selected" : ""}" type="button" data-user="${group.userId}"
+            data-state="${freshness(group.primary)}" data-located="${Boolean(group.primary.position)}" aria-expanded="${open}">
+            ${personAvatar(group)}
             <span class="device__text">
-              <span class="device__name">${esc(device.deviceId)}</span>
-              <span class="device__meta">${esc(metaText(device))}</span>
+              <span class="device__name">${esc(group.name)}${isOwn(group.primary) ? ' <span class="own">you</span>' : ""}</span>
+              <span class="device__meta">${typeIcon(group.primary)}${esc(personMeta(group))}</span>
             </span>
-            <svg class="icon device__go" aria-hidden="true"><use href="#i-locate" /></svg>
+            <svg class="icon person__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
           </button>
+          ${subs}
         </li>`;
     })
     .join("");
@@ -362,11 +491,11 @@ function render() {
 
 // From the list the map zooms in on the device, from a pin it only moves enough
 // to make room for the popup above it.
-function select(id, { zoomIn = true } = {}) {
+function select(id, { zoomIn = true, keepPanel = false } = {}) {
   selectedId = id;
-  const device = devices.find((d) => d.deviceId === id);
-  if (phone.matches && id) setExpanded(false);
-  if (device && !device.position) toast(`${device.deviceId} has not sent a position yet.`);
+  const device = devices.find((d) => keyOf(d) === id);
+  if (phone.matches && id && !keepPanel) setExpanded(false);
+  if (device && !device.position) toast(`${fullName(device)} has not sent a position yet.`);
   if (device?.position) {
     map.flyTo({
       center: [device.position.longitude, device.position.latitude],
@@ -379,8 +508,22 @@ function select(id, { zoomIn = true } = {}) {
 }
 
 listEl.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-id]");
-  if (button) select(button.dataset.id);
+  const ask = event.target.closest("[data-ask]");
+  if (ask) {
+    const device = devices.find((d) => keyOf(d) === ask.dataset.ask);
+    if (device) pingDevice(device, ask);
+    return;
+  }
+  const row = event.target.closest("[data-id]");
+  if (row) return select(row.dataset.id);
+  const head = event.target.closest("[data-user]");
+  if (!head) return;
+  // A first click focuses the person's primary device and opens the list, a second one folds it.
+  const userId = Number(head.dataset.user);
+  if (openUsers.delete(userId)) return render();
+  openUsers.add(userId);
+  const primary = groupByUser().find((g) => g.userId === userId)?.primary;
+  select(primary ? keyOf(primary) : null, { keepPanel: true });
 });
 
 function setExpanded(expanded) {
@@ -406,9 +549,9 @@ refreshButton.addEventListener("click", () => {
 
 function receive(list) {
   devices = list;
-  if (selectedId && !devices.some((d) => d.deviceId === selectedId)) selectedId = null;
+  if (selectedId && !devices.some((d) => keyOf(d) === selectedId)) selectedId = null;
   render();
-  if (!fittedOnce && located().length > 0) {
+  if (!fittedOnce && located().length > 0 && !document.body.classList.contains("is-timeline")) {
     fittedOnce = true;
     fitAll(false);
   }
@@ -438,7 +581,13 @@ function connect() {
   });
   socket.addEventListener("close", (event) => {
     if (event.code === 4000) {
-      window.location.href = "/login";
+      // Also sent when the password changes elsewhere or here. A valid session just reconnects.
+      fetch("/api/me")
+        .then((response) => {
+          if (response.ok) reconnectTimer = setTimeout(connect, 500);
+          else window.location.href = "/login";
+        })
+        .catch(() => (reconnectTimer = setTimeout(connect, 3000)));
       return;
     }
     setStatus("offline");
@@ -450,10 +599,8 @@ function connect() {
 
 // Times like "3 min ago" and the stale state move on without new data.
 setInterval(render, 15_000);
-setInterval(updateClock, 5_000);
 // On a phone the list starts folded, so the map stays visible.
 phone.addEventListener("change", (event) => setExpanded(!event.matches));
 setExpanded(!phone.matches);
-updateClock();
 render();
 connect();

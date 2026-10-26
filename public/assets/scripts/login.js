@@ -62,19 +62,26 @@ if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 }
 
 const form = document.getElementById("loginForm");
+const usernameInput = document.getElementById("username");
 const input = document.getElementById("password");
-const field = input.closest(".field");
 const toggle = document.getElementById("togglePassword");
 const submit = document.getElementById("submit");
 const message = document.getElementById("message");
 
-function showError(text) {
+function showError(text, target = input) {
   message.textContent = text;
+  const field = target.closest(".field");
   // Take the marker off and back on, so the shake plays on every wrong try.
   field.removeAttribute("data-invalid");
   void field.offsetWidth;
   field.setAttribute("data-invalid", "");
-  input.select();
+  target.focus();
+  target.select();
+}
+
+function clearError() {
+  message.textContent = "";
+  for (const field of form.querySelectorAll("[data-invalid]")) field.removeAttribute("data-invalid");
 }
 
 toggle.addEventListener("click", () => {
@@ -86,31 +93,43 @@ toggle.addEventListener("click", () => {
   input.focus();
 });
 
-input.addEventListener("input", () => {
-  field.removeAttribute("data-invalid");
-  message.textContent = "";
-});
+form.addEventListener("input", clearError);
+
+async function problemText(response, fallback) {
+  try {
+    const data = await response.json();
+    return data.message || data.detail || data.title || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function post(url, body) {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!input.value) return showError("Enter the server password.");
+  const username = usernameInput.value.trim();
+  if (!username) return showError("Enter your username.", usernameInput);
+  if (!input.value) return showError("Enter your password.");
 
   submit.disabled = true;
   submit.classList.add("is-busy");
   message.textContent = "";
   try {
-    const response = await fetch("/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: input.value }),
-    });
+    const response = await post("/login", { username, password: input.value });
     if (response.ok) {
       window.location.href = "/";
       return;
     }
-    if (response.status === 401) showError("That password is not right.");
+    if (response.status === 401) showError("Username or password is not right.");
     else if (response.status === 429) showError("Too many attempts. Wait a minute and try again.");
-    else showError("The server could not sign you in. Try again.");
+    else showError(await problemText(response, "The server could not sign you in. Try again."));
   } catch {
     showError("The server is not reachable.");
   } finally {
