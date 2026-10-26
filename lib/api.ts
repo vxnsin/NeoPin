@@ -284,3 +284,11 @@ export async function removeMember(auth: DeviceAuth, groupId: number, userId: nu
 export async function answerInvite(auth: DeviceAuth, inviteId: number, accept: boolean): Promise<void> {
   await noContent(await request(api(auth, `/invites/${inviteId}/${accept ? "accept" : "decline"}`), jsonInit(auth, "POST")));
 }
+
+export type FoundUser = { id: number; username: string; displayName: string; avatarUrl: string | null };
+
+// People to invite: matches by username or name, without the caller and, with groupId, without members.
+export async function searchUsers(auth: DeviceAuth, query: string, groupId?: number): Promise<FoundUser[]> {
+  const params = `q=${encodeURIComponent(query)}${groupId === undefined ? "" : `&groupId=${groupId}`}`;
+  return json(await request(api(auth, `/users/search?${params}`), jsonInit(auth, "GET")));
+}

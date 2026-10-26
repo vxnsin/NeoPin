@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
+import { SEARCH_DELAY_MS, searchQuery } from "@/lib/search";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
 import Field from "@/components/Field";
@@ -12,7 +13,9 @@ import {
   inviteToGroup,
   removeMember,
   renameGroup,
+  searchUsers,
   type DeviceAuth,
+  type FoundUser,
   type Group,
   type Invite,
 } from "@/lib/api";
@@ -25,6 +28,8 @@ type Props = {
   avatarFor: (url?: string | null) => string | null;
   // Reload groups and invites after a change.
   onChanged: () => void;
+  // Pictures of found people, so the parent can load them.
+  onAvatarUrls: (urls: string[]) => void;
 };
 
 // Runs a request, shows the server's message when it fails and reloads when it worked.
@@ -56,7 +61,7 @@ function confirm(title: string, message: string, action: string, onConfirm: () =
   ]);
 }
 
-export default function GroupsPanel({ auth, userId, groups, invites, avatarFor, onChanged }: Props) {
+export default function GroupsPanel({ auth, userId, groups, invites, avatarFor, onChanged, onAvatarUrls }: Props) {
   const { colors: c } = useThemeManager();
   const [name, setName] = useState("");
   const create = useAction(onChanged);
@@ -102,7 +107,7 @@ export default function GroupsPanel({ auth, userId, groups, invites, avatarFor, 
       <Text style={[styles.section, { color: c.muted }]}>My groups</Text>
       {groups.length === 0 && <Text style={[styles.meta, { color: c.muted }]}>You are not in a group yet.</Text>}
       {groups.map((group) => (
-        <GroupCard key={group.id} auth={auth} userId={userId} group={group} avatarFor={avatarFor} onChanged={onChanged} />
+        <GroupCard key={group.id} auth={auth} userId={userId} group={group} avatarFor={avatarFor} onChanged={onChanged} onAvatarUrls={onAvatarUrls} />
       ))}
 
       <Text style={[styles.section, { color: c.muted }]}>Create group</Text>
@@ -134,12 +139,14 @@ function GroupCard({
   group,
   avatarFor,
   onChanged,
+  onAvatarUrls,
 }: {
   auth: DeviceAuth;
   userId: number;
   group: Group;
   avatarFor: (url?: string | null) => string | null;
   onChanged: () => void;
+  onAvatarUrls: (urls: string[]) => void;
 }) {
   const { colors: c } = useThemeManager();
   const { busy, error, run } = useAction(onChanged);
@@ -157,9 +164,34 @@ function GroupCard({
     if (await run(() => renameGroup(auth, group.id, value))) setRenaming(false);
   };
 
-  const invite = async () => {
-    const value = username.trim();
+  const [found, setFound] = useState<FoundUser[]>([]);
+  const [focused, setFocused] = useState(false);
+  const searchRun = useRef(0);
+
+  // Suggestions while typing: debounced, and an answer that arrives late is ignored.
+  useEffect(() => {
+    const query = searchQuery(username);
+    const current = ++searchRun.current;
+    if (!query) {
+      setFound([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchUsers(auth, query, group.id)
+        .then((list) => {
+          if (current !== searchRun.current) return;
+          setFound(list);
+          onAvatarUrls(list.map((u) => u.avatarUrl).filter((u): u is string => !!u));
+        })
+        .catch(() => current === searchRun.current && setFound([]));
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [username, auth, group.id, onAvatarUrls]);
+
+  const invite = async (name?: string) => {
+    const value = (name ?? username).trim();
     if (!value) return;
+    setFound([]);
     if (await run(() => inviteToGroup(auth, group.id, value))) setUsername("");
   };
 
@@ -268,16 +300,42 @@ function GroupCard({
               value={username}
               onChangeText={setUsername}
               returnKeyType="send"
-              onSubmitEditing={invite}
+              onSubmitEditing={() => invite()}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setTimeout(() => setFocused(false), 200)}
             />
           </View>
           <Pressable
             style={[styles.smallButton, { backgroundColor: c.secondary, opacity: busy || !username.trim() ? 0.6 : 1 }]}
-            onPress={invite}
+            onPress={() => invite()}
             disabled={busy || !username.trim()}
           >
             <Text style={[styles.buttonText, { color: c.onSecondary }]}>Invite</Text>
           </Pressable>
+        </View>
+      )}
+
+      {group.canManage && focused && found.length > 0 && (
+        <View style={[styles.suggestions, { backgroundColor: c.raised }]}>
+          {found.map((user) => (
+            <Pressable
+              key={user.id}
+              style={({ pressed }) => [styles.suggestion, pressed && { backgroundColor: c.subtle }]}
+              onPress={() => invite(user.username)}
+              accessibilityLabel={`Invite ${user.displayName}`}
+            >
+              <Avatar name={user.displayName} uri={avatarFor(user.avatarUrl)} state="offline" size={28} gapColor={c.raised} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.memberName, { color: c.primary }]} numberOfLines={1}>
+                  {user.displayName}
+                </Text>
+                <Text style={[styles.meta, { color: c.muted, marginTop: 0 }]} numberOfLines={1}>
+                  @{user.username}
+                </Text>
+              </View>
+              <MaterialIcons name="person-add-alt" size={20} color={c.muted} />
+            </Pressable>
+          ))}
         </View>
       )}
 
@@ -315,4 +373,6 @@ const styles = StyleSheet.create({
   wide: { height: 46, borderRadius: 14, alignItems: "center", justifyContent: "center", marginTop: 10 },
   buttonText: { fontSize: 15, fontWeight: "700" },
   error: { fontSize: 13, marginTop: 8 },
+  suggestions: { borderRadius: 14, marginTop: -6, marginBottom: 6, paddingVertical: 4 },
+  suggestion: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7, paddingHorizontal: 10 },
 });

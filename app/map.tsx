@@ -102,6 +102,7 @@ export default function MapScreen() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
+  const [foundAvatars, setFoundAvatars] = useState<string[]>([]);
   const [groupFilter, setGroupFilter] = useState<number | null>(null);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
@@ -121,8 +122,9 @@ export default function MapScreen() {
     add(user?.avatarUrl);
     // Group members show their picture in the groups sheet even without a device.
     groups.forEach((group) => group.members.forEach((member) => add(member.avatarUrl)));
+    foundAvatars.forEach(add);
     return [...devices, ...extra];
-  }, [devices, user?.avatarUrl, groups]);
+  }, [devices, user?.avatarUrl, groups, foundAvatars]);
   const avatarFor = useAvatars(avatarSources, creds);
   // Built once, later theme changes go in as messages so the map does not reload.
   const mapHtml = useMemo(() => buildMapHtml(theme.isDark, insets.bottom), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -617,6 +619,7 @@ export default function MapScreen() {
                 invites={invites}
                 avatarFor={avatarFor}
                 onChanged={loadGroups}
+                onAvatarUrls={setFoundAvatars}
               />
             </ScrollView>
           )}
