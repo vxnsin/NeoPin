@@ -63,6 +63,19 @@ export function getUserByName(username) {
   return getDb().prepare("SELECT * FROM users WHERE username = ?").get(username) ?? null;
 }
 
+// Accounts whose username or name starts with, or contains, the text. For invite suggestions.
+export function searchUsers(text, { excludeIds = [], limit = 8 } = {}) {
+  const needle = String(text ?? "").trim().toLowerCase().replace(/[%_]/g, "");
+  if (!needle) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM users WHERE (lower(username) LIKE ? OR lower(display_name) LIKE ?)
+       ORDER BY (lower(username) LIKE ? OR lower(display_name) LIKE ?) DESC, username COLLATE NOCASE LIMIT 50`
+    )
+    .all(`%${needle}%`, `%${needle}%`, `${needle}%`, `${needle}%`);
+  return rows.filter((r) => !excludeIds.includes(r.id)).slice(0, limit);
+}
+
 export function listUsers() {
   return getDb().prepare("SELECT * FROM users ORDER BY id").all();
 }

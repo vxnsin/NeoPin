@@ -33,6 +33,26 @@ const SCHEMA = `
     lat REAL NOT NULL,
     lon REAL NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (group_id, user_id)
+  );
+  CREATE TABLE IF NOT EXISTS group_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    invited_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    UNIQUE (group_id, user_id)
+  );
   CREATE INDEX IF NOT EXISTS positions_lookup ON positions(user_id, device_id, ts);
 `;
 
@@ -43,7 +63,18 @@ export function initDb(file = config.dbPath) {
   db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  const hadGroups = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_groups'").get();
   db.exec(SCHEMA);
+  // Servers from before groups existed: everybody saw everybody, so keep that as one group
+  // ("Everyone", owned by the admin) and nothing disappears. Narrow it down from there.
+  if (!hadGroups) {
+    const admin = db.prepare("SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1").get();
+    if (admin) {
+      const stamp = new Date().toISOString();
+      const group = db.prepare("INSERT INTO user_groups (name, owner_id, created_at) VALUES ('Everyone', ?, ?)").run(admin.id, stamp);
+      db.prepare("INSERT INTO group_members (group_id, user_id, joined_at) SELECT ?, id, ? FROM users").run(Number(group.lastInsertRowid), stamp);
+    }
+  }
   // Databases from before admins existed: the first account becomes the admin.
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "is_admin")) {
     db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");

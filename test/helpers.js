@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { config } from "../src/config.js";
 import { createApp } from "../src/app.js";
 import { createUser } from "../src/accounts.js";
-import { initDb, closeDb } from "../src/db.js";
+import { acceptInvite, createGroup, invite } from "../src/groups.js";
+import { initDb, closeDb, getDb } from "../src/db.js";
 import { resetDevices } from "../src/devices.js";
 import { resetHistoryState } from "../src/history.js";
 
@@ -101,3 +102,18 @@ export const deviceHeaders = (deviceId, token) => ({
   "x-device-id": encodeURIComponent(deviceId),
   authorization: `Bearer ${encodeURIComponent(token)}`,
 });
+
+// Puts the accounts into one new group, the first one owns it.
+export function shareGroup(name, ...users) {
+  const [owner, ...others] = users;
+  const group = createGroup(owner.id, name);
+  for (const user of others) acceptInvite(invite(group.id, owner.id, user.username) && invitesOf(group.id, user.id));
+  return group;
+}
+
+function invitesOf(groupId, userId) {
+  // The invite row id, found the same way the API does.
+  return Number(
+    getDb().prepare("SELECT id FROM group_invites WHERE group_id = ? AND user_id = ?").get(groupId, userId).id
+  );
+}

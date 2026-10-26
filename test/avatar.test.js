@@ -2,7 +2,7 @@ import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/config.js";
 import { getDb } from "../src/db.js";
-import { deviceHeaders, startServer } from "./helpers.js";
+import { deviceHeaders, shareGroup, startServer } from "./helpers.js";
 
 let s;
 let luis;
@@ -60,7 +60,9 @@ test("the picture is served to everyone who is signed in", async () => {
   assert.equal((await fetch(s.baseUrl + avatarUrl)).status, 401);
 
   const anna = await s.account("anna");
-  assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: { cookie: anna.cookie } })).status, 200, "the others see it too");
+  assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: { cookie: anna.cookie } })).status, 404, "not in a shared group");
+  shareGroup("Family", luis.user, anna.user);
+  assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: { cookie: anna.cookie } })).status, 200, "people in a shared group see it");
   assert.equal((await fetch(`${s.baseUrl}/avatars/${anna.user.id}`, { headers: { cookie: luis.cookie } })).status, 404, "anna has none");
 });
 

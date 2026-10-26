@@ -33,6 +33,7 @@ test("a new device starts online without a position", () => {
       status: "online",
       avatarUrl: null,
       deviceType: "phone",
+      groupIds: [],
     },
   ]);
 });
