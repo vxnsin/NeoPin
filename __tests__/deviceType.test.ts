@@ -1,4 +1,4 @@
-import { deviceTypeFrom } from "../lib/deviceType";
+import { deviceTypeFrom, resolveDeviceType } from "../lib/deviceType";
 import { typeOf } from "../lib/devices";
 
 test("expo-device types map to the server's names", () => {
@@ -32,4 +32,11 @@ test("the avatar stack shows one entry per owner with the best state and a count
     [1, "b", 2],
     [2, "x", 0],
   ]);
+});
+
+test("an iPad reported as a phone still counts as a tablet", () => {
+  expect(resolveDeviceType({ reported: 1, isPad: true })).toBe("tablet");
+  expect(resolveDeviceType({ reported: 0, modelName: "iPad Pro 11-inch" })).toBe("tablet");
+  expect(resolveDeviceType({ reported: 1, modelName: "iPhone 15" })).toBe("phone");
+  expect(resolveDeviceType({ reported: 3 })).toBe("desktop");
 });
