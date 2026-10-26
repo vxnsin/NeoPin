@@ -19,7 +19,6 @@
 
   <body>
     <svg class="sprite" aria-hidden="true">
-      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></symbol>
       <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></symbol>
       <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></symbol>
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
@@ -31,27 +30,13 @@
     </svg>
 
     <div class="loader" id="loader" role="status" aria-label="Loading">
-      <div class="loader__inner">
-        <span class="brand__mark"><svg class="icon"><use href="#i-pin" /></svg></span>
-        <div class="spinner"></div>
-      </div>
+      <div class="spinner"></div>
     </div>
 
     <div id="map"></div>
 
     <!-- Heads-up display over the map: who is where, how many are online, the time, the connection. -->
     <header class="hud">
-      <div class="hud-tile hud-brand">
-        <span class="brand__mark"><svg class="icon"><use href="#i-pin" /></svg></span>
-        <div class="hud-brand__text">
-          <strong>NeoPin</strong>
-          <span class="conn" id="status" data-state="connecting" role="status">
-            <span class="conn__dot"></span>
-            <span class="conn__text">Connecting…</span>
-          </span>
-        </div>
-      </div>
-
       <div class="hud-right">
         <div class="hud-tile hud-stat" aria-label="Devices online">
           <span class="hud-stat__value"><span id="onlineCount">0</span><small>/<span id="totalCount">0</span></small></span>
@@ -80,7 +65,10 @@
       <button class="devices__head" id="panelToggle" type="button" aria-controls="devicesBody" aria-expanded="true">
         <span class="devices__title">
           <strong>Devices</strong>
-          <span id="summary">No devices</span>
+          <span class="conn" id="status" data-state="connecting" role="status">
+            <span class="conn__dot"></span>
+            <span class="conn__text" id="summary">Connecting…</span>
+          </span>
         </span>
         <span class="devices__stack" id="avatarStack" aria-hidden="true"></span>
         <svg class="icon devices__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>

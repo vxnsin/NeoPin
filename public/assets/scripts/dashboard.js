@@ -82,9 +82,19 @@ function metaText(device) {
   return device.lastPing ? timeAgo(device.lastPing) : "Online · no position yet";
 }
 
-function setStatus(state, text) {
+// The panel's subtitle doubles as the connection state: device count while
+// connected, otherwise what the socket is doing.
+function setStatus(state) {
   statusEl.dataset.state = state;
-  statusEl.querySelector(".conn__text").textContent = text;
+  updateSummary();
+}
+
+function updateSummary() {
+  const state = statusEl.dataset.state;
+  const online = devices.filter((d) => d.status === "online").length;
+  if (state === "connecting") summaryEl.textContent = "Connecting…";
+  else if (state === "offline") summaryEl.textContent = "Reconnecting…";
+  else summaryEl.textContent = devices.length === 0 ? "Connected · no devices yet" : `${online} of ${devices.length} connected`;
 }
 
 function toast(text) {
@@ -309,7 +319,7 @@ function renderPanel() {
   const online = devices.filter((d) => d.status === "online").length;
   onlineCountEl.textContent = online;
   totalCountEl.textContent = devices.length;
-  summaryEl.textContent = devices.length === 0 ? "No devices yet" : `${online} of ${devices.length} connected`;
+  updateSummary();
 
   const sorted = sortedDevices();
   stackEl.innerHTML = sorted.slice(0, 4).map((device) => avatarHtml(device, "sm")).join("");
@@ -406,7 +416,7 @@ function receive(list) {
 
 function connect() {
   clearTimeout(reconnectTimer);
-  setStatus("connecting", "Connecting…");
+  setStatus("connecting");
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   socket = new WebSocket(`${protocol}://${location.host}`);
 
@@ -420,7 +430,7 @@ function connect() {
     }
     if ("successful" in data) {
       if (!data.successful) return (window.location.href = "/login.html");
-      setStatus("online", "Connected");
+      setStatus("online");
       hideLoader();
       return;
     }
@@ -431,7 +441,7 @@ function connect() {
       window.location.href = "/login.html";
       return;
     }
-    setStatus("offline", "Reconnecting…");
+    setStatus("offline");
     hideLoader();
     reconnectTimer = setTimeout(connect, 3000);
   });

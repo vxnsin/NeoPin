@@ -8,23 +8,6 @@ body {
   background: var(--bg);
 }
 
-.loader__inner {
-  display: grid;
-  justify-items: center;
-  gap: 18px;
-}
-
-.loader .brand__mark {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-}
-
-.loader .brand__mark .icon {
-  width: 26px;
-  height: 26px;
-}
-
 /* Glass tiles floating over the map. */
 .hud-tile,
 .devices {
@@ -43,7 +26,7 @@ body {
   z-index: 10;
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   pointer-events: none;
 }
@@ -57,21 +40,6 @@ body {
   align-items: center;
   min-height: 56px;
   border-radius: 18px;
-}
-
-.hud-brand {
-  gap: 12px;
-  padding: 10px 18px 10px 11px;
-}
-
-.hud-brand__text {
-  display: grid;
-  line-height: 1.25;
-}
-
-.hud-brand__text strong {
-  font-size: 16px;
-  letter-spacing: -0.01em;
 }
 
 .hud-right {
@@ -150,8 +118,7 @@ body {
   font-size: 16px;
 }
 
-.devices__title span {
-  color: var(--text-muted);
+.devices__title .conn {
   font-size: 12.5px;
 }
 
@@ -544,15 +511,6 @@ body {
   .hud-tile {
     min-height: 48px;
     border-radius: 16px;
-  }
-
-  .hud-brand {
-    padding: 7px 14px 7px 8px;
-  }
-
-  .hud-brand .brand__mark {
-    width: 30px;
-    height: 30px;
   }
 
   .hud-clock {

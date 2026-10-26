@@ -60,30 +60,13 @@ body {
   animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.login__mark {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 18px;
-  border-radius: 20px;
-  background: var(--brand);
-  color: var(--on-brand);
-  box-shadow: 0 14px 28px -12px rgba(211, 23, 30, 0.8);
-}
-
-.login__mark .icon {
-  width: 30px;
-  height: 30px;
-}
-
-.login__ripple {
-  position: absolute;
-  inset: 0;
-  border-radius: 20px;
-  border: 2px solid var(--brand);
-  animation: halo 2.6s ease-out infinite;
+.login__logo {
+  display: block;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  box-shadow: 0 14px 30px -14px rgba(211, 23, 30, 0.7);
 }
 
 h1 {
@@ -231,17 +214,6 @@ form {
   from {
     opacity: 0;
     transform: translateY(12px) scale(0.98);
-  }
-}
-
-@keyframes halo {
-  from {
-    transform: scale(1);
-    opacity: 0.6;
-  }
-  to {
-    transform: scale(1.6);
-    opacity: 0;
   }
 }
 

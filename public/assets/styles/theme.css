@@ -173,31 +173,6 @@ input {
   display: none;
 }
 
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-}
-
-.brand__mark {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: var(--brand);
-  color: var(--on-brand);
-  box-shadow: 0 6px 16px -6px rgba(211, 23, 30, 0.7);
-}
-
-.brand__mark .icon {
-  width: 19px;
-  height: 19px;
-}
-
 /* Avatars with a status ring. The ring sits outside the circle, so callers leave room for it.
    The fill colours leave out green and yellow, those belong to the ring. */
 .avatar {
