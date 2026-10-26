@@ -374,7 +374,9 @@ export function createApp({ gracefulShutdown = true } = {}) {
         setPassword(user.id, ctx.body.newPassword);
         console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} changed the password.`));
         // Every other device has to log in again. The one asking keeps working with a fresh token.
-        disconnectAccount(user.id, "Password changed");
+        for (const device of onlineDevices(user.id)) {
+          if (device.id !== deviceId) device.socket.close(CLOSE_POLICY, "Password changed");
+        }
         return { message: "Password changed", ...(deviceId ? { token: issueToken(user.id, deviceId) } : {}) };
       }
     );

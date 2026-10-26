@@ -54,6 +54,10 @@ test("changing the password needs the current one and ends the old logins", asyn
   assert.equal(ok.status, 200);
   assert.equal((await phone.closed).code, 4000, "devices have to log in again");
 
+  const viewer = await s.connect({ cookie: luis.cookie });
+  viewer.send({ type: "authenticate", viewer: true });
+  assert.deepEqual(await viewer.next(), { successful: true });
+
   assert.equal((await s.post("/login", { username: "luis", password: PASSWORD })).status, 401);
   assert.equal((await s.post("/login", { username: "luis", password: "a-new-password" })).status, 200);
 
