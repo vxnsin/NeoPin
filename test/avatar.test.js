@@ -59,7 +59,6 @@ test("the picture is served to the dashboard and the app of that account only", 
   assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: deviceHeaders("phone", luis.token) })).status, 200);
   assert.equal((await fetch(s.baseUrl + avatarUrl)).status, 401);
 
-  config.allowRegistration = true;
   const anna = await s.account("anna");
   assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: { cookie: anna.cookie } })).status, 404);
 });

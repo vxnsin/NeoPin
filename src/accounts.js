@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import { config } from "./config.js";
 import { getDb } from "./db.js";
 
 const USERNAME = /^[A-Za-z0-9_.-]{3,32}$/;
@@ -25,8 +24,10 @@ const DUMMY_HASH = hashPassword("neopin-dummy");
 
 export const userCount = () => getDb().prepare("SELECT COUNT(*) AS n FROM users").get().n;
 
+// Self-service sign-up exists for the very first account only. Everyone after that
+// is created by the admin.
 export function registrationOpen() {
-  return config.allowRegistration || userCount() === 0;
+  return userCount() === 0;
 }
 
 export function publicUser(row) {

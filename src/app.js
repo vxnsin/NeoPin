@@ -239,6 +239,15 @@ export function createApp({ gracefulShutdown = true } = {}) {
     return user;
   }
 
+  // Whose data a request is about: the signed-in account, or for the admin any account.
+  function targetUserId(ctx, requested) {
+    const { user } = currentUser(ctx);
+    if (requested === undefined || requested === user.id) return user.id;
+    if (!user.is_admin) throw problem(403, "forbidden", "You can only see your own devices");
+    if (!getUser(requested)) throw problem(404, "unknown-user", "No such account");
+    return requested;
+  }
+
   function linkedDevicesOf(userId) {
     return linkedDevices(userId).map((link) => {
       const live = getDevice(userId, link.deviceId);
@@ -354,7 +363,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         response: { 201: User, 400: t.problem(), 403: t.problem(), 409: t.problem(), 429: t.problem() },
       },
       (ctx) => {
-        if (!registrationOpen()) throw problem(403, "registration-closed", "Registration is closed on this server");
+        if (!registrationOpen()) throw problem(403, "registration-closed", "Accounts are created by the admin");
         try {
           const user = createUser(ctx.body);
           console.log(chalk.cyan(`[i] Account ${chalk.whiteBright(user.username)} created.`));
@@ -402,6 +411,18 @@ export function createApp({ gracefulShutdown = true } = {}) {
         (ctx) => {
           requireAdmin(ctx);
           return listUsers().map((u) => ({ ...publicUser(u), devices: linkedDevices(u.id).length }));
+        }
+      );
+
+      // The admin looks at the devices of any account, e.g. to open their timeline.
+      api.get(
+        "/users/:id/devices",
+        { response: { 200: t.array(LinkedDevice), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          requireAdmin(ctx);
+          const id = Number(ctx.params.id);
+          if (!getUser(id)) throw problem(404, "unknown-user", "No such account");
+          return linkedDevicesOf(id);
         }
       );
 
@@ -493,11 +514,12 @@ export function createApp({ gracefulShutdown = true } = {}) {
             deviceId: t.string().max(64),
             date: t.string().max(10),
             tz: t.number().optional(),
+            userId: t.number().optional(),
           }),
-          response: { 200: Timeline, 400: t.problem(), 401: t.problem() },
+          response: { 200: Timeline, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
         (ctx) => {
-          const userId = currentUser(ctx).user.id;
+          const userId = targetUserId(ctx, ctx.query.userId);
           const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
@@ -509,10 +531,10 @@ export function createApp({ gracefulShutdown = true } = {}) {
       api.get(
         "/timeline/days",
         {
-          query: t.object({ deviceId: t.string().max(64), tz: t.number().optional() }),
-          response: { 200: t.array(t.string()), 401: t.problem() },
+          query: t.object({ deviceId: t.string().max(64), tz: t.number().optional(), userId: t.number().optional() }),
+          response: { 200: t.array(t.string()), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
-        (ctx) => daysWithData(currentUser(ctx).user.id, ctx.query.deviceId, ctx.query.tz ?? 0)
+        (ctx) => daysWithData(targetUserId(ctx, ctx.query.userId), ctx.query.deviceId, ctx.query.tz ?? 0)
       );
     },
     {},

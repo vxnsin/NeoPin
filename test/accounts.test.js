@@ -1,6 +1,5 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { config } from "../src/config.js";
 import { getDb } from "../src/db.js";
 import { PASSWORD, deviceHeaders, startServer } from "./helpers.js";
 
@@ -8,12 +7,11 @@ let s;
 
 beforeEach(async () => {
   s = await startServer();
-  config.allowRegistration = false;
 });
 
 afterEach(() => s.stop());
 
-test("the first account can always be registered, more only when allowed", async () => {
+test("self-service sign-up exists for the first account only", async () => {
   assert.equal((await (await fetch(`${s.baseUrl}/api/status`)).json()).registrationOpen, true);
 
   const first = await s.post("/api/register", { username: "luis", password: PASSWORD, displayName: "Luis" });
@@ -25,9 +23,7 @@ test("the first account can always be registered, more only when allowed", async
 
   assert.equal((await (await fetch(`${s.baseUrl}/api/status`)).json()).registrationOpen, false);
   assert.equal((await s.post("/api/register", { username: "anna", password: PASSWORD })).status, 403);
-
-  config.allowRegistration = true;
-  assert.equal((await s.post("/api/register", { username: "anna", password: PASSWORD })).status, 201);
+  assert.equal(user.isAdmin, true);
 });
 
 test("usernames and passwords are validated, names are unique regardless of case", async () => {
@@ -36,8 +32,8 @@ test("usernames and passwords are validated, names are unique regardless of case
   assert.equal((await s.post("/api/register", { username: "luis", password: "short" })).status, 400);
 
   assert.equal((await s.post("/api/register", { username: "luis", password: PASSWORD })).status, 201);
-  config.allowRegistration = true;
-  assert.equal((await s.post("/api/register", { username: "LUIS", password: PASSWORD })).status, 409);
+  const admin = await s.cookieFor("luis");
+  assert.equal((await s.post("/api/users", { username: "LUIS", password: PASSWORD }, { cookie: admin })).status, 409);
 });
 
 test("passwords are stored hashed, never as they were typed", async () => {
@@ -76,7 +72,6 @@ test("logging in again on a device replaces its token, logout revokes it", async
 
 test("every account sees only its own devices", async () => {
   await s.account("luis");
-  config.allowRegistration = true;
   await s.account("anna");
 
   const luisPhone = await s.device("luis", "phone");
@@ -142,4 +137,30 @@ test("linked devices are listed with their state and can be unlinked", async () 
   assert.deepEqual((await list()).map((d) => d.deviceId), ["tablet"]);
   assert.equal((await fetch(`${s.baseUrl}/api/me`, { headers: deviceHeaders("phone", luis.token) })).status, 401);
   assert.equal((await fetch(`${s.baseUrl}/api/devices/ghost`, { method: "DELETE", headers: { cookie: luis.cookie } })).status, 404);
+});
+
+test("only the admin may open the timeline and devices of another account", async () => {
+  const luis = await s.account("luis"); // the first account is the admin
+  const anna = await s.account("anna");
+  const { recordPosition } = await import("../src/history.js");
+  recordPosition(anna.user.id, "phone", 48.1, 11.5, Date.UTC(2025, 5, 10, 9));
+  await s.tokenFor("anna", "phone");
+
+  const q = (userId) => `${s.baseUrl}/api/timeline?deviceId=phone&date=2025-06-10&userId=${userId}`;
+  const asAdmin = await fetch(q(anna.user.id), { headers: { cookie: luis.cookie } });
+  assert.equal(asAdmin.status, 200);
+  assert.equal((await asAdmin.json()).summary.pointCount, 1);
+  assert.equal((await fetch(q(999), { headers: { cookie: luis.cookie } })).status, 404);
+
+  assert.equal((await fetch(q(anna.user.id), { headers: { cookie: anna.cookie } })).status, 200, "own id is fine");
+  const denied = await fetch(q(luis.user.id), { headers: { cookie: anna.cookie } });
+  assert.equal(denied.status, 403, "another account's timeline is closed to normal users");
+
+  const days = await fetch(`${s.baseUrl}/api/timeline/days?deviceId=phone&userId=${anna.user.id}`, { headers: { cookie: luis.cookie } });
+  assert.deepEqual(await days.json(), ["2025-06-10"]);
+  assert.equal((await fetch(`${s.baseUrl}/api/timeline/days?deviceId=phone&userId=${luis.user.id}`, { headers: { cookie: anna.cookie } })).status, 403);
+
+  const devices = await fetch(`${s.baseUrl}/api/users/${anna.user.id}/devices`, { headers: { cookie: luis.cookie } });
+  assert.deepEqual((await devices.json()).map((d) => d.deviceId), ["phone"]);
+  assert.equal((await fetch(`${s.baseUrl}/api/users/${luis.user.id}/devices`, { headers: { cookie: anna.cookie } })).status, 403);
 });

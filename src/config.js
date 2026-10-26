@@ -23,8 +23,6 @@ export const config = {
   port: Number(process.env.PORT) || DEFAULT_PORT,
   // Accounts, profile pictures and the location history live in this SQLite file.
   dbPath: path.resolve(rootDir, process.env.DATABASE_PATH || "data/neopin.db"),
-  // The first account can always be created. More only while this is on.
-  allowRegistration: process.env.ALLOW_REGISTRATION === "true",
   // Location history older than this is deleted at startup.
   historyDays: Number(process.env.HISTORY_DAYS) || 365,
   // Only behind a reverse proxy: take the client IP and https from X-Forwarded-*.

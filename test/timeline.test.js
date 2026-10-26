@@ -135,7 +135,6 @@ test("another account cannot read the timeline", async () => {
   const luis = await s.account("luis");
   for (const p of aDay()) recordPosition(luis.user.id, "phone", p.lat, p.lon, p.ts);
   const { config } = await import("../src/config.js");
-  config.allowRegistration = true;
   const anna = await s.account("anna");
 
   const res = await fetch(`${s.baseUrl}/api/timeline?deviceId=phone&date=2025-06-10`, { headers: { cookie: anna.cookie } });
