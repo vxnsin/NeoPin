@@ -1,5 +1,6 @@
 import { getUser, inferDeviceType, linkedDevices, listUsers, publicUser } from "./accounts.js";
 import { lastPosition } from "./history.js";
+import { sharedGroupIds, visibleUserIds } from "./groups.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
 // account and its name, so two people may both own an "iPhone". A record outlives
@@ -59,10 +60,19 @@ export function updatePosition(userId, deviceId, latitude, longitude) {
 // The list is built from the linked devices in the database, so it survives a server
 // restart: a device that has not connected yet shows as offline with its last stored
 // position. A device whose login was revoked is gone unless it is still connected.
-export function serializeDevices() {
+export function serializeDevices(viewer) {
   const rows = new Map();
+  // A viewer only gets the devices of people they share a group with (the admin gets all).
+  const visible = viewer ? visibleUserIds(viewer) : null;
+  const groupIds = new Map();
+  const groupsOf = (userId) => {
+    if (!viewer) return [];
+    if (!groupIds.has(userId)) groupIds.set(userId, sharedGroupIds(viewer.id, userId));
+    return groupIds.get(userId);
+  };
 
   for (const user of listUsers()) {
+    if (visible && !visible.has(user.id)) continue;
     const owner = publicUser(user);
     for (const link of linkedDevices(user.id)) {
       const live = devices.get(keyOf(user.id, link.deviceId));
@@ -76,13 +86,14 @@ export function serializeDevices() {
         status: live?.status ?? "offline",
         avatarUrl: owner.avatarUrl,
         deviceType: live?.deviceType ?? link.deviceType ?? "phone",
+        groupIds: groupsOf(user.id),
       });
     }
   }
 
   // Connected devices without a stored login (should not happen, but never hide a live one).
   for (const d of allDevices()) {
-    if (d.status !== "online" || rows.has(keyOf(d.userId, d.id))) continue;
+    if (d.status !== "online" || rows.has(keyOf(d.userId, d.id)) || (visible && !visible.has(d.userId))) continue;
     const owner = publicUser(getUser(d.userId));
     rows.set(keyOf(d.userId, d.id), {
       deviceId: d.id,
@@ -93,6 +104,7 @@ export function serializeDevices() {
       status: d.status,
       avatarUrl: owner?.avatarUrl ?? null,
       deviceType: d.deviceType ?? inferDeviceType(d.id),
+      groupIds: groupsOf(d.userId),
     });
   }
   return [...rows.values()];

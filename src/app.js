@@ -32,6 +32,23 @@ import {
   serializeDevices,
   updatePosition,
 } from "./devices.js";
+import {
+  acceptInvite,
+  audience,
+  cancelInvite,
+  canManage,
+  canSee,
+  createGroup,
+  deleteGroup,
+  getGroup,
+  getInvite,
+  groupsFor,
+  invite,
+  invitesFor,
+  isMember,
+  removeMember,
+  renameGroup,
+} from "./groups.js";
 import { daysWithData, positionsBetween, recordPosition } from "./history.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
@@ -55,6 +72,7 @@ const DeviceType = t.enum(["phone", "tablet", "desktop"]);
 const Device = t.object({
   deviceId: t.string(),
   userId: t.number(),
+  groupIds: t.array(t.number()),
   owner: t.object({ username: t.string(), displayName: t.string() }),
   position: Position.nullable(),
   lastPing: t.string().nullable(),
@@ -174,22 +192,40 @@ export function createApp({ gracefulShutdown = true } = {}) {
   const authFailures = createAttemptLimiter(config.deviceAuthLimit);
   let broadcastTimer = null;
 
-  // Sends the device list to every device and dashboard, at most twice a second.
+  // Everybody gets the devices of the people they share a group with, so the payload differs
+  // per account. Sent to every device and dashboard, at most twice a second.
   function broadcastDevices() {
     if (broadcastTimer) return;
     broadcastTimer = setTimeout(() => {
       broadcastTimer = null;
-      const payload = { type: "dataResponse", devices: serializeDevices() };
-      for (const device of onlineDevices()) send(device.socket, payload);
-      for (const viewer of viewers.keys()) send(viewer, payload);
+      const payloads = new Map();
+      const payloadFor = (userId) => {
+        if (!payloads.has(userId)) {
+          const viewer = getUser(userId);
+          payloads.set(userId, viewer ? { type: "dataResponse", devices: serializeDevices(viewer) } : null);
+        }
+        return payloads.get(userId);
+      };
+      for (const device of onlineDevices()) send(device.socket, payloadFor(device.userId));
+      for (const [viewer, userId] of viewers) send(viewer, payloadFor(userId));
     }, BROADCAST_THROTTLE_MS);
+  }
+
+  // Tells the clients of these accounts to reload their groups and invites.
+  function notifyGroups(userIds) {
+    const ids = new Set(userIds);
+    const message = { type: "groupsChanged" };
+    for (const device of onlineDevices()) if (ids.has(device.userId)) send(device.socket, message);
+    for (const [viewer, userId] of viewers) if (ids.has(userId)) send(viewer, message);
+    broadcastDevices();
   }
 
   // Asks devices for a fresh fix and resolves once they answered or the wait is over.
   // `only` narrows it to one device, `except` leaves the asking device out.
-  function requestLocation({ only = null, except = null } = {}) {
+  function requestLocation({ only = null, except = null, viewer = null } = {}) {
     const targets = onlineDevices().filter(
       (d) =>
+        (!viewer || canSee(viewer, d.userId)) &&
         !(except && d.userId === except.userId && d.id === except.deviceId) &&
         (!only || (d.id === only.deviceId && (only.userId === undefined || d.userId === only.userId)))
     );
@@ -525,6 +561,153 @@ export function createApp({ gracefulShutdown = true } = {}) {
         (ctx) => applyProfile(currentUser(ctx).user.id, ctx.body)
       );
 
+
+      // Groups decide who sees whom.
+      const Member = User.extend({ role: t.enum(["owner", "member"]) });
+      const Group = t.object({
+        id: t.number(),
+        name: t.string(),
+        ownerId: t.number(),
+        role: t.enum(["owner", "member"]),
+        canManage: t.boolean(),
+        members: t.array(Member),
+        pendingInvites: t.array(t.object({ id: t.number(), user: User })),
+      });
+      const Invite = t.object({
+        id: t.number(),
+        groupId: t.number(),
+        groupName: t.string(),
+        invitedBy: t.object({ id: t.number(), username: t.string(), displayName: t.string() }).nullable(),
+        createdAt: t.string(),
+      });
+      const GroupName = t.object({ name: t.string().max(64) });
+
+      function groupFor(ctx, { manage = false } = {}) {
+        const { user } = currentUser(ctx);
+        const group = getGroup(Number(ctx.params.id));
+        if (!group || (!isMember(group.id, user.id) && user.is_admin !== 1)) throw problem(404, "unknown-group", "No such group");
+        if (manage && !canManage(group, user)) throw problem(403, "forbidden", "Only the owner can do this");
+        return { user, group };
+      }
+
+      const viewOf = (user, groupId) => groupsFor(user).find((g) => g.id === groupId);
+
+      api.get("/groups", { response: { 200: t.array(Group), 401: t.problem() } }, (ctx) => groupsFor(currentUser(ctx).user));
+
+      api.post(
+        "/groups",
+        { body: GroupName, response: { 201: Group, 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          try {
+            const group = createGroup(user.id, ctx.body.name);
+            notifyGroups([user.id]);
+            return reply(201, viewOf(user, group.id));
+          } catch (error) {
+            if (error.code === "invalid") throw problem(400, "invalid-group", error.message);
+            throw error;
+          }
+        }
+      );
+
+      api.patch(
+        "/groups/:id",
+        { body: GroupName, response: { 200: Group, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { user, group } = groupFor(ctx, { manage: true });
+          try {
+            renameGroup(group.id, ctx.body.name);
+          } catch (error) {
+            if (error.code === "invalid") throw problem(400, "invalid-group", error.message);
+            throw error;
+          }
+          notifyGroups(audience(group.id));
+          return viewOf(user, group.id) ?? viewOf(getUser(group.owner_id), group.id);
+        }
+      );
+
+      api.delete(
+        "/groups/:id",
+        { response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { group } = groupFor(ctx, { manage: true });
+          const people = deleteGroup(group.id);
+          notifyGroups(people);
+          return reply(204);
+        }
+      );
+
+      // Invite an existing account by username. The invited person accepts or declines.
+      api.post(
+        "/groups/:id/invites",
+        {
+          body: t.object({ username: t.string().max(64) }),
+          response: { 201: Message, 401: t.problem(), 403: t.problem(), 404: t.problem(), 409: t.problem() },
+        },
+        (ctx) => {
+          const { user, group } = groupFor(ctx, { manage: true });
+          try {
+            const target = invite(group.id, user.id, ctx.body.username);
+            notifyGroups([user.id, group.owner_id, target.id]);
+            return reply(201, { message: target.display_name + " was invited" });
+          } catch (error) {
+            if (error.code === "notfound") throw problem(404, "unknown-user", error.message);
+            if (error.code === "member" || error.code === "invited") throw problem(409, "already-there", error.message);
+            throw error;
+          }
+        }
+      );
+
+      api.delete(
+        "/groups/:id/invites/:inviteId",
+        { response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { group } = groupFor(ctx, { manage: true });
+          const row = getInvite(Number(ctx.params.inviteId));
+          if (!row || row.group_id !== group.id) throw problem(404, "unknown-invite", "No such invite");
+          cancelInvite(row.id);
+          notifyGroups([group.owner_id, row.user_id]);
+          return reply(204);
+        }
+      );
+
+      // Remove a member (the owner) or leave (yourself). The owner cannot leave, delete the group instead.
+      api.delete(
+        "/groups/:id/members/:userId",
+        { response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { user, group } = groupFor(ctx);
+          const target = Number(ctx.params.userId);
+          if (!isMember(group.id, target)) throw problem(404, "unknown-member", "Not in this group");
+          if (target === group.owner_id) throw problem(400, "owner", "The owner stays in the group, delete the group instead");
+          if (target !== user.id && !canManage(group, user)) throw problem(403, "forbidden", "Only the owner can remove people");
+          const people = audience(group.id);
+          removeMember(group.id, target);
+          notifyGroups(people);
+          return reply(204);
+        }
+      );
+
+      api.get("/invites", { response: { 200: t.array(Invite), 401: t.problem() } }, (ctx) => invitesFor(currentUser(ctx).user.id));
+
+      for (const action of ["accept", "decline"]) {
+        api.post(
+          "/invites/:id/" + action,
+          { response: { 204: t.empty(), 401: t.problem(), 404: t.problem() } },
+          (ctx) => {
+            const { user } = currentUser(ctx);
+            const row = getInvite(Number(ctx.params.id));
+            if (!row || row.user_id !== user.id) throw problem(404, "unknown-invite", "No such invite");
+            const owner = getGroup(row.group_id)?.owner_id;
+            const people = audience(row.group_id);
+            if (action === "accept") acceptInvite(row.id);
+            else cancelInvite(row.id);
+            notifyGroups([...people, owner].filter(Boolean));
+            return reply(204);
+          }
+        );
+      }
+
       api.post(
         "/auth/logout",
         { response: { 200: Message, 401: t.problem() } },
@@ -535,10 +718,9 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
-      api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, (ctx) => {
-        currentUser(ctx);
-        return serializeDevices();
-      });
+      api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, (ctx) =>
+        serializeDevices(currentUser(ctx).user)
+      );
 
       api.post(
         "/sendPing",
@@ -552,18 +734,19 @@ export function createApp({ gracefulShutdown = true } = {}) {
           },
         },
         async (ctx) => {
-          currentUser(ctx);
+          const { user } = currentUser(ctx);
           const { deviceId, userId } = ctx.body ?? {};
-          if (onlineDevices().length === 0) return reply(202, { message: "No devices connected" });
+          const reachable = onlineDevices().filter((d) => canSee(user, d.userId));
+          if (reachable.length === 0) return reply(202, { message: "No devices connected" });
           const only = deviceId ? { deviceId, userId } : null;
-          if (only && !onlineDevices().some((d) => d.id === deviceId && (userId === undefined || d.userId === userId))) {
+          if (only && !reachable.some((d) => d.id === deviceId && (userId === undefined || d.userId === userId))) {
             throw problem(404, "device-not-connected", `Device ${deviceId} is not connected`);
           }
-          const asked = await requestLocation({ only });
+          const asked = await requestLocation({ only, viewer: user });
           broadcastDevices();
           return {
             message: deviceId ? `Location request sent to ${deviceId}` : `Location request sent to ${asked} devices`,
-            devices: serializeDevices(),
+            devices: serializeDevices(user),
           };
         }
       );
@@ -643,8 +826,9 @@ export function createApp({ gracefulShutdown = true } = {}) {
     );
 
     avatars.get("/avatars/:userId", (ctx) => {
-      currentUser(ctx);
-      const avatar = avatarFor(Number(ctx.params.userId));
+      const { user } = currentUser(ctx);
+      const wanted = Number(ctx.params.userId);
+      const avatar = canSee(user, wanted) ? avatarFor(wanted) : null;
       if (!avatar) throw problem(404, "no-avatar", "No profile picture");
       return reply(200, avatar.data, {
         "content-type": avatar.type,
@@ -674,7 +858,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           account = id;
           viewers.set(socket, id);
           send(socket, { successful: true });
-          send(socket, { type: "dataResponse", devices: serializeDevices() });
+          send(socket, { type: "dataResponse", devices: serializeDevices(getUser(id)) });
           return;
         }
 
@@ -710,11 +894,11 @@ export function createApp({ gracefulShutdown = true } = {}) {
             send(socket, { type: "pong" });
             break;
           case "getData":
-            send(socket, { type: "dataResponse", devices: serializeDevices() });
+            send(socket, { type: "dataResponse", devices: serializeDevices(getUser(account)) });
             break;
           case "pingDevices":
-            await requestLocation({ except: { userId: account, deviceId } });
-            send(socket, { type: "dataResponse", devices: serializeDevices() });
+            await requestLocation({ except: { userId: account, deviceId }, viewer: getUser(account) });
+            send(socket, { type: "dataResponse", devices: serializeDevices(getUser(account)) });
             break;
           case "updatePosition":
             if (role !== "device") return;
@@ -755,6 +939,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
     app,
     broadcastDevices,
     requestLocation,
+    notifyGroups,
     disconnectDevice(userId, id, reason = "Disconnected by server") {
       getDevice(userId, id)?.socket?.close(CLOSE_POLICY, reason);
     },
