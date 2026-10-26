@@ -88,8 +88,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
 
     .route-mode .pin { display: none; }
     .stop { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 2.5px solid #fff; border-radius: 50%; background: #d3171e; color: #fff;
-      box-shadow: var(--shadow); font: 700 13px system-ui, sans-serif; transition: scale .15s; }
-    .stop.active { z-index: 6; background: #0f172a; scale: 1.25; }
+      box-shadow: var(--shadow); font: 700 13px system-ui, sans-serif; transition: box-shadow .15s; }
+    .stop.active { z-index: 6; background: #0f172a; box-shadow: 0 0 0 4px rgba(15,23,42,.25), var(--shadow); }
     .dark .stop.active { background: #fff; color: #0f172a; border-color: #0f172a; }
 
     @keyframes breathe { 0%, 100% { opacity: 0; } 45% { opacity: .85; } }
