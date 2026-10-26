@@ -9,12 +9,12 @@ import {
 import useThemeManager from "@/hooks/useThemeManager";
 import { MaterialIcons as Icon } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useWebSocketContext } from "@/context/WebSocket";
+import { readCredentials } from "@/lib/socket";
+import { logout } from "@/lib/logout";
 
 export default function ErrorScreen() {
   const colors = useThemeManager();
-  const { getValue, removeValue } = useAsyncStorage("userData");
   const router = useRouter();
   const params = useLocalSearchParams();
   const { connect } = useWebSocketContext();
@@ -30,7 +30,7 @@ export default function ErrorScreen() {
   const errorDescription = params.description || "Error Desc";
 
   const handleLogout = async () => {
-    await removeValue();
+    await logout();
     router.replace("/login");
   };
 
@@ -38,14 +38,13 @@ export default function ErrorScreen() {
     setRetrying(true);
     setErrorMessage("");
     try {
-      const userData = await getValue();
-      if (!userData) {
+      const creds = await readCredentials();
+      if (!creds) {
         setErrorMessage("User data not found.");
         setRetrying(false);
         return;
       }
-      const { serverIp, deviceId, password } = JSON.parse(userData);
-      await connect(serverIp, deviceId, password);
+      await connect(creds.serverIp, creds.deviceId, creds.password);
       router.replace("/map");
     } catch (error: any) {
       console.error("Retry connection error:", error);

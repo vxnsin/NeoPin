@@ -7,11 +7,16 @@ const HEARTBEAT_MS = 25_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MS = 30_000;
 const MAX_QUEUE = 50;
+// The server closes with this code when the password is wrong or it kicked the device.
+const CLOSE_POLICY = 4000;
 
 type Credentials = { url: string; deviceId: string; password: string };
 
 export class SocketClient {
   connected = false;
+  // Set when the server refused us. Retrying with the same password is pointless
+  // until the user logs in again.
+  rejected = false;
 
   private socket: WebSocket | null = null;
   private credentials: Credentials | null = null;
@@ -33,6 +38,7 @@ export class SocketClient {
     this.credentials = { url, deviceId, password };
     this.autoReconnect = options?.autoReconnect ?? true;
     this.closedManually = false;
+    this.rejected = false;
     this.everConnected = false;
     this.retries = 0;
     this.clearReconnectTimer();
@@ -125,6 +131,7 @@ export class SocketClient {
             settle(resolve);
           } else {
             this.closedManually = true;
+            this.rejected = true;
             settle(() => reject(new Error("Authentication failed")));
             ws.close();
           }
@@ -144,9 +151,10 @@ export class SocketClient {
         this.socket = null;
         this.stopHeartbeat();
         this.setConnected(false);
+        if (event.code === CLOSE_POLICY) this.rejected = true;
         settle(() => reject(new Error(event.reason || `Connection closed (${event.code})`)));
 
-        if (!this.closedManually && this.autoReconnect && this.everConnected) {
+        if (!this.closedManually && !this.rejected && this.autoReconnect && this.everConnected) {
           this.scheduleReconnect();
         }
       };

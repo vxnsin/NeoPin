@@ -59,7 +59,8 @@ async function connectAndAuthenticate(client: SocketClient) {
 }
 
 beforeEach(() => {
-  jest.useFakeTimers();
+  // flush() waits for setImmediate, so that one has to stay real.
+  jest.useFakeTimers({ doNotFake: ["setImmediate"] });
   FakeWebSocket.instances = [];
   (global as any).WebSocket = FakeWebSocket;
 });
@@ -108,6 +109,17 @@ test("reconnects with back-off after the connection drops", async () => {
 
   expect(client.connected).toBe(true);
   expect(states).toEqual([true, false, true]);
+});
+
+test("stops reconnecting once the server closes with the policy code", async () => {
+  const client = new SocketClient();
+  const ws = await connectAndAuthenticate(client);
+
+  ws.close(4000, "Unauthorized");
+
+  jest.advanceTimersByTime(60_000);
+  expect(FakeWebSocket.instances).toHaveLength(1);
+  expect(client.rejected).toBe(true);
 });
 
 test("queues messages while offline and flushes them after authentication", async () => {

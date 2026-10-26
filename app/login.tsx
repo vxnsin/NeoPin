@@ -5,8 +5,6 @@ import {
   TouchableOpacity,
   Text,
   Animated,
-  Linking,
-  Dimensions,
 } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
 import { MaterialIcons as Icon } from "@expo/vector-icons";
@@ -14,6 +12,14 @@ import FloatingInput from "@/components/FloatingInput";
 import * as Device from "expo-device";
 import { useRouter } from "expo-router";
 import { useAsyncStorage } from "@/hooks/useAsyncStorage";
+import { useWebSocketContext } from "@/context/WebSocket";
+import { STORAGE_KEY } from "@/lib/socket";
+
+// "192.168.1.20:3012" is what people type, the socket needs a scheme.
+function normalizeUrl(input: string) {
+  const url = input.trim();
+  return /^wss?:\/\//i.test(url) ? url : `ws://${url}`;
+}
 
 const Login = () => {
   const colors = useThemeManager();
@@ -33,7 +39,9 @@ const Login = () => {
     serverPassword: useRef(new Animated.Value(0)).current,
   };
   const router = useRouter();
-  const { storeValue } = useAsyncStorage("userData");
+  const { storeValue } = useAsyncStorage(STORAGE_KEY);
+  const { connect } = useWebSocketContext();
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     setDeviceName(Device.modelName || "Unknown Device");
@@ -62,9 +70,11 @@ const Login = () => {
 
   const handleConnect = async () => {
     setErrors({ username: false, serverIp: false, serverPassword: false });
+    const deviceId = username.trim();
+    const url = serverIp.trim();
     const newErrors = {
-      username: !username,
-      serverIp: !serverIp,
+      username: !deviceId,
+      serverIp: !url,
       serverPassword: !serverPassword,
     };
     if (newErrors.username || newErrors.serverIp || newErrors.serverPassword) {
@@ -72,41 +82,20 @@ const Login = () => {
       setConnectionStatus("Please fill in all fields");
       return;
     }
+    if (connecting) return;
+    setConnecting(true);
+    setConnectionStatus("Connecting...");
+    // Log in with the shared socket right away instead of a throwaway test
+    // connection: it has the auth timeout and clean error handling already.
+    const serverUrl = normalizeUrl(url);
     try {
-      await new Promise<void>((resolve, reject) => {
-        const testSocket = new WebSocket(serverIp);
-        testSocket.onopen = () => {
-          const authMessage = JSON.stringify({
-            type: "authenticate",
-            deviceId: username,
-            password: serverPassword,
-          });
-          testSocket.send(authMessage);
-        };
-        testSocket.onmessage = (event) => {
-          const response = JSON.parse(event.data);
-          testSocket.close();
-          if (response.successful === true) {
-            console.log("Connected");
-            resolve();
-          } else {
-            reject(new Error("Authentication failed"));
-          }
-        };
-        testSocket.onerror = () => {
-          reject(new Error("Test connection failed"));
-        };
-      });
-      setConnectionStatus("Test connection successful - Connecting...");
-      const userData = JSON.stringify({
-        deviceId: username,
-        serverIp: serverIp,
-        password: serverPassword,
-      });
-      await storeValue(userData);
+      await connect(serverUrl, deviceId, serverPassword);
+      await storeValue(JSON.stringify({ deviceId, serverIp: serverUrl, password: serverPassword }));
       router.replace("/");
     } catch (error: any) {
       setConnectionStatus("Connection failed: " + error.message);
+    } finally {
+      setConnecting(false);
     }
   };
   return (
@@ -157,11 +146,15 @@ const Login = () => {
       <TouchableOpacity
         style={[styles.button, { backgroundColor: colors.colors.secondary }]}
         onPress={handleConnect}
+        disabled={connecting}
       >
         <Text style={[styles.buttonText, { color: colors.colors.onSecondary }]}>
-          Connect to Server
+          {connecting ? "Connecting..." : "Connect to Server"}
         </Text>
       </TouchableOpacity>
+      {connectionStatus && !connecting ? (
+        <Text style={[styles.status, { color: colors.colors.primary }]}>{connectionStatus}</Text>
+      ) : null}
     </View>
   );
 };
@@ -181,6 +174,7 @@ const styles = StyleSheet.create({
     marginTop: 30,
   },
   buttonText: { fontSize: 18, fontWeight: "bold" },
+  status: { fontSize: 14, marginTop: 16, textAlign: "center" },
 });
 
 export default Login;

@@ -11,7 +11,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // reporter keep running. The task itself just makes sure we are connected.
 const keepAlive = async () => {
   while (BackgroundService.isRunning()) {
-    if (!socket.connected && !socket.reconnectPending) {
+    if (!socket.connected && !socket.reconnectPending && !socket.rejected) {
       const creds = await readCredentials();
       if (!creds) break;
       try {

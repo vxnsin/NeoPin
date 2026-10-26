@@ -15,10 +15,9 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import useThemeManager from "@/hooks/useThemeManager";
 import { useWebSocketContext } from "@/context/WebSocket";
-import { STORAGE_KEY } from "@/lib/socket";
+import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import {
   REPORTING_PRESETS,
@@ -26,8 +25,6 @@ import {
   setReportingPreset,
   type ReportingPreset,
 } from "@/lib/settings";
-import { stopBackgroundLocation } from "@/tasks/LocationTask";
-import { stopWebSocketService } from "@/services/WebSocketService";
 
 type Device = {
   deviceId: string;
@@ -55,7 +52,7 @@ export default function MapScreen() {
   const theme = useThemeManager();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { emit, close, addMessageListener, isConnected } = useWebSocketContext();
+  const { emit, addMessageListener, isConnected } = useWebSocketContext();
 
   const webviewRef = useRef<WebView>(null);
   const [webViewLoaded, setWebViewLoaded] = useState(false);
@@ -137,9 +134,7 @@ export default function MapScreen() {
 
   const logout = async () => {
     setMenuOpen(false);
-    close();
-    await Promise.all([stopWebSocketService(), stopBackgroundLocation().catch(() => {})]);
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await signOut();
     router.replace("/login");
   };
 
@@ -371,6 +366,12 @@ const mapHTML = `
       if (s < 86400) return Math.floor(s / 3600) + ' h ago';
       return Math.floor(s / 86400) + ' d ago';
     }
+    // Device names come from other phones, never put them into HTML unescaped.
+    function esc(text) {
+      return String(text).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
     function state(d) {
       if (d.status !== 'online') return 'offline';
       if (!d.lastPing) return 'unknown';
@@ -394,7 +395,7 @@ const mapHTML = `
         seen[d.deviceId] = true;
         var latlng = [d.position.latitude, d.position.longitude];
         var st = state(d);
-        var popup = '<b>' + d.deviceId + '</b><br>' + d.status + ' &middot; ' + ago(d.lastPing);
+        var popup = '<b>' + esc(d.deviceId) + '</b><br>' + esc(d.status) + ' &middot; ' + ago(d.lastPing);
         if (markers[d.deviceId]) {
           markers[d.deviceId].setLatLng(latlng).setIcon(icon(st)).bindPopup(popup);
         } else {
