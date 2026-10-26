@@ -1,5 +1,4 @@
 // Who is signed in, and the account's profile picture.
-const AVATAR_SIZE = 128;
 const AVATAR_MAX_BYTES = 16 * 1024;
 
 const accountWrap = document.getElementById("accountWrap");
@@ -65,34 +64,6 @@ function loadImage(file) {
   });
 }
 
-// Centre crop to a square, then lower the quality until it fits the server's limit.
-async function squareJpeg(file) {
-  const image = await loadImage(file);
-  const side = Math.min(image.naturalWidth, image.naturalHeight);
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = AVATAR_SIZE;
-  const context = canvas.getContext("2d");
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE);
-  context.imageSmoothingQuality = "high";
-  context.drawImage(
-    image,
-    (image.naturalWidth - side) / 2,
-    (image.naturalHeight - side) / 2,
-    side,
-    side,
-    0,
-    0,
-    AVATAR_SIZE,
-    AVATAR_SIZE
-  );
-  for (let quality = 0.9; quality >= 0.3; quality -= 0.1) {
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
-    if (blob && blob.size <= AVATAR_MAX_BYTES) return blob;
-  }
-  throw new Error("too-large");
-}
-
 async function request(url, options) {
   const response = await fetch(url, options);
   if (response.status === 401) {
@@ -110,7 +81,9 @@ avatarFile.addEventListener("change", async () => {
   if (!file) return;
   setMenu(false);
   try {
-    const blob = await squareJpeg(file);
+    const image = await cropAvatar(file);
+    if (!image) return;
+    const blob = image;
     const response = await request("/api/avatar", { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: blob });
     if (!response.ok) throw new Error("rejected");
     me.avatarUrl = (await response.json()).avatarUrl;

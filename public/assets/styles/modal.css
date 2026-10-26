@@ -223,3 +223,57 @@
   color: var(--text-muted);
   font-size: 12.5px;
 }
+
+/* Picture cropper */
+.cropper {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.cropper__view {
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.cropper__canvas {
+  display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+.cropper__canvas:active {
+  cursor: grabbing;
+}
+
+/* The circle is what the avatar will show, the rest is dimmed. */
+.cropper__mask {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 999px rgba(8, 10, 14, 0.55), inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+
+.cropper__zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cropper__zoom input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--brand);
+}
+
+.cropper .row__edit-actions {
+  width: 100%;
+}

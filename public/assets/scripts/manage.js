@@ -3,8 +3,11 @@ const modal = document.getElementById("modal");
 const modalTitle = document.getElementById("modalTitle");
 const modalBody = document.getElementById("modalBody");
 let modalOpener = null;
+// Set by a dialog that has to hear about it when it is closed without its own buttons.
+let modalCleanup = null;
 
 function openModal(title) {
+  modalCleanup = null;
   modalTitle.textContent = title;
   modalBody.replaceChildren();
   modalOpener = document.activeElement;
@@ -13,6 +16,9 @@ function openModal(title) {
 }
 
 function closeModal() {
+  const cleanup = modalCleanup;
+  modalCleanup = null;
+  cleanup?.();
   modal.hidden = true;
   modalBody.replaceChildren();
   modalOpener?.focus?.();
