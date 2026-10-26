@@ -188,9 +188,11 @@ export function createApp({ gracefulShutdown = true } = {}) {
       "cache-control": "no-cache",
     });
 
-  app.get("/", (ctx) => (isSignedIn(ctx.session) ? page("index.html") : ctx.redirect("/login.html")));
+  app.get("/", (ctx) => (isSignedIn(ctx.session) ? page("index.html") : ctx.redirect("/login")));
   app.get("/index.html", (ctx) => ctx.redirect("/"));
-  app.get("/login.html", () => page("login.html"));
+  app.get("/login", () => page("login.html"));
+  // Old links and bookmarks still find the login.
+  app.get("/login.html", (ctx) => ctx.redirect("/login"));
   app.register(serveStatic({ dir: path.join(publicDir, "assets"), prefix: "/assets", immutable: () => false }));
 
   app.register((scope) => {
@@ -211,7 +213,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
 
   app.get("/logout", (ctx) => {
     ctx.session.destroy();
-    return ctx.redirect("/login.html");
+    return ctx.redirect("/login");
   });
 
   app.register(

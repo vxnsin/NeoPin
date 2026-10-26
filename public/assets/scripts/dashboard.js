@@ -293,7 +293,7 @@ async function pingDevice(deviceId, button) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId }),
     });
-    if (response.status === 401) return (window.location.href = "/login.html");
+    if (response.status === 401) return (window.location.href = "/login");
     if (!response.ok) toast("The device is not connected right now.");
   } catch {
     toast("The server is not reachable.");
@@ -429,7 +429,7 @@ function connect() {
       return;
     }
     if ("successful" in data) {
-      if (!data.successful) return (window.location.href = "/login.html");
+      if (!data.successful) return (window.location.href = "/login");
       setStatus("online");
       hideLoader();
       return;
@@ -438,7 +438,7 @@ function connect() {
   });
   socket.addEventListener("close", (event) => {
     if (event.code === 4000) {
-      window.location.href = "/login.html";
+      window.location.href = "/login";
       return;
     }
     setStatus("offline");

@@ -179,9 +179,9 @@ test("dashboard login issues a session cookie and rejects wrong passwords", asyn
 test("the dashboard page needs a session, the login page does not", async () => {
   const anonymous = await fetch(`${baseUrl}/`, { redirect: "manual" });
   assert.equal(anonymous.status, 302);
-  assert.equal(anonymous.headers.get("location"), "/login.html");
+  assert.equal(anonymous.headers.get("location"), "/login");
 
-  const loginPage = await fetch(`${baseUrl}/login.html`);
+  const loginPage = await fetch(`${baseUrl}/login`);
   assert.equal(loginPage.status, 200);
   assert.match(loginPage.headers.get("content-security-policy"), /script-src 'self'/);
 
@@ -197,7 +197,7 @@ test("the login endpoint is rate limited, the rest of the app is not", async () 
   assert.equal(last.status, 429);
   assert.ok(last.headers.get("retry-after"));
 
-  const page = await fetch(`${baseUrl}/login.html`);
+  const page = await fetch(`${baseUrl}/login`);
   assert.equal(page.status, 200);
 });
 
