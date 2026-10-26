@@ -14,8 +14,8 @@ import {
   linkedDevices,
   listUsers,
   publicUser,
-  registrationOpen,
   revokeToken,
+  setPassword,
   setAvatar,
   unlinkDevice,
   userForToken,
@@ -62,6 +62,7 @@ const User = t.object({
   username: t.string(),
   displayName: t.string(),
   isAdmin: t.boolean(),
+  mustChangePassword: t.boolean(),
   avatarUrl: t.string().nullable(),
 });
 
@@ -311,8 +312,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
   // What the login screens need before anyone is signed in.
   app.get(
     "/api/status",
-    { response: { 200: t.object({ version: t.string(), registrationOpen: t.boolean() }) } },
-    () => ({ version: config.version, registrationOpen: registrationOpen() })
+    { response: { 200: t.object({ version: t.string() }) } },
+    () => ({ version: config.version })
   );
 
   // Everything that takes a password shares one limit per IP.
@@ -352,27 +353,29 @@ export function createApp({ gracefulShutdown = true } = {}) {
       }
     );
 
+    // Changing the password asks for the current one, so a stolen session or token is not enough.
     scope.post(
-      "/api/register",
+      "/api/me/password",
       {
-        body: t.object({
-          username: t.string().max(64),
-          password: t.string().max(256),
-          displayName: t.string().max(64).optional(),
-        }),
-        response: { 201: User, 400: t.problem(), 403: t.problem(), 409: t.problem(), 429: t.problem() },
+        body: t.object({ currentPassword: t.string().max(256), newPassword: t.string().max(256) }),
+        response: {
+          200: t.object({ message: t.string(), token: t.string().optional() }),
+          400: t.problem(),
+          401: t.problem(),
+          429: t.problem(),
+        },
       },
       (ctx) => {
-        if (!registrationOpen()) throw problem(403, "registration-closed", "Accounts are created by the admin");
-        try {
-          const user = createUser(ctx.body);
-          console.log(chalk.cyan(`[i] Account ${chalk.whiteBright(user.username)} created.`));
-          return reply(201, publicUser(user));
-        } catch (error) {
-          if (error.code === "taken") throw problem(409, "username-taken", error.message);
-          if (error.code === "invalid") throw problem(400, "invalid-account", error.message);
-          throw error;
+        const { user, deviceId } = currentUser(ctx);
+        if (!verifyLogin(user.username, ctx.body.currentPassword)) {
+          throw problem(401, "invalid-credentials", "The current password is wrong");
         }
+        if (ctx.body.newPassword.length < 8) throw problem(400, "weak-password", "The password needs at least 8 characters");
+        setPassword(user.id, ctx.body.newPassword);
+        console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} changed the password.`));
+        // Every other device has to log in again. The one asking keeps working with a fresh token.
+        disconnectAccount(user.id, "Password changed");
+        return { message: "Password changed", ...(deviceId ? { token: issueToken(user.id, deviceId) } : {}) };
       }
     );
   });

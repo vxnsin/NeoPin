@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { config } from "./config.js";
 import { getDb } from "./db.js";
 
 const USERNAME = /^[A-Za-z0-9_.-]{3,32}$/;
@@ -24,10 +25,15 @@ const DUMMY_HASH = hashPassword("neopin-dummy");
 
 export const userCount = () => getDb().prepare("SELECT COUNT(*) AS n FROM users").get().n;
 
-// Self-service sign-up exists for the very first account only. Everyone after that
-// is created by the admin.
-export function registrationOpen() {
-  return userCount() === 0;
+// On a fresh database the server creates the admin itself and hands back the
+// generated password once. The admin is asked to change it after the first login.
+export function ensureAdmin() {
+  if (userCount() > 0) return null;
+  const generated = !config.adminPassword;
+  const password = config.adminPassword ?? crypto.randomBytes(12).toString("base64url");
+  const user = createUser({ username: config.adminUsername, password, displayName: "Admin" });
+  if (generated) getDb().prepare("UPDATE users SET must_change_password = 1 WHERE id = ?").run(user.id);
+  return { username: user.username, password: generated ? password : null };
 }
 
 export function publicUser(row) {
@@ -37,6 +43,7 @@ export function publicUser(row) {
     username: row.username,
     displayName: row.display_name,
     isAdmin: row.is_admin === 1,
+    mustChangePassword: row.must_change_password === 1,
     avatarUrl: row.avatar_b64 ? `/avatars/${row.id}?v=${row.avatar_version}` : null,
   };
 }
@@ -95,7 +102,7 @@ export function unlinkDevice(userId, deviceId) {
 }
 
 export function setPassword(userId, password) {
-  getDb().prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(password), userId);
+  getDb().prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hashPassword(password), userId);
   getDb().prepare("DELETE FROM tokens WHERE user_id = ?").run(userId);
 }
 

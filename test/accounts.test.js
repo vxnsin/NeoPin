@@ -1,5 +1,7 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { config } from "../src/config.js";
+import { ensureAdmin } from "../src/accounts.js";
 import { getDb } from "../src/db.js";
 import { PASSWORD, deviceHeaders, startServer } from "./helpers.js";
 
@@ -11,29 +13,57 @@ beforeEach(async () => {
 
 afterEach(() => s.stop());
 
-test("self-service sign-up exists for the first account only", async () => {
-  assert.equal((await (await fetch(`${s.baseUrl}/api/status`)).json()).registrationOpen, true);
+test("a fresh database gets an admin with a generated password that must be changed", async () => {
+  const created = ensureAdmin();
+  assert.equal(created.username, "admin");
+  assert.ok(created.password.length >= 16);
+  assert.equal(ensureAdmin(), null, "only once");
 
-  const first = await s.post("/api/register", { username: "luis", password: PASSWORD, displayName: "Luis" });
-  assert.equal(first.status, 201);
-  const user = await first.json();
-  assert.equal(user.username, "luis");
-  assert.equal(user.displayName, "Luis");
-  assert.equal(user.avatarUrl, null);
+  const cookie = await s.cookieFor("admin", created.password);
+  const me = await (await fetch(`${s.baseUrl}/api/me`, { headers: { cookie } })).json();
+  assert.equal(me.isAdmin, true);
+  assert.equal(me.mustChangePassword, true);
+});
 
-  assert.equal((await (await fetch(`${s.baseUrl}/api/status`)).json()).registrationOpen, false);
-  assert.equal((await s.post("/api/register", { username: "anna", password: PASSWORD })).status, 403);
-  assert.equal(user.isAdmin, true);
+test("there is no self-service sign-up", async () => {
+  assert.equal((await s.post("/api/register", { username: "luis", password: PASSWORD })).status, 404);
+  assert.deepEqual(await (await fetch(`${s.baseUrl}/api/status`)).json(), { version: config.version });
 });
 
 test("usernames and passwords are validated, names are unique regardless of case", async () => {
-  assert.equal((await s.post("/api/register", { username: "x", password: PASSWORD })).status, 400);
-  assert.equal((await s.post("/api/register", { username: "has space", password: PASSWORD })).status, 400);
-  assert.equal((await s.post("/api/register", { username: "luis", password: "short" })).status, 400);
+  const admin = await s.account("luis");
+  const create = (body) => s.post("/api/users", body, { cookie: admin.cookie });
+  assert.equal((await create({ username: "x", password: PASSWORD })).status, 400);
+  assert.equal((await create({ username: "has space", password: PASSWORD })).status, 400);
+  assert.equal((await create({ username: "anna", password: "short" })).status, 400);
+  assert.equal((await create({ username: "anna", password: PASSWORD })).status, 201);
+  assert.equal((await create({ username: "ANNA", password: PASSWORD })).status, 409);
+});
 
-  assert.equal((await s.post("/api/register", { username: "luis", password: PASSWORD })).status, 201);
-  const admin = await s.cookieFor("luis");
-  assert.equal((await s.post("/api/users", { username: "LUIS", password: PASSWORD }, { cookie: admin })).status, 409);
+test("changing the password needs the current one and ends the old logins", async () => {
+  const luis = await s.account("luis");
+  const change = (body, headers) => s.post("/api/me/password", body, headers);
+
+  assert.equal((await change({ currentPassword: "wrong-password", newPassword: "a-new-password" }, { cookie: luis.cookie })).status, 401);
+  assert.equal((await change({ currentPassword: PASSWORD, newPassword: "short" }, { cookie: luis.cookie })).status, 400);
+  assert.equal((await change({ currentPassword: PASSWORD, newPassword: "a-new-password" })).status, 401, "not signed in");
+
+  const phone = await s.device("luis", "phone", luis.token);
+  await phone.next();
+  const ok = await change({ currentPassword: PASSWORD, newPassword: "a-new-password" }, { cookie: luis.cookie });
+  assert.equal(ok.status, 200);
+  assert.equal((await phone.closed).code, 4000, "devices have to log in again");
+
+  assert.equal((await s.post("/login", { username: "luis", password: PASSWORD })).status, 401);
+  assert.equal((await s.post("/login", { username: "luis", password: "a-new-password" })).status, 200);
+
+  const fromDevice = await s.post("/api/auth/login", { username: "luis", password: "a-new-password", deviceId: "phone" });
+  const { token } = await fromDevice.json();
+  const again = await change({ currentPassword: "a-new-password", newPassword: "another-password" }, deviceHeaders("phone", token));
+  assert.equal(again.status, 200);
+  const fresh = (await again.json()).token;
+  assert.equal((await fetch(`${s.baseUrl}/api/me`, { headers: deviceHeaders("phone", fresh) })).status, 200, "the asking device keeps working");
+  assert.equal((await fetch(`${s.baseUrl}/api/me`, { headers: deviceHeaders("phone", token) })).status, 401);
 });
 
 test("passwords are stored hashed, never as they were typed", async () => {

@@ -2,7 +2,7 @@ import os from "os";
 import chalk from "chalk";
 import { config } from "./src/config.js";
 import { initDb } from "./src/db.js";
-import { userCount } from "./src/accounts.js";
+import { ensureAdmin } from "./src/accounts.js";
 import { pruneHistory } from "./src/history.js";
 import { createApp } from "./src/app.js";
 import { startConsole } from "./src/console.js";
@@ -24,14 +24,18 @@ function banner() {
   console.log(chalk.red(" / /|  /  __/ /_/ ") + chalk.whiteBright("/ ____/ / / / /"));
   console.log(chalk.red("/_/ |_/___/\\____/") + chalk.whiteBright(`_/    /_/_/ /_/ v${config.version}`));
   console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://${networkIp()}:${config.port}`)}`));
-  if (userCount() === 0) {
-    console.log(chalk.yellow("No account yet. Open the dashboard to create the first one."));
+  if (adminCreated) {
+    console.log(chalk.yellow(`Admin account created: ${chalk.whiteBright(adminCreated.username)}`));
+    if (adminCreated.password) {
+      console.log(chalk.yellow(`Generated password: ${chalk.whiteBright(adminCreated.password)}  (shown once, change it after logging in)`));
+    }
   }
   console.log(chalk.whiteBright(`Type '${chalk.red.bold("help")}' to see available commands`));
 }
 
 // inkan closes every socket and the server itself on SIGINT and SIGTERM.
 initDb();
+const adminCreated = ensureAdmin();
 pruneHistory();
 const server = createApp();
 await server.app.listen(config.port);

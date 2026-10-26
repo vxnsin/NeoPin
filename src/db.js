@@ -15,6 +15,7 @@ const SCHEMA = `
     avatar_type TEXT,
     avatar_version TEXT,
     is_admin INTEGER NOT NULL DEFAULT 0,
+    must_change_password INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS tokens (
@@ -47,6 +48,9 @@ export function initDb(file = config.dbPath) {
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "is_admin")) {
     db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
     db.exec("UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users)");
+  }
+  if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "must_change_password")) {
+    db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0");
   }
   return db;
 }
