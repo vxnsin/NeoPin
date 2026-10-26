@@ -92,7 +92,7 @@ export async function uploadAvatar(creds: Credentials, jpeg: Uint8Array): Promis
   const response = await fetch(`${httpBase(creds.serverIp)}/api/avatar`, {
     method: "PUT",
     headers: { ...deviceHeaders(creds), "Content-Type": "image/jpeg" },
-    body: jpeg,
+    body: jpeg as unknown as BodyInit,
   });
   if (!response.ok) throw new Error(problemMessage(response.status));
   const { avatarUrl } = await response.json();
