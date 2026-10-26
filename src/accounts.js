@@ -2,6 +2,13 @@ import crypto from "crypto";
 import { config } from "./config.js";
 import { getDb } from "./db.js";
 
+// Devices that never announced a type (older app versions) are told apart by their name.
+export function inferDeviceType(name) {
+  if (/ipad|tablet|\btab\b|\bpad\b/i.test(name ?? "")) return "tablet";
+  if (/\b(mac|macbook|imac|laptop|desktop|pc|windows|linux)\b/i.test(name ?? "")) return "desktop";
+  return "phone";
+}
+
 const USERNAME = /^[A-Za-z0-9_.-]{3,32}$/;
 
 function hashPassword(password) {
@@ -93,7 +100,7 @@ export function linkedDevices(userId) {
   return getDb()
     .prepare("SELECT device_id, created_at, device_type FROM tokens WHERE user_id = ? ORDER BY created_at")
     .all(userId)
-    .map((r) => ({ deviceId: r.device_id, linkedAt: r.created_at, deviceType: r.device_type ?? "phone" }));
+    .map((r) => ({ deviceId: r.device_id, linkedAt: r.created_at, deviceType: r.device_type ?? inferDeviceType(r.device_id) }));
 }
 
 export function unlinkDevice(userId, deviceId) {

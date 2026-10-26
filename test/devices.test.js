@@ -115,3 +115,13 @@ test("linked devices are listed after a restart with their last stored position"
   assert.deepEqual(device.position, { latitude: 48.1, longitude: 11.5 });
   assert.equal(device.lastPing, "2025-06-10T09:00:00.000Z");
 });
+
+test("a device without a announced type is told apart by its name", async () => {
+  const { inferDeviceType } = await import("../src/accounts.js");
+  assert.equal(inferDeviceType("iPad"), "tablet");
+  assert.equal(inferDeviceType("Luis' iPad Pro"), "tablet");
+  assert.equal(inferDeviceType("Galaxy Tab S9"), "tablet");
+  assert.equal(inferDeviceType("MacBook Pro"), "desktop");
+  assert.equal(inferDeviceType("iPhone"), "phone");
+  assert.equal(inferDeviceType("Nothing Phone (3)"), "phone");
+});

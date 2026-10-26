@@ -1,4 +1,4 @@
-import { getUser, linkedDevices, listUsers, publicUser } from "./accounts.js";
+import { getUser, inferDeviceType, linkedDevices, listUsers, publicUser } from "./accounts.js";
 import { lastPosition } from "./history.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
@@ -92,7 +92,7 @@ export function serializeDevices() {
       lastPing: d.lastPing,
       status: d.status,
       avatarUrl: owner?.avatarUrl ?? null,
-      deviceType: d.deviceType ?? "phone",
+      deviceType: d.deviceType ?? inferDeviceType(d.id),
     });
   }
   return [...rows.values()];
