@@ -224,7 +224,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     function fullName(d) { return d.owner && d.owner.displayName ? d.owner.displayName + " \u00b7 " + d.deviceId : d.deviceId; }
     var TYPE_PATHS = {
       phone: '<rect width="12" height="20" x="6" y="2" rx="2.5"/><path d="M11 18h2"/>',
-      tablet: '<rect width="16" height="20" x="4" y="2" rx="2.5"/><path d="M11 18h2"/>',
+      tablet: '<rect width="20" height="16" x="2" y="4" rx="2.5"/><path d="M18 12h.01"/>',
       desktop: '<rect width="16" height="11" x="4" y="5" rx="2"/><path d="M2 20h20"/>'
     };
     function typeBadge(d) {
