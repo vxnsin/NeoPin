@@ -132,6 +132,19 @@ export async function changePasswordRequest(
   );
 }
 
+export async function updateProfileRequest(
+  auth: DeviceAuth,
+  changes: { displayName?: string; username?: string }
+): Promise<User> {
+  return json(
+    await request(`${httpBase(auth.serverIp)}/api/me`, {
+      method: "PATCH",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify(changes),
+    })
+  );
+}
+
 export async function fetchMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me`, { headers: deviceHeaders(auth) }));
 }

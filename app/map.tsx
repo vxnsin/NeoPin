@@ -27,6 +27,7 @@ import Avatar from "@/components/Avatar";
 import PulseLogo from "@/components/PulseLogo";
 import TimelinePanel from "@/components/TimelinePanel";
 import PasswordForm from "@/components/PasswordForm";
+import ProfileForm from "@/components/ProfileForm";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
@@ -84,6 +85,7 @@ export default function MapScreen() {
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
@@ -547,10 +549,17 @@ export default function MapScreen() {
                         <Text style={[styles.link, { color: c.muted }]}>Remove</Text>
                       </Pressable>
                     ) : null}
+                    <Pressable onPress={() => setEditingProfile((open) => !open)} hitSlop={8}>
+                      <Text style={[styles.link, { color: c.muted }]}>Edit profile</Text>
+                    </Pressable>
                   </View>
                   {photoError ? <Text style={[styles.error, { color: c.secondary }]}>{photoError}</Text> : null}
                 </View>
               </View>
+
+              {editingProfile ? (
+                <ProfileForm auth={creds} user={creds.user} onSaved={(saved) => changeUser(saved)} onClose={() => setEditingProfile(false)} />
+              ) : null}
 
               <Text style={[styles.sectionTitle, { color: c.muted }]}>Position updates</Text>
               <View style={styles.presetRow}>
