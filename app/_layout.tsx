@@ -6,7 +6,7 @@ import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
 import { socket } from "@/lib/socket";
-import { checkAndApplyUpdate } from "@/lib/updates";
+import { checkAndPrompt } from "@/lib/updates";
 import { logout } from "@/lib/logout";
 import { startPositionReporting } from "@/handlers/Location";
 import { startBackgroundLocation } from "@/tasks/LocationTask";
@@ -34,11 +34,11 @@ function ConnectionLifecycle() {
     [router]
   );
 
-  // A new version is fetched and applied as soon as the app is open, not only on the next launch.
+  // A new version is downloaded as soon as the app is open, and the user is asked to restart.
   useEffect(() => {
-    checkAndApplyUpdate();
+    checkAndPrompt();
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") checkAndApplyUpdate();
+      if (state === "active") checkAndPrompt();
     });
     return () => subscription.remove();
   }, []);

@@ -18,7 +18,7 @@ import {
 import { WebView as NativeWebView, type WebViewMessageEvent } from "react-native-webview";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { checkAndApplyUpdate, updateLabel } from "@/lib/updates";
+import { checkAndPrompt, updateLabel } from "@/lib/updates";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import useThemeManager from "@/hooks/useThemeManager";
@@ -614,9 +614,10 @@ export default function MapScreen() {
               <Pressable
                 style={[styles.versionRow]}
                 onPress={async () => {
-                  const result = await checkAndApplyUpdate();
+                  setUpdateNote("Checking…");
+                  const result = await checkAndPrompt(true);
                   setUpdateNote(
-                    result === "current" ? "You have the latest version." : result === "failed" ? "Could not check for updates." : result === "unavailable" ? "Updates are off in this build." : "Updating…"
+                    result === "current" ? "You have the latest version." : result === "failed" ? "Could not check for updates." : result === "unavailable" ? "Updates are off in this build." : "A new version is ready."
                   );
                 }}
                 accessibilityLabel="Check for updates"
