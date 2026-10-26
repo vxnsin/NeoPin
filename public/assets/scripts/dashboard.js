@@ -82,12 +82,13 @@ function colourClass(name) {
 }
 
 // The picture comes from avatarUrl only, so where it is stored can change without touching this.
-function avatarHtml(device, size = "") {
+// A person's row passes their own name for the letters and colour, pins use the device's.
+function avatarHtml(device, size = "", { label = device.deviceId, colour = keyOf(device) } = {}) {
   const inner = device.avatarUrl
     ? `<img src="${esc(device.avatarUrl)}" alt="" decoding="async" />`
-    : `<span>${esc(initials(device.deviceId))}</span>`;
+    : `<span>${esc(initials(label))}</span>`;
   const sizeClass = size ? ` avatar--${size}` : "";
-  return `<span class="avatar${sizeClass} ${colourClass(keyOf(device))}" data-state="${freshness(device)}">${inner}</span>`;
+  return `<span class="avatar${sizeClass} ${colourClass(colour)}" data-state="${freshness(device)}">${inner}</span>`;
 }
 
 function metaText(device) {
@@ -305,8 +306,9 @@ function syncPopup() {
 }
 
 async function pingDevice(device, button) {
+  const labelled = !button.classList.contains("icon-btn");
   button.disabled = true;
-  button.textContent = "Asking…";
+  if (labelled) button.textContent = "Asking…";
   try {
     const response = await fetch("/api/sendPing", {
       method: "POST",
@@ -321,33 +323,71 @@ async function pingDevice(device, button) {
   // The answer arrives over the socket and redraws the popup.
   if (button.isConnected) {
     button.disabled = false;
-    button.textContent = "Ask for a fresh position";
+    if (labelled) button.textContent = "Ask for a fresh position";
   }
 }
 
 // Device panel
 
-function sortedDevices() {
-  return [...devices].sort(
-    (a, b) =>
-      STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
-      fullName(a).localeCompare(fullName(b), undefined, { sensitivity: "base" })
+const TYPE_RANK = { phone: 0, tablet: 1, desktop: 2 };
+
+// The device that stands for a person: the one online, else phone over tablet over
+// computer, else the one that reported last.
+function comparePrimary(a, b) {
+  return (
+    (a.status === "online" ? 0 : 1) - (b.status === "online" ? 0 : 1) ||
+    (TYPE_RANK[a.deviceType] ?? 0) - (TYPE_RANK[b.deviceType] ?? 0) ||
+    (Date.parse(b.lastPing) || 0) - (Date.parse(a.lastPing) || 0) ||
+    a.deviceId.localeCompare(b.deviceId)
   );
 }
 
-// One entry per owner: their freshest device stands for them, extra counts the others.
-function groupByOwner(list) {
-  const rank = { online: 0, stale: 1, offline: 2 };
+// One entry per person, the own account first, then by how alive their primary device is.
+function groupByUser() {
   const groups = new Map();
-  for (const device of list) {
-    const group = groups.get(device.userId);
-    if (!group) groups.set(device.userId, { device, extra: 0 });
-    else {
-      group.extra += 1;
-      if (rank[freshness(device)] < rank[freshness(group.device)]) group.device = device;
-    }
+  for (const device of devices) {
+    if (!groups.has(device.userId)) groups.set(device.userId, { userId: device.userId, name: ownerName(device), devices: [] });
+    groups.get(device.userId).devices.push(device);
   }
-  return [...groups.values()];
+  for (const group of groups.values()) {
+    group.devices.sort(comparePrimary);
+    group.primary = group.devices[0];
+  }
+  return [...groups.values()].sort(
+    (a, b) =>
+      (isOwn(b.primary) ? 1 : 0) - (isOwn(a.primary) ? 1 : 0) ||
+      STATE_ORDER[freshness(a.primary)] - STATE_ORDER[freshness(b.primary)] ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+}
+
+const personAvatar = (group, size = "") => avatarHtml(group.primary, size, { label: group.name, colour: `user:${group.userId}` });
+const openUsers = new Set();
+
+// "iPhone · online" or "iPad · 5 min ago", with a hint when there are more devices.
+function personMeta(group) {
+  const device = group.primary;
+  const state = freshness(device);
+  const when = state === "online" ? "online" : state === "stale" ? "no recent position" : device.lastPing ? timeAgo(device.lastPing) : "offline";
+  const more = group.devices.length - 1;
+  return `${device.deviceId} · ${when}${more ? ` · +${more} ${more === 1 ? "device" : "devices"}` : ""}`;
+}
+
+function subDeviceHtml(device) {
+  const selected = keyOf(device) === selectedId;
+  const askable = device.status === "online";
+  return `
+    <li class="subdevice" data-state="${freshness(device)}">
+      <button class="device device--sub${selected ? " is-selected" : ""}" type="button" data-id="${esc(keyOf(device))}"
+        data-state="${freshness(device)}" data-located="${Boolean(device.position)}" aria-pressed="${selected}">
+        ${typeIcon(device, " dtype--row")}
+        <span class="device__text">
+          <span class="device__name">${esc(device.deviceId)}</span>
+          <span class="device__meta">${esc(metaText(device))}</span>
+        </span>
+      </button>
+      ${askable ? `<button class="icon-btn subdevice__ask" type="button" data-ask="${esc(keyOf(device))}" aria-label="Ask ${esc(device.deviceId)} for a fresh position" title="Ask for a fresh position"><svg class="icon"><use href="#i-refresh" /></svg></button>` : ""}
+    </li>`;
 }
 
 function renderPanel() {
@@ -356,10 +396,13 @@ function renderPanel() {
   totalCountEl.textContent = devices.length;
   updateSummary();
 
-  const sorted = sortedDevices();
-  stackEl.innerHTML = groupByOwner(sorted)
+  const groups = groupByUser();
+  stackEl.innerHTML = groups
     .slice(0, 4)
-    .map(({ device, extra }) => `<span class="stack-item">${avatarHtml(device, "sm")}${extra ? `<span class="stack-extra">+${extra}</span>` : ""}</span>`)
+    .map((group) => {
+      const extra = group.devices.length - 1;
+      return `<span class="stack-item">${personAvatar(group, "sm")}${extra ? `<span class="stack-extra">+${extra}</span>` : ""}</span>`;
+    })
     .join("");
 
   if (devices.length === 0) {
@@ -372,20 +415,23 @@ function renderPanel() {
     return;
   }
 
-  listEl.innerHTML = sorted
-    .map((device) => {
-      const selected = keyOf(device) === selectedId;
+  listEl.innerHTML = groups
+    .map((group) => {
+      const open = openUsers.has(group.userId);
+      const holdsSelection = group.devices.some((d) => keyOf(d) === selectedId);
+      const subs = open ? `<ul class="person__devices" role="list">${group.devices.map(subDeviceHtml).join("")}</ul>` : "";
       return `
-        <li>
-          <button class="device${selected ? " is-selected" : ""}" type="button" data-id="${esc(keyOf(device))}"
-            data-state="${freshness(device)}" data-located="${Boolean(device.position)}" aria-pressed="${selected}">
-            ${avatarHtml(device)}
+        <li class="person${open ? " is-open" : ""}">
+          <button class="device person__head${holdsSelection ? " is-selected" : ""}" type="button" data-user="${group.userId}"
+            data-state="${freshness(group.primary)}" data-located="${Boolean(group.primary.position)}" aria-expanded="${open}">
+            ${personAvatar(group)}
             <span class="device__text">
-              <span class="device__name">${typeIcon(device)}${esc(fullName(device))}${isOwn(device) ? ' <span class="own">you</span>' : ""}</span>
-              <span class="device__meta">${esc(metaText(device))}</span>
+              <span class="device__name">${esc(group.name)}${isOwn(group.primary) ? ' <span class="own">you</span>' : ""}</span>
+              <span class="device__meta">${typeIcon(group.primary)}${esc(personMeta(group))}</span>
             </span>
-            <svg class="icon device__go" aria-hidden="true"><use href="#i-locate" /></svg>
+            <svg class="icon person__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
           </button>
+          ${subs}
         </li>`;
     })
     .join("");
@@ -400,10 +446,10 @@ function render() {
 
 // From the list the map zooms in on the device, from a pin it only moves enough
 // to make room for the popup above it.
-function select(id, { zoomIn = true } = {}) {
+function select(id, { zoomIn = true, keepPanel = false } = {}) {
   selectedId = id;
   const device = devices.find((d) => keyOf(d) === id);
-  if (phone.matches && id) setExpanded(false);
+  if (phone.matches && id && !keepPanel) setExpanded(false);
   if (device && !device.position) toast(`${fullName(device)} has not sent a position yet.`);
   if (device?.position) {
     map.flyTo({
@@ -417,8 +463,22 @@ function select(id, { zoomIn = true } = {}) {
 }
 
 listEl.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-id]");
-  if (button) select(button.dataset.id);
+  const ask = event.target.closest("[data-ask]");
+  if (ask) {
+    const device = devices.find((d) => keyOf(d) === ask.dataset.ask);
+    if (device) pingDevice(device, ask);
+    return;
+  }
+  const row = event.target.closest("[data-id]");
+  if (row) return select(row.dataset.id);
+  const head = event.target.closest("[data-user]");
+  if (!head) return;
+  // A first click focuses the person's primary device and opens the list, a second one folds it.
+  const userId = Number(head.dataset.user);
+  if (openUsers.delete(userId)) return render();
+  openUsers.add(userId);
+  const primary = groupByUser().find((g) => g.userId === userId)?.primary;
+  select(primary ? keyOf(primary) : null, { keepPanel: true });
 });
 
 function setExpanded(expanded) {

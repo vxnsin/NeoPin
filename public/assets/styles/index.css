@@ -995,3 +995,61 @@ body.is-timeline .maplibregl-popup {
   height: 13px;
   margin-right: 4px;
 }
+
+/* One row per person, the devices unfold underneath. */
+.person__chevron {
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  transform: rotate(180deg);
+  transition: transform 0.2s ease;
+}
+
+.person.is-open .person__chevron {
+  transform: none;
+}
+
+.person__devices {
+  margin: 0 0 6px 28px;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--border);
+  list-style: none;
+}
+
+.subdevice {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.device--sub {
+  flex: 1;
+  min-width: 0;
+  gap: 12px;
+  padding: 6px 8px;
+}
+
+.device--sub .device__name {
+  font-size: 14px;
+}
+
+.device--sub .device__meta {
+  font-size: 12px;
+}
+
+.dtype--row {
+  width: 20px;
+  height: 20px;
+  margin: 0 2px;
+  color: var(--text-muted);
+}
+
+.subdevice__ask {
+  width: 34px;
+  height: 34px;
+}
+
+.subdevice__ask .icon {
+  width: 16px;
+  height: 16px;
+}
