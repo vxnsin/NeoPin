@@ -51,6 +51,8 @@ const Position = t.object({
 
 const Device = t.object({
   deviceId: t.string(),
+  userId: t.number(),
+  owner: t.object({ username: t.string(), displayName: t.string() }),
   position: Position.nullable(),
   lastPing: t.string().nullable(),
   status: t.enum(["online", "offline"]),
@@ -165,29 +167,25 @@ export function createApp({ gracefulShutdown = true } = {}) {
   const viewers = new Map();
   const authFailures = createAttemptLimiter(config.deviceAuthLimit);
   let broadcastTimer = null;
-  const dirtyUsers = new Set();
 
-  // Sends the device list to every device and dashboard of the accounts that changed, at most twice a second.
-  function broadcastDevices(userId) {
-    if (userId !== undefined) dirtyUsers.add(userId);
-    else onlineDevices().forEach((d) => dirtyUsers.add(d.userId));
+  // Sends the device list to every device and dashboard, at most twice a second.
+  function broadcastDevices() {
     if (broadcastTimer) return;
     broadcastTimer = setTimeout(() => {
       broadcastTimer = null;
-      const users = [...dirtyUsers];
-      dirtyUsers.clear();
-      for (const id of users) {
-        const payload = { type: "dataResponse", devices: serializeDevices(id) };
-        for (const device of onlineDevices(id)) send(device.socket, payload);
-        for (const [viewer, viewerUser] of viewers) if (viewerUser === id) send(viewer, payload);
-      }
+      const payload = { type: "dataResponse", devices: serializeDevices() };
+      for (const device of onlineDevices()) send(device.socket, payload);
+      for (const viewer of viewers.keys()) send(viewer, payload);
     }, BROADCAST_THROTTLE_MS);
   }
 
-  // Asks an account's devices for a fresh fix and resolves once they answered or the wait is over.
-  function requestLocation(userId, targetId, excludeId) {
-    const targets = onlineDevices(userId).filter(
-      (d) => d.id !== excludeId && (!targetId || d.id === targetId)
+  // Asks devices for a fresh fix and resolves once they answered or the wait is over.
+  // `only` narrows it to one device, `except` leaves the asking device out.
+  function requestLocation({ only = null, except = null } = {}) {
+    const targets = onlineDevices().filter(
+      (d) =>
+        !(except && d.userId === except.userId && d.id === except.deviceId) &&
+        (!only || (d.id === only.deviceId && (only.userId === undefined || d.userId === only.userId)))
     );
     const waits = targets.map(
       (device) =>
@@ -203,7 +201,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           };
           const timer = setTimeout(done, config.locationWaitMs);
           socket.on("message", onMessage);
-          send(socket, { type: "requestLocation", from: excludeId });
+          send(socket, { type: "requestLocation", from: except?.deviceId });
         })
     );
     return Promise.all(waits).then(() => targets.length);
@@ -404,7 +402,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           if (!unlinkDevice(user.id, ctx.params.deviceId)) throw problem(404, "unknown-device", "No such linked device");
           getDevice(user.id, ctx.params.deviceId)?.socket?.close(CLOSE_POLICY, "Device removed");
           removeDevice(user.id, ctx.params.deviceId);
-          broadcastDevices(user.id);
+          broadcastDevices();
           return reply(204);
         }
       );
@@ -480,14 +478,15 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
-      api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, (ctx) =>
-        serializeDevices(currentUser(ctx).user.id)
-      );
+      api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, (ctx) => {
+        currentUser(ctx);
+        return serializeDevices();
+      });
 
       api.post(
         "/sendPing",
         {
-          body: t.object({ deviceId: t.string().max(64).optional() }).optional(),
+          body: t.object({ deviceId: t.string().max(64).optional(), userId: t.number().optional() }).optional(),
           response: {
             200: t.object({ message: t.string(), devices: t.array(Device) }),
             202: Message,
@@ -496,17 +495,18 @@ export function createApp({ gracefulShutdown = true } = {}) {
           },
         },
         async (ctx) => {
-          const userId = currentUser(ctx).user.id;
-          const deviceId = ctx.body?.deviceId;
-          if (onlineDevices(userId).length === 0) return reply(202, { message: "No devices connected" });
-          if (deviceId && !getDevice(userId, deviceId)?.socket) {
+          currentUser(ctx);
+          const { deviceId, userId } = ctx.body ?? {};
+          if (onlineDevices().length === 0) return reply(202, { message: "No devices connected" });
+          const only = deviceId ? { deviceId, userId } : null;
+          if (only && !onlineDevices().some((d) => d.id === deviceId && (userId === undefined || d.userId === userId))) {
             throw problem(404, "device-not-connected", `Device ${deviceId} is not connected`);
           }
-          const asked = await requestLocation(userId, deviceId || null, null);
-          broadcastDevices(userId);
+          const asked = await requestLocation({ only });
+          broadcastDevices();
           return {
             message: deviceId ? `Location request sent to ${deviceId}` : `Location request sent to ${asked} devices`,
-            devices: serializeDevices(userId),
+            devices: serializeDevices(),
           };
         }
       );
@@ -546,7 +546,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
     { prefix: "/api" }
   );
 
-  // Profile pictures belong to the account. Set from the app or the dashboard, read by both.
+  // Profile pictures belong to the account. Set from the app or the dashboard, everyone signed in can see them.
   app.register((avatars) => {
     avatars.register(rateLimit({ max: config.avatarRateLimit.max, window: config.avatarRateLimit.windowMs }));
 
@@ -569,7 +569,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         if (!looksLike(type, ctx.body)) throw problem(400, "not-an-image", `The body is no ${type}`);
         const updated = setAvatar(user.id, Buffer.from(ctx.body), type);
         console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} has a new profile picture.`));
-        broadcastDevices(user.id);
+        broadcastDevices();
         return { avatarUrl: publicUser(updated).avatarUrl };
       }
     );
@@ -580,14 +580,14 @@ export function createApp({ gracefulShutdown = true } = {}) {
       (ctx) => {
         const { user } = currentUser(ctx);
         clearAvatar(user.id);
-        broadcastDevices(user.id);
+        broadcastDevices();
         return reply(204);
       }
     );
 
     avatars.get("/avatars/:userId", (ctx) => {
-      const { user } = currentUser(ctx);
-      const avatar = String(user.id) === ctx.params.userId ? avatarFor(user.id) : null;
+      currentUser(ctx);
+      const avatar = avatarFor(Number(ctx.params.userId));
       if (!avatar) throw problem(404, "no-avatar", "No profile picture");
       return reply(200, avatar.data, {
         "content-type": avatar.type,
@@ -617,7 +617,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           account = id;
           viewers.set(socket, id);
           send(socket, { successful: true });
-          send(socket, { type: "dataResponse", devices: serializeDevices(id) });
+          send(socket, { type: "dataResponse", devices: serializeDevices() });
           return;
         }
 
@@ -644,7 +644,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           console.log(chalk.greenBright(`[+] Device ${label} connected.`));
         }
         send(socket, { successful: true });
-        broadcastDevices(account);
+        broadcastDevices();
       };
 
       const handle = async (msg) => {
@@ -653,17 +653,17 @@ export function createApp({ gracefulShutdown = true } = {}) {
             send(socket, { type: "pong" });
             break;
           case "getData":
-            send(socket, { type: "dataResponse", devices: serializeDevices(account) });
+            send(socket, { type: "dataResponse", devices: serializeDevices() });
             break;
           case "pingDevices":
-            await requestLocation(account, null, deviceId);
-            send(socket, { type: "dataResponse", devices: serializeDevices(account) });
+            await requestLocation({ except: { userId: account, deviceId } });
+            send(socket, { type: "dataResponse", devices: serializeDevices() });
             break;
           case "updatePosition":
             if (role !== "device") return;
             updatePosition(account, deviceId, msg.latitude, msg.longitude);
             recordPosition(account, deviceId, msg.latitude, msg.longitude);
-            broadcastDevices(account);
+            broadcastDevices();
             break;
           case "locationError":
             console.log(chalk.yellow(`[!] ${chalk.whiteBright(deviceId)} could not read its location: ${msg.message}`));
@@ -683,7 +683,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
         if (role === "device" && !socket.replaced && detachSocket(account, deviceId, socket)) {
           console.log(chalk.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected. Marked offline.`));
-          broadcastDevices(account);
+          broadcastDevices();
         }
       });
     }
@@ -709,7 +709,6 @@ export function createApp({ gracefulShutdown = true } = {}) {
     stop() {
       clearTimeout(broadcastTimer);
       broadcastTimer = null;
-      dirtyUsers.clear();
     },
   };
 }

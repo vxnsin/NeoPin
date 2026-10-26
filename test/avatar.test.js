@@ -46,7 +46,7 @@ test("the picture is stored as a base64 string in the database", async () => {
   assert.deepEqual(Buffer.from(row.avatar_b64, "base64"), picture);
 });
 
-test("the picture is served to the dashboard and the app of that account only", async () => {
+test("the picture is served to everyone who is signed in", async () => {
   const picture = jpeg(7);
   const { avatarUrl } = await (await upload(picture)).json();
 
@@ -60,7 +60,8 @@ test("the picture is served to the dashboard and the app of that account only", 
   assert.equal((await fetch(s.baseUrl + avatarUrl)).status, 401);
 
   const anna = await s.account("anna");
-  assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: { cookie: anna.cookie } })).status, 404);
+  assert.equal((await fetch(s.baseUrl + avatarUrl, { headers: { cookie: anna.cookie } })).status, 200, "the others see it too");
+  assert.equal((await fetch(`${s.baseUrl}/avatars/${anna.user.id}`, { headers: { cookie: luis.cookie } })).status, 404, "anna has none");
 });
 
 test("an upload needs a valid login", async () => {

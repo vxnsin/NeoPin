@@ -1,4 +1,4 @@
-import { avatarUrlFor } from "./accounts.js";
+import { getUser, publicUser } from "./accounts.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
 // account and its name, so two people may both own an "iPhone". A record outlives
@@ -52,16 +52,26 @@ export function updatePosition(userId, deviceId, latitude, longitude) {
   return device;
 }
 
-// The picture belongs to the account, so every device of it shows the same one.
-export function serializeDevices(userId) {
-  const avatarUrl = avatarUrlFor(userId);
-  return allDevices(userId).map((d) => ({
-    deviceId: d.id,
-    position: d.position,
-    lastPing: d.lastPing,
-    status: d.status,
-    avatarUrl,
-  }));
+// Everyone signed in sees every device. The picture and the name belong to the
+// account that owns the device, so all devices of one person look alike.
+export function serializeDevices() {
+  const owners = new Map();
+  const ownerOf = (userId) => {
+    if (!owners.has(userId)) owners.set(userId, publicUser(getUser(userId)));
+    return owners.get(userId);
+  };
+  return allDevices().map((d) => {
+    const owner = ownerOf(d.userId);
+    return {
+      deviceId: d.id,
+      userId: d.userId,
+      owner: { username: owner?.username ?? "", displayName: owner?.displayName ?? "" },
+      position: d.position,
+      lastPing: d.lastPing,
+      status: d.status,
+      avatarUrl: owner?.avatarUrl ?? null,
+    };
+  });
 }
 
 export function timeAgo(timestamp) {

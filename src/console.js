@@ -68,9 +68,9 @@ export function startConsole(sockets) {
       const user = name && getUserByName(name);
       if (!user) return console.log(chalk.red("Usage: sendPing <name> [deviceId]"));
       if (onlineDevices(user.id).length === 0) return console.log(chalk.yellow("No devices connected."));
-      const asked = await sockets.requestLocation(user.id, deviceId || null, null);
+      const asked = await sockets.requestLocation({ only: deviceId ? { deviceId, userId: user.id } : null });
       if (asked === 0) return console.log(chalk.red(`Device ${chalk.whiteBright(deviceId)} is not connected.`));
-      sockets.broadcastDevices(user.id);
+      sockets.broadcastDevices();
       console.log(chalk.green(`Location request sent to ${deviceId ? deviceId : `${asked} devices`}.`));
     },
 

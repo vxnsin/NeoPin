@@ -23,8 +23,16 @@ beforeEach(() => {
 
 test("a new device starts online without a position", () => {
   attachSocket(userId, "phone", fakeSocket());
-  assert.deepEqual(serializeDevices(userId), [
-    { deviceId: "phone", position: null, lastPing: null, status: "online", avatarUrl: null },
+  assert.deepEqual(serializeDevices(), [
+    {
+      deviceId: "phone",
+      userId,
+      owner: { username: "luis", displayName: "luis" },
+      position: null,
+      lastPing: null,
+      status: "online",
+      avatarUrl: null,
+    },
   ]);
 });
 
@@ -60,8 +68,10 @@ test("the same device name under two accounts stays two devices", () => {
   attachSocket(other, "phone", fakeSocket());
   updatePosition(userId, "phone", 1, 2);
 
-  assert.equal(serializeDevices(userId).length, 1);
-  assert.equal(serializeDevices(other)[0].position, null);
+  const all = serializeDevices();
+  assert.equal(all.length, 2);
+  assert.deepEqual(all.map((d) => d.owner.username), ["luis", "anna"]);
+  assert.equal(all.find((d) => d.userId === other).position, null);
 });
 
 test("timeAgo picks the largest fitting unit", () => {

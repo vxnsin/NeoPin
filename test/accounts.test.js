@@ -104,7 +104,7 @@ test("logging in again on a device replaces its token, logout revokes it", async
   assert.equal((await fetch(`${s.baseUrl}/api/me`, { headers: deviceHeaders("phone", second) })).status, 401);
 });
 
-test("every account sees only its own devices", async () => {
+test("every account sees the devices of everyone, with their owner", async () => {
   await s.account("luis");
   await s.account("anna");
 
@@ -117,15 +117,18 @@ test("every account sees only its own devices", async () => {
   const annaCookie = await s.cookieFor("anna");
   const list = async (cookie) => (await fetch(`${s.baseUrl}/api/getData`, { headers: { cookie } })).json();
 
-  assert.equal((await list(luisCookie)).length, 1);
-  assert.equal((await list(annaCookie)).length, 1);
+  const seenByAnna = await list(annaCookie);
+  assert.deepEqual(seenByAnna.map((d) => d.owner.username).sort(), ["anna", "luis"]);
+  assert.equal((await list(luisCookie)).length, 2);
 
   luisPhone.send({ type: "updatePosition", latitude: 10, longitude: 20 });
   await luisPhone.next();
-  assert.deepEqual((await list(luisCookie))[0].position, { latitude: 10, longitude: 20 });
-  assert.equal((await list(annaCookie))[0].position, null, "the same device name of another account stays separate");
+  const after = await list(annaCookie);
+  assert.deepEqual(after.find((d) => d.owner.username === "luis").position, { latitude: 10, longitude: 20 });
+  assert.equal(after.find((d) => d.owner.username === "anna").position, null, "the same device name under two accounts stays two devices");
 
-  assert.equal((await s.post("/api/sendPing", { deviceId: "phone" }, { cookie: annaCookie })).status, 200);
+  const ping = await s.post("/api/sendPing", { deviceId: "phone", userId: seenByAnna.find((d) => d.owner.username === "anna").userId }, { cookie: luisCookie });
+  assert.equal(ping.status, 200);
 });
 
 test("the admin creates and removes accounts from the dashboard, others cannot", async () => {
