@@ -32,9 +32,9 @@ flowchart LR
     D <-- "live over WebSocket" --> S
 ```
 
-Phones log in with a shared password and a name and send their position whenever they move. The server keeps the latest position of every device in memory and pushes each change to all phones and dashboards, at most twice a second. Hit refresh and it asks every device for a fresh fix.
+Everyone has an account: a username and a password, created by the admin in the dashboard. A phone logs in with it once, gets a token and sends its position whenever it moves. The server keeps the latest position of every device in memory and pushes each change to all phones and dashboards, at most twice a second. Hit refresh and it asks every device for a fresh fix.
 
-No database, no third party, nothing written to disk. Profile pictures live in memory too. Restart it and the map is empty.
+Accounts, profile pictures and the location history live in a SQLite file (`data/neopin.db`, built in `node:sqlite`, no extra database to run). The timeline in the dashboard shows the stays and trips of a device per day, built from that history. Positions older than `HISTORY_DAYS` are deleted at startup. The live map itself is memory only, so after a restart it fills up again as devices reconnect.
 
 It runs on [inkan](https://github.com/inkanjs/inkan), with [`@inkanjs/session`](https://github.com/inkanjs/middleware/tree/main/packages/session) for the dashboard login and [`@inkanjs/secure-headers`](https://github.com/inkanjs/middleware/tree/main/packages/secure-headers) for the CSP. Every socket message is checked against a schema, and inkan serves the API docs at `/docs`.
 
@@ -50,27 +50,42 @@ npm install
 npm start
 ```
 
-The first start writes a `.env` with `PORT=3012` and the password `neopin123`.
+The first start writes a `.env` with `PORT=3012`, creates the database and the admin account `admin` with a generated password. It is printed once in the console, right under the banner.
 
 > [!IMPORTANT]
-> Change the password before anyone else can reach the server: edit `.env`, or type `changePassword neopin123 <new>` in the running console.
+> Copy that password now, it is not shown again. The dashboard asks you to change it after the first login. Set `ADMIN_PASSWORD` in `.env` before the first start if you want to choose it yourself.
 
-Then open **`http://<your-ip>:3012`** in a browser, or enter **`ws://<your-ip>:3012`** in the app.
+Then open **`http://<your-ip>:3012`**, log in as the admin and create an account for everyone who should use the app. In the app enter **`ws://<your-ip>:3012`** and log in with that account.
 
 ### Docker
 
+Every push to the `Server` branch builds an image for `amd64` and `arm64` and publishes it on the GitHub Container Registry: `ghcr.io/vxnsin/neopin-server`. Tags: `latest` (the `Server` branch), `sha-<commit>` and, for releases, `1.2.3` / `1.2`.
+
 ```bash
-git clone -b Server https://github.com/vxnsin/NeoPin.git neopin-server
-cd neopin-server
-# set PASSWORD in docker-compose.yml
-docker compose up -d --build
+docker run -d --name neopin -p 3012:3012 -v neopin-data:/app/data --restart unless-stopped \
+  ghcr.io/vxnsin/neopin-server:latest
+docker logs neopin
 ```
 
-`docker attach <container>` opens the console, `Ctrl+P` `Ctrl+Q` leaves it again.
+The admin account is created on the first start, and `docker logs neopin` shows its generated password once. No console or TTY is needed. To choose your own, add `-e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=<password>`. Everything that matters (database, accounts, history) lives in the volume at `/app/data`, so back that up.
+
+With Compose, [`docker-compose.yml`](docker-compose.yml) does the same and keeps a `build: .` line in a comment if you want to build the image from a checkout instead:
+
+```bash
+docker compose up -d
+docker compose logs neopin
+```
+
+**Updates.** `docker compose pull && docker compose up -d` fetches the newest image and recreates the container, the volume stays. To do that automatically, uncomment the `watchtower` service in the compose file: it checks every 5 minutes and only touches containers with the `com.centurylinklabs.watchtower.enable` label, which `neopin` has.
+
+> [!NOTE]
+> A package that GitHub created is private at first. Open the package settings of `neopin-server` on GitHub once and set its visibility to public, otherwise servers need `docker login ghcr.io` to pull it.
+
+`docker attach neopin` opens the console when the container was started with `-it` (`stdin_open` and `tty` in Compose), `Ctrl+P` `Ctrl+Q` leaves it again.
 
 ## On the internet
 
-Plain `ws://` is fine at home. On any other network the password and every position travel unencrypted, so put a reverse proxy with HTTPS in front. [Caddy](https://caddyserver.com) does it in two lines:
+Plain `ws://` is fine at home. On any other network passwords, tokens and every position travel unencrypted, so put a reverse proxy with HTTPS in front. [Caddy](https://caddyserver.com) does it in two lines:
 
 ```caddyfile
 neopin.example.com {
@@ -92,28 +107,33 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | Variable | Default | |
 |:--|:--|:--|
 | `PORT` | `3012` | HTTP and WebSocket port |
-| `PASSWORD` | `neopin123` | Shared password for apps and the dashboard |
+| `DATABASE_PATH` | `data/neopin.db` | SQLite file, relative to the project root. In Docker `/app/data` is the volume |
+| `ADMIN_USERNAME` | `admin` | Name of the admin account, only read while it is created on the first start |
+| `ADMIN_PASSWORD` | generated | Password of that account. Without it one is generated and printed once |
+| `HISTORY_DAYS` | `365` | Location history older than this is deleted at startup |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
 
-Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device passwords and 120 profile picture requests per minute and IP.
+Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device tokens and 120 profile picture requests per minute and IP.
 
 ## Console
 
-Type into the running server:
+Type into the running server. It only starts when a terminal is attached; without one (Docker without `-it`) it stays off and the dashboard does the same jobs.
 
 | Command | |
 |:--|:--|
+| `users` | Every account |
+| `createUser <name> <password>` | New account |
+| `passwd <name> <password>` | New password for an account, kicks its devices and all dashboards |
 | `device-list` | Every known device with status, position and last ping |
-| `sendPing [deviceId]` | Ask one device, or all, for a fresh position |
-| `disconnect <deviceId>` | Kick a device. It stays out until the app logs in again |
-| `changePassword <current> <new>` | New password right away, kicks all devices and dashboards |
+| `sendPing <name> [deviceId]` | Ask one or all devices of an account for a fresh position |
+| `disconnect <name> <deviceId>` | Kick a device. It stays out until the app logs in again |
 | `sessions-clear` | Log out every dashboard |
 | `help` | All of the above |
 
 ## WebSocket protocol
 
-Connect to `/` and send JSON. The first message has to be `authenticate`.
+Connect to `/` and send JSON. The first message has to be `authenticate`. The app gets its token from `POST /api/auth/login` first.
 
 <details>
 <summary><b>Client → Server</b></summary>
@@ -121,7 +141,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`.
 
 | Message | Answer |
 |:--|:--|
-| `{ "type": "authenticate", "deviceId", "password" }` | `{ "successful": true }`, then a `dataResponse` |
+| `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
 | `{ "type": "updatePosition", "latitude", "longitude" }` | Stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
@@ -138,7 +158,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`.
 | Message | Meaning |
 |:--|:--|
 | `{ "type": "requestLocation", "from"? }` | Send an `updatePosition` now |
-| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, position, lastPing, status, avatarUrl }` per device, after every change |
+| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, ... }` per device, after every change |
 
 </details>
 
@@ -148,7 +168,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`.
 
 | Code | Why | What the app does |
 |:--|:--|:--|
-| `4000` | Wrong password, too many attempts, kicked, or the password changed | Stops and waits for a new login |
+| `4000` | Wrong token, too many attempts, kicked, or the password changed | Stops and waits for a new login |
 | `4001` | The same device name connected again | Nothing, the newer connection wins |
 | `1007` | Not JSON, or not part of the protocol | Reconnects |
 
@@ -162,22 +182,29 @@ The server also pings every connection every 30 seconds and drops the ones that 
 <summary><b>Routes</b></summary>
 <br>
 
-The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_session`.
+The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_session`. The full list with schemas is at `/docs`.
 
-| | Path | Session | |
+| | Path | Auth | |
 |:--|:--|:--:|:--|
-| `GET` | `/` | ✓ | Dashboard, otherwise a redirect to `/login` |
-| `GET` | `/login` | | Login page. `/login.html` still redirects here |
-| `POST` | `/login` | | `{ "password" }`, `401` when wrong, `429` after 5 tries a minute |
+| `GET` | `/` | session | Dashboard, otherwise a redirect to `/login` |
+| `GET` | `/login` | | Login page |
+| `POST` | `/login` | | `{ "username", "password" }`, sets the cookie. `401` when wrong, `429` after 5 tries a minute |
+| `POST` | `/api/auth/login` | | `{ "username", "password", "deviceId", "deviceType"? }`, answers with the device `token` |
 | `GET` | `/logout` | | Ends the session |
+| `GET` | `/api/status` | | `{ "version" }`, used by the login screens and the Docker health check |
+| `GET` | `/api/me` | ✓ | The signed-in account |
+| `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
+| `GET` | `/api/devices` | ✓ | The devices linked to the account |
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"? }`, asks one or all devices and answers with the list |
-| `PUT` | `/api/avatar` | device | Sets the device's profile picture: JPEG, PNG or WebP, at most 16 KB |
-| `DELETE` | `/api/avatar` | device | Removes it again |
-| `GET` | `/avatars/:deviceId` | ✓ or device | The picture. Its URL changes with every new one, so it is cached for good |
+| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. The admin may pass `userId` |
+| `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |
+| `PUT` | `/api/avatar` | ✓ | Sets the account's profile picture: JPEG, PNG or WebP, at most 16 KB |
+| `DELETE` | `/api/avatar` | ✓ | Removes it again |
+| `GET` | `/avatars/:userId` | ✓ | The picture. Its URL changes with every new one, so it is cached for good |
 | `GET` | `/docs` · `/openapi.json` | | API docs, generated by inkan |
 
-Routes marked *device* are for the app: the device name in `X-Device-Id` and the server password as `Authorization: Bearer …`, both percent-encoded. Wrong passwords count against the same lockout as on the socket.
+✓ means a dashboard session cookie, or from the app the device name in `X-Device-Id` and the token as `Authorization: Bearer ...`, both percent-encoded. Wrong tokens count against the same lockout as on the socket.
 
 </details>
 
@@ -187,16 +214,20 @@ Routes marked *device* are for the app: the device name in `X-Device-Id` and the
 npm test
 ```
 
-The tests start the server on a random port and go through it with real sockets: logins and lockout, broadcast, reconnect, location requests, dashboard sessions, rate limits.
+The tests start the server on a random port and go through it with real sockets: logins and lockout, accounts, avatars, timeline, broadcast, reconnect, location requests, dashboard sessions, rate limits.
 
 ```
 server.js          start and banner
 src/
 ├─ app.js          routes, WebSocket protocol, broadcast
-├─ config.js       .env, timings, password check
+├─ config.js       .env, timings
+├─ db.js           SQLite schema
+├─ accounts.js     users, tokens, admin bootstrap
+├─ history.js      stored positions
+├─ timeline.js     stays and trips per day
 ├─ devices.js      in-memory device registry
 ├─ sessions.js     dashboard sessions
-├─ rateLimit.js    counter for wrong device passwords
+├─ rateLimit.js    counter for wrong device tokens
 └─ console.js      interactive commands
 public/            login page and dashboard
 test/              node:test
