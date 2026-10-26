@@ -427,13 +427,14 @@ body.is-timeline .maplibregl-popup {
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  /* MapLibre positions markers with transform, so the zoom uses the separate scale property. */
+  transition: scale 0.15s ease;
 }
 
 .tl-marker:hover,
 .tl-marker.is-active {
   z-index: 5;
-  transform: scale(1.25);
+  scale: 1.25;
 }
 
 /* Devices, bottom left, like the list in Apple's Find My. */

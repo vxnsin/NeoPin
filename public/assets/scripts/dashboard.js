@@ -125,6 +125,46 @@ function hideLoader() {
 
 // Map
 
+// The stock dark style is nearly black, so roads and water are hard to tell apart. This
+// lifts them into a slate palette.
+const DARK_TUNE = {
+  background: { "background-color": "#161c27" },
+  water: { "fill-color": "#1f3a57" },
+  waterway: { "line-color": "#1f3a57" },
+  landcover_wood: { "fill-color": "#1c2f2a" },
+  landuse_park: { "fill-color": "#1c2f2a" },
+  landuse_residential: { "fill-color": "#1a2130" },
+  building: { "fill-color": "#262f40" },
+  highway_path: { "line-color": "#35415a" },
+  highway_minor: { "line-color": "#3d4a62" },
+  highway_major_casing: { "line-color": "#202838" },
+  highway_major_inner: { "line-color": "#53607a" },
+  highway_major_subtle: { "line-color": "#46536c" },
+  highway_motorway_casing: { "line-color": "#2a3448" },
+  highway_motorway_subtle: { "line-color": "#46536c" },
+  railway: { "line-color": "#46536c" },
+  boundary_state: { "line-color": "#56637d" },
+  boundary_country_z0_4: { "line-color": "#6a7893" },
+  "boundary_country_z0-4": { "line-color": "#6a7893" },
+  "boundary_country_z5-": { "line-color": "#6a7893" },
+  highway_name_other: { "text-color": "#a3aec3" },
+  highway_name_motorway: { "text-color": "#b4bfd3" },
+  water_name: { "text-color": "#8fa6c4", "text-halo-color": "rgba(10,14,22,0.7)" },
+};
+for (const id of ["other", "suburb", "village", "town", "city", "city_large", "state", "country_other", "country_minor", "country_major"]) {
+  DARK_TUNE["place_" + id] = { "text-color": "#c4cde0", "text-halo-color": "rgba(10,14,22,0.8)" };
+}
+
+function tuneDark(style) {
+  for (const layer of style.layers) {
+    const paint = DARK_TUNE[layer.id];
+    if (paint) layer.paint = Object.assign({}, layer.paint, paint);
+  }
+  return style;
+}
+
+const transformStyle = (dark) => (_previous, next) => (dark ? tuneDark(next) : next);
+
 const map = new maplibregl.Map({
   container: "map",
   style: MAP_STYLES[window.neopinTheme.get()],
@@ -134,6 +174,9 @@ const map = new maplibregl.Map({
   dragRotate: false,
   pitchWithRotate: false,
 });
+if (window.neopinTheme.get() === "dark") {
+  map.setStyle(MAP_STYLES.dark, { diff: false, transformStyle: transformStyle(true) });
+}
 map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
 
@@ -167,7 +210,7 @@ updateLabels();
 document.documentElement.addEventListener("themechange", (event) => {
   // Markers are DOM elements and survive the style swap.
   // No diffing: a diff would quietly remove the timeline's own source instead of reloading.
-  map.setStyle(MAP_STYLES[event.detail], { diff: false });
+  map.setStyle(MAP_STYLES[event.detail], { diff: false, transformStyle: transformStyle(event.detail === "dark") });
 });
 
 // Always above the pin, select() moves the map so there is room for it.
