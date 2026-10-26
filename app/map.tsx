@@ -421,11 +421,6 @@ export default function MapScreen() {
           {people.slice(0, 4).map((person, index) => (
             <View key={person.key} style={{ marginLeft: index === 0 ? 0 : -10 }}>
               <Avatar name={person.name} uri={avatarFor(person.primary.avatarUrl)} state={freshness(person.primary)} size={26} gapColor={c.raised} />
-              {person.extra > 0 && (
-                <View style={[styles.extraBadge, { backgroundColor: c.primary, borderColor: c.raised }]}>
-                  <Text style={[styles.extraText, { color: c.raised }]}>+{person.extra}</Text>
-                </View>
-              )}
             </View>
           ))}
         </View>
@@ -630,8 +625,6 @@ const styles = StyleSheet.create({
   },
   barTitle: { fontSize: 17, fontWeight: "700" },
   stack: { flexDirection: "row", alignItems: "center" },
-  extraBadge: { position: "absolute", right: -4, bottom: -4, minWidth: 18, height: 14, paddingHorizontal: 3, borderRadius: 7, borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
-  extraText: { fontSize: 9, fontWeight: "700", lineHeight: 11 },
   gear: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
   metaDot: { width: 7, height: 7, borderRadius: 4 },
