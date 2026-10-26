@@ -70,8 +70,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
 
     .route-mode .pin { display: none; }
     .stop { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 2.5px solid #fff; border-radius: 50%; background: #d3171e; color: #fff;
-      box-shadow: var(--shadow); font: 700 13px system-ui, sans-serif; transition: transform .15s; }
-    .stop.active { z-index: 6; background: #0f172a; transform: scale(1.25); }
+      box-shadow: var(--shadow); font: 700 13px system-ui, sans-serif; transition: scale .15s; }
+    .stop.active { z-index: 6; background: #0f172a; scale: 1.25; }
     .dark .stop.active { background: #fff; color: #0f172a; border-color: #0f172a; }
 
     @keyframes ripple { from { transform: scale(1); opacity: .8; } to { transform: scale(1.45); opacity: 0; } }
@@ -100,10 +100,48 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({ type: type, message: String(message) }));
     }
 
+    // The stock dark style is nearly black, so roads and water are hard to tell apart.
+    var DARK_TUNE = {
+      background: { "background-color": "#161c27" },
+      water: { "fill-color": "#1f3a57" },
+      waterway: { "line-color": "#1f3a57" },
+      landcover_wood: { "fill-color": "#1c2f2a" },
+      landuse_park: { "fill-color": "#1c2f2a" },
+      landuse_residential: { "fill-color": "#1a2130" },
+      building: { "fill-color": "#262f40" },
+      highway_path: { "line-color": "#35415a" },
+      highway_minor: { "line-color": "#3d4a62" },
+      highway_major_casing: { "line-color": "#202838" },
+      highway_major_inner: { "line-color": "#53607a" },
+      highway_major_subtle: { "line-color": "#46536c" },
+      highway_motorway_casing: { "line-color": "#2a3448" },
+      highway_motorway_subtle: { "line-color": "#46536c" },
+      railway: { "line-color": "#46536c" },
+      boundary_state: { "line-color": "#56637d" },
+      "boundary_country_z0-4": { "line-color": "#6a7893" },
+      "boundary_country_z5-": { "line-color": "#6a7893" },
+      highway_name_other: { "text-color": "#a3aec3" },
+      highway_name_motorway: { "text-color": "#b4bfd3" },
+      water_name: { "text-color": "#8fa6c4", "text-halo-color": "rgba(10,14,22,0.7)" }
+    };
+    ["other", "suburb", "village", "town", "city", "city_large", "state", "country_other", "country_minor", "country_major"].forEach(function (id) {
+      DARK_TUNE["place_" + id] = { "text-color": "#c4cde0", "text-halo-color": "rgba(10,14,22,0.8)" };
+    });
+    function transformStyle(isDark) {
+      return function (previous, next) {
+        if (!isDark) return next;
+        next.layers.forEach(function (layer) {
+          var paint = DARK_TUNE[layer.id];
+          if (paint) layer.paint = Object.assign({}, layer.paint, paint);
+        });
+        return next;
+      };
+    }
     var map = new maplibregl.Map({
       container: "map", style: STYLES[dark ? "dark" : "light"], center: [10.45, 51.16], zoom: 4,
       attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false
     });
+    if (dark) map.setStyle(STYLES.dark, { diff: false, transformStyle: transformStyle(true) });
     map.touchZoomRotate.disableRotation();
     function updateLabels() {
       document.getElementById("map").classList.toggle("show-labels", map.getZoom() >= ${LABEL_ZOOM});
@@ -339,7 +377,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         else if (data.type === "theme" && data.dark !== dark) {
           dark = data.dark;
           document.documentElement.classList.toggle("dark", dark);
-          map.setStyle(STYLES[dark ? "dark" : "light"]);
+          map.setStyle(STYLES[dark ? "dark" : "light"], { diff: false, transformStyle: transformStyle(dark) });
         }
       } catch (e) {
         report("error", e);
