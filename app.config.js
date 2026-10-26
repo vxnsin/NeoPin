@@ -4,7 +4,7 @@ export default {
   expo: {
     name: "NeoPin",
     slug: "neopin",
-    version: "1.0.0",
+    version: "1.0.1",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "neopin",
@@ -90,7 +90,7 @@ export default {
       },
     },
     owner: "vensin",
-    runtimeVersion: "1.0.0",
+    runtimeVersion: "1.0.1",
     updates: {
       url: "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b",
     },
