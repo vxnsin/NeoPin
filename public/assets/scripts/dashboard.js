@@ -1,0 +1,181 @@
+const statusEl = document.getElementById("status");
+const panel = document.getElementById("devicePanel");
+const listEl = document.getElementById("deviceList");
+const markers = {};
+let devices = [];
+let socket = null;
+let reconnectTimer = null;
+let menuOpen = false;
+
+function setStatus(state, text) {
+  statusEl.dataset.state = state;
+  statusEl.querySelector(".status-text").textContent = text;
+}
+
+function showLoader(show) {
+  document.body.classList.toggle("loading", show);
+  document.body.classList.toggle("loaded", !show);
+  document.getElementById("content").classList.toggle("loaded", !show);
+  document.getElementById("spinner").style.opacity = show ? 1 : 0;
+}
+
+const map = L.map("map", { zoomControl: true }).setView([50.5561, 9.6333], 6);
+map.setMaxBounds([[-90, -180], [90, 180]]);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxZoom: 19,
+  noWrap: true,
+}).addTo(map);
+
+function timeAgo(timestamp) {
+  if (!timestamp) return "never";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(timestamp)) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.floor(hours / 24)} d ago`;
+}
+
+// Device names come from the phones, never put them into HTML unescaped.
+function esc(text) {
+  return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function freshness(device) {
+  if (device.status !== "online") return "offline";
+  if (!device.lastPing) return "unknown";
+  return Date.now() - new Date(device.lastPing) > 10 * 60 * 1000 ? "stale" : "online";
+}
+
+function markerIcon(state) {
+  return L.divIcon({
+    className: `device-marker device-marker--${state}`,
+    html: '<span class="device-marker__dot"></span>',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -12],
+  });
+}
+
+function popupHtml(device) {
+  const pos = device.position
+    ? `${device.position.latitude.toFixed(5)}, ${device.position.longitude.toFixed(5)}`
+    : "no position yet";
+  return `<b>${esc(device.deviceId)}</b><br>${esc(device.status)} · ${timeAgo(device.lastPing)}<br><small>${pos}</small>`;
+}
+
+function render(list) {
+  devices = list;
+  const seen = new Set();
+  list.forEach((device) => {
+    if (!device.position) return;
+    seen.add(device.deviceId);
+    const latlng = [device.position.latitude, device.position.longitude];
+    const state = freshness(device);
+    let marker = markers[device.deviceId];
+    if (!marker) {
+      marker = L.marker(latlng, { icon: markerIcon(state), title: device.deviceId }).addTo(map);
+      markers[device.deviceId] = marker;
+    } else {
+      marker.setLatLng(latlng);
+      marker.setIcon(markerIcon(state));
+    }
+    marker.bindPopup(popupHtml(device));
+  });
+  Object.keys(markers).forEach((id) => {
+    if (!seen.has(id)) {
+      map.removeLayer(markers[id]);
+      delete markers[id];
+    }
+  });
+  renderList();
+}
+
+function renderList() {
+  listEl.innerHTML = "";
+  if (devices.length === 0) {
+    listEl.innerHTML = '<li class="empty">No devices yet</li>';
+    return;
+  }
+  devices.forEach((device) => {
+    const li = document.createElement("li");
+    li.dataset.state = freshness(device);
+    li.innerHTML = `<span class="dot"></span><span class="name">${esc(device.deviceId)}</span><span class="meta">${timeAgo(device.lastPing)}</span>`;
+    li.onclick = () => {
+      if (device.position) {
+        map.flyTo([device.position.latitude, device.position.longitude], Math.max(map.getZoom(), 14));
+        markers[device.deviceId]?.openPopup();
+      }
+    };
+    listEl.appendChild(li);
+  });
+}
+
+function connect() {
+  clearTimeout(reconnectTimer);
+  setStatus("connecting", "Connecting…");
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  socket = new WebSocket(`${protocol}://${location.host}`);
+
+  socket.onopen = () => socket.send(JSON.stringify({ type: "authenticate", viewer: true }));
+  socket.onmessage = (event) => {
+    let data;
+    try {
+      data = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if ("successful" in data) {
+      if (data.successful) {
+        setStatus("online", "Live");
+        showLoader(false);
+      } else {
+        window.location.href = "/login.html";
+      }
+      return;
+    }
+    if (data.type === "dataResponse") render(data.devices || []);
+  };
+  socket.onclose = (event) => {
+    if (event.code === 4000) {
+      window.location.href = "/login.html";
+      return;
+    }
+    setStatus("offline", "Reconnecting…");
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+  socket.onerror = () => socket.close();
+}
+
+document.getElementById("menuButton").onclick = function () {
+  document.getElementById("menu").classList.toggle("show");
+  this.classList.toggle("rotate");
+  menuOpen = !menuOpen;
+};
+
+document.addEventListener("click", (event) => {
+  const menu = document.getElementById("menu");
+  const button = document.getElementById("menuButton");
+  if (menuOpen && !menu.contains(event.target) && event.target !== button) {
+    menu.classList.remove("show");
+    button.classList.remove("rotate");
+    menuOpen = false;
+  }
+});
+
+document.getElementById("refreshButton").onclick = function () {
+  const icon = this.querySelector("i");
+  icon.classList.add("fa-spin");
+  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "pingDevices" }));
+  setTimeout(() => icon.classList.remove("fa-spin"), 1500);
+};
+
+document.getElementById("listButton").onclick = () => panel.classList.toggle("open");
+document.getElementById("closePanel").onclick = () => panel.classList.remove("open");
+document.getElementById("logoutButton").onclick = () => (window.location.href = "/logout");
+
+setInterval(renderList, 15000);
+showLoader(true);
+connect();

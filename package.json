@@ -21,17 +21,17 @@
   "type": "module",
   "main": "server.js",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "scripts": {
     "start": "node server.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@inkanjs/secure-headers": "^0.2.0",
+    "@inkanjs/session": "^0.2.0",
+    "@vxnsin/inkan": "^0.8.1",
     "chalk": "^5.4.1",
-    "cookie-parser": "^1.4.7",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "ws": "^8.18.0"
+    "dotenv": "^16.4.7"
   }
 }

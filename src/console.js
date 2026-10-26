@@ -1,6 +1,6 @@
 import readline from "readline";
 import chalk from "chalk";
-import { config, setPassword } from "./config.js";
+import { passwordMatches, setPassword } from "./config.js";
 import { allDevices, onlineDevices, timeAgo } from "./devices.js";
 import { destroyAllSessions } from "./sessions.js";
 
@@ -48,9 +48,10 @@ export function startConsole(sockets) {
 
     changePassword(current, next) {
       if (!current || !next) return console.log(chalk.red("Usage: changePassword <current> <new>"));
-      if (current !== config.password) return console.log(chalk.red("Current password is incorrect."));
+      if (!passwordMatches(current)) return console.log(chalk.red("Current password is incorrect."));
       setPassword(next);
       destroyAllSessions();
+      sockets.disconnectAllDevices("Password changed");
       console.log(chalk.green("Password changed. Devices and dashboards must log in again."));
     },
 
@@ -69,6 +70,9 @@ export function startConsole(sockets) {
       return [hits.length ? hits : names, line];
     },
   });
+
+  // readline swallows Ctrl+C, hand it on so inkan can shut down cleanly.
+  rl.on("SIGINT", () => process.kill(process.pid, "SIGINT"));
 
   rl.on("line", async (input) => {
     const [command, ...args] = input.trim().split(/\s+/);

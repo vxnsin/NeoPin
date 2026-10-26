@@ -1,49 +1,34 @@
-import crypto from "crypto";
+import { memoryStore } from "@vxnsin/inkan";
+import { session } from "@inkanjs/session";
 import { config } from "./config.js";
 
 export const SESSION_COOKIE = "neopin_session";
 
-const sessions = new Map();
+// Bumped to log out every dashboard at once (password change, sessions-clear).
+// A session only counts while it carries the current generation.
+let generation = 0;
 
-export function createSession() {
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, Date.now() + config.sessionTtlMs);
-  return token;
+export function sessionPlugin() {
+  return session({
+    secret: config.sessionSecret,
+    store: memoryStore({ max: 10_000 }),
+    cookie: {
+      name: SESSION_COOKIE,
+      sameSite: "strict",
+      secure: config.secureCookies,
+      maxAge: Math.floor(config.sessionTtlMs / 1000),
+    },
+  });
 }
 
-export function isValidSession(token) {
-  if (!token) return false;
-  const expiresAt = sessions.get(token);
-  if (!expiresAt) return false;
-  if (expiresAt < Date.now()) {
-    sessions.delete(token);
-    return false;
-  }
-  return true;
+export function signIn(session) {
+  session.regenerate().set("generation", generation);
 }
 
-export function destroySession(token) {
-  sessions.delete(token);
+export function isSignedIn(session) {
+  return session?.get("generation") === generation;
 }
 
 export function destroyAllSessions() {
-  sessions.clear();
-}
-
-export function sessionFromCookieHeader(header) {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const [name, ...rest] = part.trim().split("=");
-    if (name === SESSION_COOKIE) return decodeURIComponent(rest.join("="));
-  }
-  return null;
-}
-
-export function cookieOptions(req) {
-  return {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: Boolean(req.secure),
-    maxAge: config.sessionTtlMs,
-  };
+  generation += 1;
 }

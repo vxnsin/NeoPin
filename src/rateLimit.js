@@ -1,23 +1,23 @@
-// Minimal fixed-window rate limiter keyed by client IP.
-export function createRateLimiter({ windowMs, max }) {
+// Fixed-window counter keyed by client IP. HTTP routes use inkan's rateLimit;
+// this one counts failed WebSocket logins, which are no HTTP requests of their own.
+export function createAttemptLimiter({ windowMs, max }) {
   const hits = new Map();
 
-  const middleware = (req, res, next) => {
+  const entryFor = (key) => {
     const now = Date.now();
-    const key = req.ip || "unknown";
     let entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
       entry = { count: 0, resetAt: now + windowMs };
       hits.set(key, entry);
     }
-    entry.count += 1;
-    if (entry.count > max) {
-      res.set("Retry-After", String(Math.ceil((entry.resetAt - now) / 1000)));
-      return res.status(429).json({ message: "Too many attempts. Try again later." });
-    }
-    next();
+    return entry;
   };
 
-  middleware.reset = () => hits.clear();
-  return middleware;
+  return {
+    blocked: (key) => entryFor(key).count >= max,
+    fail: (key) => {
+      entryFor(key).count += 1;
+    },
+    reset: () => hits.clear(),
+  };
 }
