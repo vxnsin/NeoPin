@@ -69,8 +69,8 @@ export async function startBackgroundLocation(): Promise<boolean> {
 
   const foreground = await Location.getForegroundPermissionsAsync();
   if (foreground.status !== "granted") return false;
-  const background = await Location.requestBackgroundPermissionsAsync();
-  if (background.status !== "granted") return false;
+  const background = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+  if (background?.status !== "granted") return false;
 
   if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) return true;
 
