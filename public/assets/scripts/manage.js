@@ -135,7 +135,10 @@ async function showAccounts() {
             <strong>${esc(user.displayName || user.username)}${user.isAdmin ? ' <span class="badge">Admin</span>' : ""}</strong>
             <span>@${esc(user.username)} · ${user.devices} ${user.devices === 1 ? "device" : "devices"}</span>
           </span>
-          ${user.id === me?.id ? "" : '<button class="btn btn--small btn--ghost" type="button" data-remove>Remove</button>'}
+          <span class="row__actions">
+            <button class="btn btn--small btn--ghost" type="button" data-edit>Edit</button>
+            ${user.id === me?.id ? "" : '<button class="btn btn--small btn--ghost" type="button" data-remove>Remove</button>'}
+          </span>
         </li>`
       )
       .join("");
@@ -158,6 +161,10 @@ async function showAccounts() {
           showAccounts();
         })
       );
+    });
+    modalBody.querySelectorAll("[data-edit]").forEach((button) => {
+      const row = button.closest(".row");
+      button.addEventListener("click", () => editAccountRow(row, users.find((u) => String(u.id) === row.dataset.id)));
     });
     const form = document.getElementById("newAccount");
     const error = document.getElementById("newAccountError");
@@ -250,3 +257,98 @@ document.getElementById("openPassword").addEventListener("click", () => {
   showPassword();
 });
 document.getElementById("pwBannerButton").addEventListener("click", showPassword);
+
+// Account editing for the admin: an inline form in the account's row.
+
+function editAccountRow(row, user) {
+  if (row.querySelector(".row__edit")) return;
+  const form = document.createElement("form");
+  form.className = "row__edit";
+  form.noValidate = true;
+  form.innerHTML = `
+    <input class="select" name="displayName" placeholder="Display name" value="${esc(user.displayName)}" maxlength="64" />
+    <input class="select" name="username" placeholder="Username" value="${esc(user.username)}" autocomplete="off" autocapitalize="none" spellcheck="false" />
+    <input class="select" name="password" type="password" placeholder="Set new password (optional)" autocomplete="new-password" />
+    <p class="hint">A new password signs this account's devices out.</p>
+    <p class="form-error" role="alert"></p>
+    <div class="row__edit-actions">
+      <button class="btn btn--small btn--ghost" type="button" data-cancel>Cancel</button>
+      <button class="btn btn--small" type="submit">Save</button>
+    </div>`;
+  row.append(form);
+  form.displayName.focus();
+  form.querySelector("[data-cancel]").addEventListener("click", () => form.remove());
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const error = form.querySelector(".form-error");
+    const body = {};
+    if (form.displayName.value.trim() !== user.displayName) body.displayName = form.displayName.value.trim();
+    if (form.username.value.trim() !== user.username) body.username = form.username.value.trim();
+    if (form.password.value) body.password = form.password.value;
+    if (Object.keys(body).length === 0) return form.remove();
+    const submit = form.querySelector("[type=submit]");
+    submit.disabled = true;
+    error.textContent = "";
+    try {
+      const updated = await call(`/api/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (user.id === me?.id) applyOwnProfile(updated);
+      toast("Account saved.");
+      showAccounts();
+    } catch (failure) {
+      if (failure.message !== "signed-out") error.textContent = failure.message;
+      submit.disabled = false;
+    }
+  });
+}
+
+// Edit profile
+
+function applyOwnProfile(user) {
+  me = { ...me, ...user };
+  renderAccount();
+  render();
+}
+
+function showProfile() {
+  openModal("Edit profile");
+  modalBody.innerHTML = `
+    <form class="new-account" id="profileForm" novalidate>
+      <label class="field-label">Display name<input class="select" name="displayName" value="${esc(me.displayName)}" maxlength="64" autocomplete="nickname" /></label>
+      <label class="field-label">Username<input class="select" name="username" value="${esc(me.username)}" autocomplete="username" autocapitalize="none" spellcheck="false" /></label>
+      <p class="hint">Your username is what you sign in with. Letters, digits, dot, dash and underscore.</p>
+      <p class="form-error" id="profileError" role="alert"></p>
+      <button class="btn" type="submit">Save</button>
+    </form>`;
+  const form = document.getElementById("profileForm");
+  const error = document.getElementById("profileError");
+  form.displayName.focus();
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {};
+    if (form.displayName.value.trim() !== me.displayName) body.displayName = form.displayName.value.trim();
+    if (form.username.value.trim() !== me.username) body.username = form.username.value.trim();
+    if (Object.keys(body).length === 0) return closeModal();
+    const submit = form.querySelector("button[type=submit]");
+    submit.disabled = true;
+    error.textContent = "";
+    try {
+      applyOwnProfile(
+        await call("/api/me", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      );
+      closeModal();
+      toast("Profile saved.");
+    } catch (failure) {
+      if (failure.message !== "signed-out") error.textContent = failure.message;
+      submit.disabled = false;
+    }
+  });
+}
+
+document.getElementById("openProfile").addEventListener("click", () => {
+  setMenu(false);
+  showProfile();
+});

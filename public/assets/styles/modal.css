@@ -191,3 +191,35 @@
     flex: 1 1 200px;
   }
 }
+
+.row__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.row__edit {
+  display: grid;
+  flex-basis: 100%;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.row__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.field-label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
