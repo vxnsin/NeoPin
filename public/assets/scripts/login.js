@@ -1,7 +1,8 @@
-// The background flies over a dark town: the ground keeps sliding towards the
-// viewer, and now and then a device pings on it and travels along.
+// The background flies over a town in the dark. Now and then a device pings,
+// lights up the streets around it for a moment and travels along with the ground.
 const PING_COLORS = ["#d3171e", "#22c55e", "#2563eb", "#7c3aed", "#ea580c", "#0284c7", "#db2777"];
-const SPEED = { x: 14, y: 46 }; // ground pixels per second
+const SPEED = 110; // ground pixels per second
+const LIGHT_RADIUS = 320; // half the size of .spot__light
 const plane = document.getElementById("plane");
 const pings = document.createElement("div");
 pings.style.position = "absolute";
@@ -10,24 +11,39 @@ plane.appendChild(pings);
 let offset = { x: 0, y: 0 };
 
 function ping() {
-  if (document.hidden || pings.childElementCount > 7) return;
-  const el = document.createElement("span");
-  el.className = "ping";
-  // Spots on the tilted ground that show left and right of the card, not under it.
-  const left = Math.random() < 0.5;
-  const x = left ? 36 + Math.random() * 7 : 57 + Math.random() * 15;
-  const y = 18 + Math.random() * 28;
-  el.style.left = `calc(${x}% - ${offset.x}px)`;
-  el.style.top = `calc(${y}% - ${offset.y}px)`;
-  el.style.setProperty("--ping", PING_COLORS[Math.floor(Math.random() * PING_COLORS.length)]);
-  pings.appendChild(el);
-  setTimeout(() => el.remove(), 5200);
+  if (!document.hidden && pings.childElementCount < 5) {
+    // Spots on the tilted ground that show left and right of the card, not under it.
+    const left = Math.random() < 0.5;
+    const x = ((left ? 36 + Math.random() * 7 : 57 + Math.random() * 15) / 100) * plane.offsetWidth - offset.x;
+    const y = ((18 + Math.random() * 28) / 100) * plane.offsetHeight - offset.y;
+
+    const spot = document.createElement("span");
+    spot.className = "spot";
+    spot.style.left = `${x}px`;
+    spot.style.top = `${y}px`;
+    spot.style.setProperty("--ping", PING_COLORS[Math.floor(Math.random() * PING_COLORS.length)]);
+    const light = document.createElement("span");
+    light.className = "spot__light";
+    // Spot and ground move together, so this lines its streets up with the ground's for good.
+    light.style.backgroundPosition = `${LIGHT_RADIUS - x}px ${LIGHT_RADIUS - y}px`;
+    const dot = document.createElement("span");
+    dot.className = "ping";
+    spot.append(light, dot);
+    pings.appendChild(spot);
+    setTimeout(() => spot.remove(), 5200);
+  }
+  setTimeout(ping, 1100 + Math.random() * 1600);
 }
 
+// The heading swings slowly, so the flight never runs over the same streets in the same way.
 function fly(previous) {
   return (now) => {
     const seconds = Math.min(0.1, (now - previous) / 1000);
-    offset = { x: offset.x + SPEED.x * seconds, y: offset.y + SPEED.y * seconds };
+    const heading = 0.3 + 0.7 * Math.sin(now / 21000) + 0.25 * Math.sin(now / 7300);
+    offset = {
+      x: offset.x + Math.sin(heading) * SPEED * seconds,
+      y: offset.y + Math.cos(heading) * SPEED * seconds,
+    };
     plane.style.backgroundPosition = `${offset.x}px ${offset.y}px`;
     pings.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
     requestAnimationFrame(fly(now));
@@ -36,8 +52,7 @@ function fly(previous) {
 
 if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
   requestAnimationFrame(fly(performance.now()));
-  for (let i = 0; i < 3; i++) setTimeout(ping, 300 + i * 400);
-  setInterval(ping, 900);
+  setTimeout(ping, 400);
 }
 
 const form = document.getElementById("loginForm");

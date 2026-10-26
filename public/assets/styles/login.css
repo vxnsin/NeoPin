@@ -31,6 +31,51 @@ body {
   transform-origin: 50% 50%;
 }
 
+/* The town stays in the dark, only a ping lights up the streets around it for a moment. */
+.backdrop__dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 6, 9, 0.94);
+}
+
+.spot {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.spot__light {
+  position: absolute;
+  left: -320px;
+  top: -320px;
+  width: 640px;
+  height: 640px;
+  background: url("/assets/images/town.svg") repeat;
+  background-size: 1600px 1000px;
+  -webkit-mask-image: radial-gradient(circle, #000 0%, rgba(0, 0, 0, 0.55) 35%, transparent 68%);
+  mask-image: radial-gradient(circle, #000 0%, rgba(0, 0, 0, 0.55) 35%, transparent 68%);
+  filter: brightness(1.9) saturate(1.2);
+  animation: light 5s ease-out both;
+}
+
+@keyframes light {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  12% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  55% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
 /* The far end fades into the night, the edges darken, the card's spot stays calm. */
 .backdrop__fog {
   position: absolute;
@@ -43,7 +88,7 @@ body {
 
 /* A device reporting in: a dot on the ground with rings spreading out. */
 .ping {
-  --ping: var(--brand);
+  --ping: inherit;
   position: absolute;
   width: 30px;
   height: 30px;
