@@ -30,7 +30,18 @@ import PasswordForm from "@/components/PasswordForm";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
-import { groupByOwner, DEVICE_ICONS, STATE_COLORS, typeOf, deviceKey, deviceLabel, freshness, isOwnDevice, ownerName, type Device } from "@/lib/devices";
+import {
+  DEVICE_ICONS,
+  STATE_COLORS,
+  deviceKey,
+  freshness,
+  groupPeople,
+  isOwnDevice,
+  statusText,
+  typeOf,
+  type Device,
+  type Person,
+} from "@/lib/devices";
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
@@ -56,8 +67,6 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-const STATE_ORDER = { online: 0, stale: 1, offline: 2 };
-
 type Sheet = "devices" | "settings" | null;
 
 export default function MapScreen() {
@@ -74,6 +83,7 @@ export default function MapScreen() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
@@ -193,10 +203,10 @@ export default function MapScreen() {
 
   const refresh = () => emit({ type: "pingDevices" });
 
-  const focusDevice = (device: Device) => {
+  const focusDevice = (device: Device, close = true) => {
     if (!device.position) return;
     post({ type: "focus", key: deviceKey(device) });
-    setSheet(null);
+    if (close) setSheet(null);
   };
 
   const changePreset = async (next: ReportingPreset) => {
@@ -268,13 +278,7 @@ export default function MapScreen() {
   const me = devices.find(isMine);
   const profileAvatar = user?.avatarUrl ?? null;
   const panelHeight = Math.round(windowHeight * 0.55);
-  const sorted = [...devices].sort(
-    (a, b) =>
-      Number(isMine(b)) - Number(isMine(a)) ||
-      Number(b.userId === user?.id) - Number(a.userId === user?.id) ||
-      STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
-      deviceLabel(a).localeCompare(deviceLabel(b), undefined, { sensitivity: "base" })
-  );
+  const people = groupPeople(devices, user?.id);
   const online = devices.filter((d) => d.status === "online").length;
   const summary = !isConnected
     ? "Reconnecting…"
@@ -282,33 +286,70 @@ export default function MapScreen() {
       ? "Connected · no devices yet"
       : `${online} of ${devices.length} connected`;
 
-  const deviceRow = (device: Device) => {
+  // One row per person. Tapping focuses their primary device and opens the list of their devices.
+  const togglePerson = (person: Person) => {
+    if (expanded === person.key) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(person.key);
+    focusDevice(person.primary, false);
+  };
+
+  const linkedDevice = (device: Device) => {
     const state = freshness(device);
-    const isMe = isMine(device);
     return (
       <Pressable
         key={deviceKey(device)}
-        style={({ pressed }) => [styles.deviceRow, pressed && { backgroundColor: c.subtle }]}
+        style={({ pressed }) => [styles.linkedRow, pressed && { backgroundColor: c.subtle }]}
         onPress={() => focusDevice(device)}
-        accessibilityLabel={`${deviceLabel(device)}, ${state}`}
+        accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}`}
       >
-        <Avatar name={ownerName(device)} uri={avatarFor(device.avatarUrl)} state={state} gapColor={c.raised} />
+        <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={20} color={c.muted} />
         <View style={{ flex: 1 }}>
-          <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
-            <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={15} color={c.muted} />{" "}
-            {isMe ? device.deviceId : deviceLabel(device)}
-            {isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
+          <Text style={[styles.linkedName, { color: c.primary }]} numberOfLines={1}>
+            {device.deviceId}
+            {isMine(device) ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
           </Text>
           <View style={styles.metaRow}>
             <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[state] }]} />
-            <Text style={[styles.deviceMeta, { color: c.muted }]}>
-              {state === "offline" ? "Offline · " : ""}
-              {device.lastPing ? timeAgo(device.lastPing) : "no position yet"}
-            </Text>
+            <Text style={[styles.deviceMeta, { color: c.muted }]}>{statusText(device, timeAgo)}</Text>
           </View>
         </View>
-        {device.position && <MaterialIcons name="near-me" size={20} color={c.muted} />}
+        {device.position && <MaterialIcons name="near-me" size={18} color={c.muted} />}
       </Pressable>
+    );
+  };
+
+  const personRow = (person: Person) => {
+    const { primary } = person;
+    const open = expanded === person.key;
+    return (
+      <View key={person.key}>
+        <Pressable
+          style={({ pressed }) => [styles.deviceRow, pressed && { backgroundColor: c.subtle }]}
+          onPress={() => togglePerson(person)}
+          accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}`}
+          accessibilityState={{ expanded: open }}
+        >
+          <Avatar name={person.name} uri={avatarFor(primary.avatarUrl)} state={freshness(primary)} gapColor={c.raised} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
+              {person.name}
+              {person.isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
+            </Text>
+            <View style={styles.metaRow}>
+              <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[freshness(primary)] }]} />
+              <Text style={[styles.deviceMeta, { color: c.muted }]} numberOfLines={1}>
+                {primary.deviceId} · {statusText(primary, timeAgo)}
+                {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
+              </Text>
+            </View>
+          </View>
+          <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={c.muted} />
+        </Pressable>
+        {open && <View style={styles.linked}>{person.devices.map(linkedDevice)}</View>}
+      </View>
     );
   };
 
@@ -351,12 +392,12 @@ export default function MapScreen() {
           </View>
         </View>
         <View style={styles.stack}>
-          {groupByOwner(sorted).slice(0, 4).map(({ device, extra }, index) => (
-            <View key={device.userId ?? deviceKey(device)} style={{ marginLeft: index === 0 ? 0 : -10 }}>
-              <Avatar name={ownerName(device)} uri={avatarFor(device.avatarUrl)} state={freshness(device)} size={26} gapColor={c.raised} />
-              {extra > 0 && (
+          {people.slice(0, 4).map((person, index) => (
+            <View key={person.key} style={{ marginLeft: index === 0 ? 0 : -10 }}>
+              <Avatar name={person.name} uri={avatarFor(person.primary.avatarUrl)} state={freshness(person.primary)} size={26} gapColor={c.raised} />
+              {person.extra > 0 && (
                 <View style={[styles.extraBadge, { backgroundColor: c.primary, borderColor: c.raised }]}>
-                  <Text style={[styles.extraText, { color: c.raised }]}>+{extra}</Text>
+                  <Text style={[styles.extraText, { color: c.raised }]}>+{person.extra}</Text>
                 </View>
               )}
             </View>
@@ -429,10 +470,10 @@ export default function MapScreen() {
             <>
               <Text style={[styles.sheetMeta, { color: c.muted }]}>{summary}</Text>
               <ScrollView style={styles.deviceList}>
-                {sorted.length === 0 && (
+                {people.length === 0 && (
                   <Text style={[styles.empty, { color: c.muted }]}>No devices yet.</Text>
                 )}
-                {sorted.map(deviceRow)}
+                {people.map(personRow)}
               </ScrollView>
             </>
           )}
@@ -579,6 +620,9 @@ const styles = StyleSheet.create({
   headerButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   deviceList: { maxHeight: 420 },
   empty: { paddingVertical: 14 },
+  linked: { marginLeft: 22, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: "rgba(128,128,128,0.25)", marginBottom: 6 },
+  linkedRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12 },
+  linkedName: { fontSize: 14.5, fontWeight: "600" },
   deviceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, borderRadius: 14, paddingHorizontal: 6 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
   deviceMeta: { fontSize: 12.5 },

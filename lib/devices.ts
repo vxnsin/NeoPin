@@ -74,23 +74,89 @@ export function avatarColor(name: string): string {
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
 
+const TYPE_RANK: Record<DeviceType, number> = { phone: 0, tablet: 1, desktop: 2 };
+
+const pingTime = (device: Device) => (device.lastPing ? new Date(device.lastPing).getTime() || 0 : 0);
+
+// The device that stands for its owner: the one online now, else phone over tablet over
+// desktop, else the one that reported last.
+export function comparePrimary(a: Device, b: Device): number {
+  return (
+    Number(b.status === "online") - Number(a.status === "online") ||
+    TYPE_RANK[typeOf(a)] - TYPE_RANK[typeOf(b)] ||
+    pingTime(b) - pingTime(a) ||
+    a.deviceId.localeCompare(b.deviceId)
+  );
+}
+
+export function primaryDevice(devices: Device[]): Device | undefined {
+  return [...devices].sort(comparePrimary)[0];
+}
+
+export type Person = {
+  key: string;
+  userId?: number;
+  name: string;
+  isMe: boolean;
+  online: boolean;
+  // The owner's devices, the primary one first.
+  devices: Device[];
+  primary: Device;
+  // Devices beyond the primary one.
+  extra: number;
+};
+
+function personKey(device: Device): string {
+  if (device.userId !== undefined) return `user:${device.userId}`;
+  if (device.owner?.username) return `name:${device.owner.username}`;
+  return `device:${deviceKey(device)}`;
+}
+
+// One entry per person. Order: the own account, then people with a device online, then the
+// rest, each by name.
+export function groupPeople(devices: Device[], myUserId?: number): Person[] {
+  const groups = new Map<string, Device[]>();
+  for (const device of devices) {
+    const key = personKey(device);
+    const list = groups.get(key);
+    if (list) list.push(device);
+    else groups.set(key, [device]);
+  }
+  const people: Person[] = [];
+  for (const [key, list] of groups) {
+    const sorted = [...list].sort(comparePrimary);
+    const first = sorted[0];
+    people.push({
+      key,
+      userId: first.userId,
+      name:
+        first.owner?.displayName ||
+        first.owner?.username ||
+        (first.userId !== undefined ? `User ${first.userId}` : first.deviceId),
+      isMe: myUserId !== undefined && first.userId === myUserId,
+      online: sorted.some((d) => d.status === "online"),
+      devices: sorted,
+      primary: first,
+      extra: sorted.length - 1,
+    });
+  }
+  return people.sort(
+    (a, b) =>
+      Number(b.isMe) - Number(a.isMe) ||
+      Number(b.online) - Number(a.online) ||
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+  );
+}
+
 export type OwnerGroup = { device: Device; extra: number };
 
-const FRESHNESS_RANK: Record<Freshness, number> = { online: 0, stale: 1, offline: 2 };
+// What the avatar stack shows: one entry per person with their primary device and the count of the rest.
+export function groupByOwner(devices: Device[], myUserId?: number): OwnerGroup[] {
+  return groupPeople(devices, myUserId).map((person) => ({ device: person.primary, extra: person.extra }));
+}
 
-// One entry per owner, in the order owners first appear. The representative is the owner's
-// freshest device so the ring shows the best state, extra counts the other devices.
-export function groupByOwner(devices: Device[], now = Date.now()): OwnerGroup[] {
-  const groups = new Map<string, OwnerGroup>();
-  for (const device of devices) {
-    const key = device.userId === undefined ? `device:${deviceKey(device)}` : `user:${device.userId}`;
-    const group = groups.get(key);
-    if (!group) {
-      groups.set(key, { device, extra: 0 });
-      continue;
-    }
-    group.extra += 1;
-    if (FRESHNESS_RANK[freshness(device, now)] < FRESHNESS_RANK[freshness(group.device, now)]) group.device = device;
-  }
-  return Array.from(groups.values());
+// "online", or when the device last reported.
+export function statusText(device: Device, ago: (timestamp: string | null) => string): string {
+  if (device.status === "online") return "online";
+  return device.lastPing ? ago(device.lastPing) : "no position yet";
 }
