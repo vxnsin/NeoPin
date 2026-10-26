@@ -701,6 +701,20 @@ body.is-timeline .maplibregl-popup {
   border-radius: 50%;
   border: 2px solid var(--online);
   animation: ripple 2.4s ease-out infinite;
+  /* Own compositor layer, so only the GPU animates it and the map does not repaint around it. */
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+/* The rings rest while the map moves, panning stays smooth with many pins. */
+#map.is-moving .pin[data-state="online"] .avatar::after {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pin[data-state="online"] .avatar::after {
+    animation: none;
+  }
 }
 
 /* Names show on hover and selection, and for every pin once the map is close enough. */

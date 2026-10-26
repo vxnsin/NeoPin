@@ -205,6 +205,9 @@ map.on("styleimagemissing", (event) => {
 
 const updateLabels = () => mapEl.classList.toggle("show-labels", map.getZoom() >= LABEL_ZOOM);
 map.on("zoom", updateLabels);
+// Pause the pulse rings while the map moves.
+map.on("movestart", () => map.getContainer().classList.add("is-moving"));
+map.on("moveend", () => map.getContainer().classList.remove("is-moving"));
 updateLabels();
 
 document.documentElement.addEventListener("themechange", (event) => {
