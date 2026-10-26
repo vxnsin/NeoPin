@@ -4,7 +4,7 @@ export default {
   expo: {
     name: "NeoPin",
     slug: "neopin",
-    version: "1.0.3",
+    version: "1.1.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "neopin",
@@ -28,7 +28,7 @@ export default {
     },
     android: {
       package: "de.vensin.neopin",
-      versionCode: 4,
+      versionCode: 5,
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
         backgroundColor: "#d3171e",
@@ -91,7 +91,7 @@ export default {
       },
     },
     owner: "vensin",
-    runtimeVersion: "1.0.0",
+    runtimeVersion: "1.1.0",
     updates: {
       url: "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b",
     },
