@@ -3,6 +3,7 @@ export type User = {
   username: string;
   displayName: string;
   avatarUrl: string | null;
+  isAdmin?: boolean;
 };
 
 export type ServerStatus = { version: string; registrationOpen: boolean };
@@ -105,19 +106,6 @@ export async function loginRequest(
   );
 }
 
-export async function registerRequest(
-  serverUrl: string,
-  body: { username: string; password: string; displayName?: string }
-): Promise<User> {
-  return json(
-    await request(`${httpBase(serverUrl)}/api/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    })
-  );
-}
-
 // Best effort: the token is dropped locally either way.
 export async function logoutRequest(auth: DeviceAuth): Promise<void> {
   try {
@@ -162,12 +150,36 @@ export type Timeline = {
   segments: Segment[];
 };
 
-export async function fetchTimeline(auth: DeviceAuth, deviceId: string, date: string): Promise<Timeline> {
-  const query = `deviceId=${encodeURIComponent(deviceId)}&date=${date}&tz=${new Date().getTimezoneOffset()}`;
+export type AccountSummary = User & { devices: number };
+
+export type AccountDevice = {
+  deviceId: string;
+  linkedAt?: string | null;
+  status: "online" | "offline";
+  lastPing: string | null;
+  position: { latitude: number; longitude: number } | null;
+};
+
+// Admin only.
+export async function fetchUsers(auth: DeviceAuth): Promise<AccountSummary[]> {
+  return json(await request(`${httpBase(auth.serverIp)}/api/users`, { headers: deviceHeaders(auth) }));
+}
+
+export async function fetchUserDevices(auth: DeviceAuth, userId: number): Promise<AccountDevice[]> {
+  return json(await request(`${httpBase(auth.serverIp)}/api/users/${userId}/devices`, { headers: deviceHeaders(auth) }));
+}
+
+// userId is for admins who look at another account.
+const timelineQuery = (deviceId: string, userId?: number) =>
+  `deviceId=${encodeURIComponent(deviceId)}${userId === undefined ? "" : `&userId=${userId}`}&tz=${new Date().getTimezoneOffset()}`;
+
+export async function fetchTimeline(auth: DeviceAuth, deviceId: string, date: string, userId?: number): Promise<Timeline> {
+  const query = `${timelineQuery(deviceId, userId)}&date=${date}`;
   return json(await request(`${httpBase(auth.serverIp)}/api/timeline?${query}`, { headers: deviceHeaders(auth) }));
 }
 
-export async function fetchTimelineDays(auth: DeviceAuth, deviceId: string): Promise<string[]> {
-  const query = `deviceId=${encodeURIComponent(deviceId)}&tz=${new Date().getTimezoneOffset()}`;
-  return json(await request(`${httpBase(auth.serverIp)}/api/timeline/days?${query}`, { headers: deviceHeaders(auth) }));
+export async function fetchTimelineDays(auth: DeviceAuth, deviceId: string, userId?: number): Promise<string[]> {
+  return json(
+    await request(`${httpBase(auth.serverIp)}/api/timeline/days?${timelineQuery(deviceId, userId)}`, { headers: deviceHeaders(auth) })
+  );
 }

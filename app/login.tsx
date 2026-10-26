@@ -16,11 +16,9 @@ import { MaterialIcons } from "@expo/vector-icons";
 import useThemeManager from "@/hooks/useThemeManager";
 import Field from "@/components/Field";
 import { useWebSocketContext } from "@/context/WebSocket";
-import { fetchStatus, loginRequest, normalizeServerUrl, registerRequest } from "@/lib/api";
+import { fetchStatus, loginRequest, normalizeServerUrl } from "@/lib/api";
 import { saveCredentials } from "@/lib/credentials";
-import { passwordError, usernameError } from "@/lib/validation";
 
-type Mode = "login" | "register";
 type Errors = { server?: string; username?: string; password?: string; name?: string };
 
 const STATUS_DELAY_MS = 700;
@@ -29,32 +27,28 @@ const Login = () => {
   const { colors } = useThemeManager();
   const router = useRouter();
   const { connect } = useWebSocketContext();
-  const [mode, setMode] = useState<Mode>("login");
   const [server, setServer] = useState("");
   const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   // The name is what the server calls this device, its deviceId.
   const [name, setName] = useState(Device.deviceName || Device.modelName || "My phone");
-  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [noAccounts, setNoAccounts] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState("");
   const [connecting, setConnecting] = useState(false);
   const statusRun = useRef(0);
 
-  const creating = mode === "register";
-
-  // Ask the server whether it takes new accounts once the address looks complete.
+  // A server without any account has to get its admin account in the dashboard first.
   const checkStatus = (address: string) => {
     const run = ++statusRun.current;
     const url = address.trim();
     if (!url) {
-      setRegistrationOpen(false);
+      setNoAccounts(false);
       return;
     }
     fetchStatus(normalizeServerUrl(url))
-      .then((status) => run === statusRun.current && setRegistrationOpen(status.registrationOpen))
-      .catch(() => run === statusRun.current && setRegistrationOpen(false));
+      .then((status) => run === statusRun.current && setNoAccounts(status.registrationOpen))
+      .catch(() => run === statusRun.current && setNoAccounts(false));
   };
 
   useEffect(() => {
@@ -62,17 +56,7 @@ const Login = () => {
     return () => clearTimeout(timer);
   }, [server]);
 
-  useEffect(() => {
-    if (!registrationOpen && mode === "register") setMode("login");
-  }, [registrationOpen, mode]);
-
   const clear = (key: keyof Errors) => setErrors((e) => ({ ...e, [key]: undefined }));
-
-  const switchMode = (next: Mode) => {
-    setMode(next);
-    setErrors({});
-    setFailure("");
-  };
 
   const handleSubmit = async () => {
     if (connecting) return;
@@ -81,8 +65,8 @@ const Login = () => {
     const user = username.trim();
     const next: Errors = {
       server: url ? undefined : "Server address is required",
-      username: creating ? usernameError(user) : user ? undefined : "Username is required",
-      password: passwordError(password, creating),
+      username: user ? undefined : "Username is required",
+      password: password ? undefined : "Password is required",
       name: deviceId ? undefined : "Name is required",
     };
     setErrors(next);
@@ -92,11 +76,6 @@ const Login = () => {
     setConnecting(true);
     const serverUrl = normalizeServerUrl(url);
     try {
-      if (creating) {
-        await registerRequest(serverUrl, { username: user, password, displayName: displayName.trim() || undefined });
-        // A failed login below then retries as a plain login instead of registering twice.
-        setMode("login");
-      }
       const { token, user: account } = await loginRequest(serverUrl, { username: user, password, deviceId });
       // Connect with the shared socket right away instead of a throwaway test
       // connection: it has the auth timeout and clean error handling already.
@@ -119,7 +98,7 @@ const Login = () => {
         <Image source={require("@/assets/images/logo.png")} style={styles.logo} />
         <Text style={[styles.title, { color: colors.primary }]}>NeoPin</Text>
         <Text style={[styles.lead, { color: colors.muted }]}>
-          {creating ? "Create an account on your NeoPin server." : "Log in to your NeoPin server."}
+          Log in to your NeoPin server.
         </Text>
 
         <View style={styles.form}>
@@ -150,28 +129,16 @@ const Login = () => {
             error={errors.username}
             returnKeyType="next"
           />
-          {creating && (
-            <Field
-              label="Display name"
-              icon="badge"
-              placeholder={username.trim() || "How others see you"}
-              value={displayName}
-              onChangeText={setDisplayName}
-              autoCapitalize="words"
-              hint="Optional, shown instead of the username."
-              returnKeyType="next"
-            />
-          )}
           <Field
             label="Password"
             icon="lock-outline"
-            placeholder={creating ? "At least 8 characters" : "Password"}
+            placeholder="Password"
             value={password}
             onChangeText={(text) => {
               setPassword(text);
               clear("password");
             }}
-            textContentType={creating ? "newPassword" : "password"}
+            textContentType="password"
             secret
             error={errors.password}
             returnKeyType="next"
@@ -212,28 +179,19 @@ const Login = () => {
               <ActivityIndicator color={colors.onSecondary} />
             ) : (
               <>
-                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>
-                  {creating ? "Create account" : "Log in"}
-                </Text>
+                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>Log in</Text>
                 <MaterialIcons name="arrow-forward" size={20} color={colors.onSecondary} />
               </>
             )}
           </Pressable>
 
-          {(registrationOpen || creating) && (
-            <Pressable
-              onPress={() => switchMode(creating ? "login" : "register")}
-              disabled={connecting}
-              style={styles.switch}
-              hitSlop={8}
-            >
-              <Text style={[styles.switchText, { color: colors.muted }]}>
-                {creating ? "Already have an account? " : "New here? "}
-                <Text style={{ color: colors.secondary, fontWeight: "700" }}>
-                  {creating ? "Log in" : "Create account"}
-                </Text>
+          {noAccounts && (
+            <View style={[styles.failure, { backgroundColor: colors.subtle }]}>
+              <MaterialIcons name="info-outline" size={18} color={colors.muted} />
+              <Text style={[styles.failureText, { color: colors.primary }]}>
+                Create the admin account in the dashboard first.
               </Text>
-            </Pressable>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -260,8 +218,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   buttonText: { fontSize: 17, fontWeight: "700" },
-  switch: { alignItems: "center", paddingVertical: 18 },
-  switchText: { fontSize: 14.5 },
 });
 
 export default Login;

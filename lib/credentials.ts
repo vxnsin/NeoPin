@@ -32,6 +32,7 @@ export function parseSession(raw: string | null): StoredCredentials | null {
         username: user.username,
         displayName: typeof user.displayName === "string" ? user.displayName : user.username,
         avatarUrl: typeof user.avatarUrl === "string" ? user.avatarUrl : null,
+        isAdmin: user.isAdmin === true,
       },
     };
   } catch {

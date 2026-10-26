@@ -1,4 +1,4 @@
-import { ApiError, deviceHeaders, fetchTimeline, loginRequest, normalizeServerUrl, registerRequest } from "../lib/api";
+import { ApiError, deviceHeaders, fetchTimeline, fetchTimelineDays, loginRequest, normalizeServerUrl } from "../lib/api";
 
 const auth = { serverIp: "ws://10.0.0.2:3012", deviceId: "Luis’ iPhone", token: "t/k+1" };
 
@@ -31,10 +31,17 @@ test("a login posts the device with the credentials and returns the token", asyn
 });
 
 test("the server message is shown", async () => {
-  (global as any).fetch = respond(400, { message: "Password needs 8 characters" });
-  await expect(registerRequest("ws://x", { username: "luis", password: "1" })).rejects.toThrow("Password needs 8 characters");
-  (global as any).fetch = respond(409, {});
-  await expect(registerRequest("ws://x", { username: "luis", password: "1" })).rejects.toMatchObject({ status: 409 });
+  (global as any).fetch = respond(401, { detail: "Wrong username or password" });
+  await expect(loginRequest("ws://x", { username: "a", password: "b", deviceId: "c" })).rejects.toThrow("Wrong username or password");
+});
+
+test("an admin asks for another account's timeline with userId", async () => {
+  const fetchMock = respond(200, []);
+  (global as any).fetch = fetchMock;
+  await fetchTimelineDays(auth, "Dev", 7);
+  expect(fetchMock.mock.calls[0][0]).toContain("/api/timeline/days?deviceId=Dev&userId=7&tz=");
+  await fetchTimelineDays(auth, "Dev");
+  expect(fetchMock.mock.calls[1][0]).not.toContain("userId");
 });
 
 test("an unreachable server is an ApiError with status 0", async () => {
@@ -49,6 +56,6 @@ test("the timeline asks for one day of one device with the time zone offset", as
   (global as any).fetch = fetchMock;
   await fetchTimeline(auth, "Luis’ iPhone", "2025-06-10");
   const [url, init] = fetchMock.mock.calls[0];
-  expect(url).toContain("http://10.0.0.2:3012/api/timeline?deviceId=Luis%E2%80%99%20iPhone&date=2025-06-10&tz=");
+  expect(url).toContain("http://10.0.0.2:3012/api/timeline?deviceId=Luis%E2%80%99%20iPhone&tz=");
   expect(init.headers.Authorization).toBe("Bearer t%2Fk%2B1");
 });

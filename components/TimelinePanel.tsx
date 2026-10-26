@@ -4,7 +4,14 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
-import { fetchTimeline, fetchTimelineDays, type Timeline } from "@/lib/api";
+import {
+  fetchTimeline,
+  fetchTimelineDays,
+  fetchUserDevices,
+  fetchUsers,
+  type AccountSummary,
+  type Timeline,
+} from "@/lib/api";
 import type { StoredCredentials } from "@/lib/credentials";
 import { freshness, type Device } from "@/lib/devices";
 import {
@@ -39,14 +46,23 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const { colors: c } = useThemeManager();
   const insets = useSafeAreaInsets();
 
+  const admin = creds.user.isAdmin === true;
+  const [users, setUsers] = useState<AccountSummary[]>([]);
+  // Admins can look at another account, undefined is their own.
+  const [accountId, setAccountId] = useState<number | undefined>(undefined);
+  const [otherDevices, setOtherDevices] = useState<Device[]>([]);
+  const viewingOther = accountId !== undefined && accountId !== creds.user.id;
+  const queryUser = viewingOther ? accountId : undefined;
+
   const choices = useMemo(() => {
+    if (viewingOther) return otherDevices;
     const list = devices.length ? devices : [{ deviceId: creds.deviceId } as Device];
     return [...list].sort(
       (a, b) =>
         Number(b.deviceId === creds.deviceId) - Number(a.deviceId === creds.deviceId) ||
         a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
     );
-  }, [devices, creds.deviceId]);
+  }, [devices, creds.deviceId, viewingOther, otherDevices]);
 
   const today = dayKey(new Date());
   const [deviceId, setDeviceId] = useState(creds.deviceId);
@@ -64,21 +80,56 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const bottomPadding = height + 16;
 
   useEffect(() => {
+    if (!admin) return;
+    fetchUsers(creds)
+      .then(setUsers)
+      .catch(() => setUsers([]));
+  }, [creds, admin]);
+
+  const pickAccount = (user: AccountSummary) => {
+    setDaysOpen(false);
+    if (user.id === creds.user.id) {
+      setAccountId(undefined);
+      setOtherDevices([]);
+      setDeviceId(creds.deviceId);
+      return;
+    }
+    setAccountId(user.id);
+    setOtherDevices([]);
+    setTimeline(null);
+    fetchUserDevices(creds, user.id)
+      .then((list) => {
+        setOtherDevices(
+          list.map((d) => ({ deviceId: d.deviceId, position: d.position, lastPing: d.lastPing, status: d.status, avatarUrl: user.avatarUrl }))
+        );
+        setDeviceId(list[0]?.deviceId ?? "");
+      })
+      .catch((e: any) => setError(e?.message || "The devices could not be loaded."));
+  };
+
+  useEffect(() => {
+    if (!deviceId) return;
     let live = true;
-    fetchTimelineDays(creds, deviceId)
+    fetchTimelineDays(creds, deviceId, queryUser)
       .then((list) => live && setDays(list))
       .catch(() => live && setDays([]));
     return () => {
       live = false;
     };
-  }, [creds, deviceId, reloads]);
+  }, [creds, deviceId, queryUser, reloads]);
 
   useEffect(() => {
     const current = ++run.current;
+    if (!deviceId) {
+      setTimeline(null);
+      setLoading(false);
+      post({ type: "routeClear" });
+      return;
+    }
     setLoading(true);
     setError("");
     setSelected(null);
-    fetchTimeline(creds, deviceId, day)
+    fetchTimeline(creds, deviceId, day, queryUser)
       .then((result) => {
         if (current !== run.current) return;
         setTimeline(result);
@@ -93,7 +144,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         post({ type: "routeClear" });
       })
       .finally(() => current === run.current && setLoading(false));
-  }, [creds, deviceId, day, reloads, post, bottomPadding]);
+  }, [creds, deviceId, queryUser, day, reloads, post, bottomPadding]);
 
   useEffect(() => () => post({ type: "routeClear" }), [post]);
 
@@ -144,6 +195,28 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           </Pressable>
         </View>
       </View>
+
+      {admin && users.length > 1 && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
+          {users.map((user) => {
+            const active = user.id === (accountId ?? creds.user.id);
+            return (
+              <Pressable
+                key={user.id}
+                onPress={() => pickAccount(user)}
+                style={[styles.deviceChip, chip(active)]}
+                accessibilityLabel={`Show the account ${user.displayName}`}
+                accessibilityState={{ selected: active }}
+              >
+                <MaterialIcons name="person" size={18} color={active ? c.onSecondary : c.muted} />
+                <Text style={[styles.chipLabel, chipText(active)]} numberOfLines={1}>
+                  {user.id === creds.user.id ? "Me" : user.displayName}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
 
       {choices.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
@@ -248,7 +321,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           <MaterialIcons name="timeline" size={34} color={c.muted} />
           <Text style={[styles.emptyTitle, { color: c.primary }]}>Nothing recorded</Text>
           <Text style={[styles.note, { color: c.muted, textAlign: "center" }]}>
-            This device has no location data for {dayLabel(day).toLowerCase()}.
+            {choices.length === 0 ? "This account has no devices." : `This device has no location data for ${dayLabel(day).toLowerCase()}.`}
           </Text>
         </View>
       ) : (

@@ -8,7 +8,6 @@ import {
   shiftDay,
   visitNumbers,
 } from "../lib/timeline";
-import { passwordError, usernameError } from "../lib/validation";
 import type { Segment } from "../lib/api";
 
 test("durations read like a clock face", () => {
@@ -68,13 +67,4 @@ test("stops are numbered in order and trips keep their index", () => {
 
 test("a trip without a line is not drawn", () => {
   expect(routeSegments([trip([[1, 2]])])).toEqual([]);
-});
-
-test("registration rules match the server", () => {
-  expect(usernameError("ab")).toBeDefined();
-  expect(usernameError("luis kanzewitsch")).toBeDefined();
-  expect(usernameError("luis.k_1-x")).toBeUndefined();
-  expect(passwordError("short", true)).toBeDefined();
-  expect(passwordError("short", false)).toBeUndefined();
-  expect(passwordError("", false)).toBeDefined();
 });
