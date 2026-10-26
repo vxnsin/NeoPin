@@ -1,3 +1,4 @@
+import { CLUSTER_RADIUS_PX, CLUSTER_SCRIPT } from "@/lib/cluster";
 import { STALE_AFTER_MS, STATE_COLORS } from "@/lib/devices";
 
 // OpenFreeMap serves vector tiles without an API key, the same styles as the dashboard.
@@ -41,6 +42,18 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
 
     .pin { display: block; border: 0; background: none; padding: 0; }
     .pin.selected { z-index: 5; }
+    .pin.clustered { display: none; }
+    .route-mode .cluster { display: none; }
+    .cluster { display: block; border: 0; background: none; padding: 0; }
+    .cluster-body { position: relative; display: flex; align-items: center; padding: 4px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow); }
+    .cluster .avatar { width: 30px; height: 30px; font-size: 12px; }
+    .cluster .avatar + .avatar { margin-left: -9px; }
+    .cluster-count { position: absolute; top: -9px; right: -9px; display: grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; border: 2px solid var(--surface); border-radius: 11px; background: #d3171e; color: #fff; font: 700 11px system-ui, sans-serif; }
+    .cluster-list { display: flex; flex-direction: column; gap: 2px; max-width: 240px; max-height: 200px; overflow-y: auto; }
+    .cluster-row { display: flex; align-items: center; gap: 10px; border: 0; border-radius: 10px; background: none; padding: 5px 6px; color: var(--text); font: 600 13px system-ui, sans-serif; text-align: left; }
+    .cluster-row:active { background: var(--bg); }
+    .cluster-row .avatar { flex: none; width: 28px; height: 28px; font-size: 11px; }
+    .cluster-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pin-body { position: relative; display: flex; flex-direction: column; align-items: center; transform-origin: 50% 100%; transition: transform .2s; }
     .pin.selected .pin-body { transform: scale(1.12); }
     .bubble { position: relative; padding: 5px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); }
@@ -96,6 +109,12 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     var selfMarker = null;
     var selectedId = null;
     var devices = [];
+    var clusters = {};
+    var CLUSTER_RADIUS = ${CLUSTER_RADIUS_PX};
+    // Mercator px per degree at zoom 18 (512 px tiles), to tell whether zooming can still pull a cluster apart.
+    var PX_PER_DEG_Z18 = 512 * Math.pow(2, 18) / 360;
+    var STATE_RANK = { online: 0, stale: 1, offline: 2 };
+    ${CLUSTER_SCRIPT}
     // The day shown by the timeline: { segments, bottom, active }.
     var route = null;
     var stops = [];
@@ -164,7 +183,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     });
     var popup = new maplibregl.Popup({ anchor: "bottom", closeButton: false, closeOnClick: false, offset: [0, -64] });
     map.on("click", function (e) {
-      if (e.originalEvent.target.closest && e.originalEvent.target.closest(".pin, .maplibregl-popup")) return;
+      if (e.originalEvent.target.closest && e.originalEvent.target.closest(".pin, .cluster, .maplibregl-popup")) return;
       selectedId = null;
       popup.remove();
       sync();
@@ -222,6 +241,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     }
 
     function select(id) {
+      clusterPopup.remove();
       selectedId = id;
       var d = devices.find(function (x) { return keyOf(x) === id; });
       if (d && d.position) map.easeTo({ center: [d.position.longitude, d.position.latitude], padding: PADDING, duration: 500 });
@@ -260,6 +280,94 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       } else if (popup.isOpen()) {
         popup.remove();
       }
+      layout();
+    }
+
+    function ownerOf(d) {
+      if (d.userId !== undefined && d.userId !== null) return "u" + d.userId;
+      return d.owner && d.owner.username ? "n" + d.owner.username : "d" + keyOf(d);
+    }
+    // One avatar per person, the person's best state wins when several devices are in the cluster.
+    function bestByOwner(members) {
+      var best = {}, order = [];
+      members.forEach(function (d) {
+        var o = ownerOf(d);
+        if (!best[o]) { best[o] = d; order.push(o); }
+        else if (STATE_RANK[state(d)] < STATE_RANK[state(best[o])]) best[o] = d;
+      });
+      return order.map(function (o) { return best[o]; });
+    }
+    function clusterHtml(members) {
+      var people = bestByOwner(members);
+      var badge = people.length > 1 ? '<span class="cluster-count">' + people.length + "</span>" : "";
+      return '<span class="cluster-body">' + people.slice(0, 3).map(avatarHtml).join("") + badge + "</span>";
+    }
+    var clusterPopup = new maplibregl.Popup({ closeButton: false, closeOnClick: true, offset: 30 });
+    function showClusterList(entry) {
+      var box = document.createElement("div");
+      box.className = "cluster-list";
+      bestByOwner(entry.members).forEach(function (d) {
+        var row = document.createElement("button");
+        row.className = "cluster-row";
+        row.innerHTML = avatarHtml(d) + "<span>" + esc(fullName(d)) + "</span>";
+        row.addEventListener("click", function () { focusDevice(d); });
+        box.appendChild(row);
+      });
+      clusterPopup.setLngLat(entry.marker.getLngLat()).setDOMContent(box).addTo(map);
+    }
+    function openCluster(id) {
+      var entry = clusters[id];
+      if (!entry) return;
+      var bounds = new maplibregl.LngLatBounds();
+      entry.members.forEach(function (d) { bounds.extend([d.position.longitude, d.position.latitude]); });
+      var span = Math.max(bounds.getEast() - bounds.getWest(), bounds.getNorth() - bounds.getSouth());
+      // Close enough that even the deepest zoom keeps them together: list the people instead.
+      if (span * PX_PER_DEG_Z18 < CLUSTER_RADIUS || map.getZoom() >= 17.5) showClusterList(entry);
+      else map.fitBounds(bounds, { padding: PADDING, maxZoom: 18, duration: 500 });
+    }
+    // Pins closer than the radius on screen become one marker, the selected device always stays a pin.
+    function layout() {
+      var byKey = {};
+      var pins = [];
+      devices.forEach(function (d) {
+        if (!d.position) return;
+        var p = map.project([d.position.longitude, d.position.latitude]);
+        byKey[keyOf(d)] = d;
+        pins.push({ key: keyOf(d), x: p.x, y: p.y, owner: ownerOf(d), fixed: keyOf(d) === selectedId });
+      });
+      var live = {};
+      clusterPins(pins, CLUSTER_RADIUS).forEach(function (group) {
+        var single = group.keys.length === 1;
+        group.keys.forEach(function (k) { if (markers[k]) markers[k].el.classList.toggle("clustered", !single); });
+        if (single) return;
+        var id = group.keys.join("|");
+        live[id] = true;
+        var members = group.keys.map(function (k) { return byKey[k]; });
+        var at = map.unproject([group.x, group.y]);
+        var sig = members.map(function (d) { return keyOf(d) + state(d) + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : ""); }).join("|");
+        var entry = clusters[id];
+        if (!entry) {
+          var el = document.createElement("button");
+          el.className = "cluster";
+          el.addEventListener("click", function (e) { e.stopPropagation(); openCluster(id); });
+          entry = clusters[id] = { el: el, sig: "", members: members, marker: new maplibregl.Marker({ element: el }).setLngLat(at).addTo(map) };
+        }
+        entry.members = members;
+        entry.marker.setLngLat(at);
+        if (entry.sig !== sig) { entry.el.innerHTML = clusterHtml(members); entry.sig = sig; }
+      });
+      Object.keys(clusters).forEach(function (id) {
+        if (!live[id]) { clusters[id].marker.remove(); delete clusters[id]; }
+      });
+    }
+    map.on("zoomend", layout);
+    map.on("moveend", layout);
+
+    function focusDevice(d) {
+      clusterPopup.remove();
+      selectedId = keyOf(d);
+      sync();
+      map.flyTo({ center: [d.position.longitude, d.position.latitude], zoom: Math.max(map.getZoom(), 15), padding: PADDING });
     }
 
     function lngLat(p) { return [p[1], p[0]]; }
@@ -371,11 +479,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         else if (data.type === "self") updateSelf(data.latitude, data.longitude, data.center);
         else if (data.type === "focus") {
           var d = devices.find(function (x) { return keyOf(x) === data.key; });
-          if (d && d.position) {
-            selectedId = keyOf(d);
-            sync();
-            map.flyTo({ center: [d.position.longitude, d.position.latitude], zoom: Math.max(map.getZoom(), 15), padding: PADDING });
-          }
+          if (d && d.position) focusDevice(d);
         }
         else if (data.type === "route") showRoute(data.segments, data.bottom);
         else if (data.type === "routeFocus" && route) {
