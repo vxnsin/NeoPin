@@ -30,7 +30,7 @@ import PasswordForm from "@/components/PasswordForm";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
-import { DEVICE_ICONS, STATE_COLORS, typeOf, deviceKey, deviceLabel, freshness, isOwnDevice, ownerName, type Device } from "@/lib/devices";
+import { groupByOwner, DEVICE_ICONS, STATE_COLORS, typeOf, deviceKey, deviceLabel, freshness, isOwnDevice, ownerName, type Device } from "@/lib/devices";
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
@@ -351,9 +351,14 @@ export default function MapScreen() {
           </View>
         </View>
         <View style={styles.stack}>
-          {sorted.slice(0, 4).map((device, index) => (
-            <View key={deviceKey(device)} style={{ marginLeft: index === 0 ? 0 : -10 }}>
+          {groupByOwner(sorted).slice(0, 4).map(({ device, extra }, index) => (
+            <View key={device.userId ?? deviceKey(device)} style={{ marginLeft: index === 0 ? 0 : -10 }}>
               <Avatar name={ownerName(device)} uri={avatarFor(device.avatarUrl)} state={freshness(device)} size={26} gapColor={c.raised} />
+              {extra > 0 && (
+                <View style={[styles.extraBadge, { backgroundColor: c.primary, borderColor: c.raised }]}>
+                  <Text style={[styles.extraText, { color: c.raised }]}>+{extra}</Text>
+                </View>
+              )}
             </View>
           ))}
         </View>
@@ -549,6 +554,8 @@ const styles = StyleSheet.create({
   },
   barTitle: { fontSize: 17, fontWeight: "700" },
   stack: { flexDirection: "row", alignItems: "center" },
+  extraBadge: { position: "absolute", right: -4, bottom: -4, minWidth: 18, height: 14, paddingHorizontal: 3, borderRadius: 7, borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
+  extraText: { fontSize: 9, fontWeight: "700", lineHeight: 11 },
   gear: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
   metaDot: { width: 7, height: 7, borderRadius: 4 },

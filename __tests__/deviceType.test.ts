@@ -15,3 +15,21 @@ test("a device without a known type is a phone", () => {
   expect(typeOf({ deviceType: "desktop" })).toBe("desktop");
   expect(typeOf({ deviceType: "toaster" })).toBe("phone");
 });
+
+import { groupByOwner, type Device } from "../lib/devices";
+
+const dev = (userId: number, deviceId: string, status: "online" | "offline"): Device => ({
+  deviceId,
+  userId,
+  position: null,
+  lastPing: null,
+  status,
+});
+
+test("the avatar stack shows one entry per owner with the best state and a count of the rest", () => {
+  const groups = groupByOwner([dev(1, "a", "offline"), dev(2, "x", "online"), dev(1, "b", "online"), dev(1, "c", "offline")]);
+  expect(groups.map((g) => [g.device.userId, g.device.deviceId, g.extra])).toEqual([
+    [1, "b", 2],
+    [2, "x", 0],
+  ]);
+});

@@ -73,3 +73,24 @@ export function avatarColor(name: string): string {
   for (const char of name) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) >>> 0;
   return AVATAR_COLORS[hash % AVATAR_COLORS.length];
 }
+
+export type OwnerGroup = { device: Device; extra: number };
+
+const FRESHNESS_RANK: Record<Freshness, number> = { online: 0, stale: 1, offline: 2 };
+
+// One entry per owner, in the order owners first appear. The representative is the owner's
+// freshest device so the ring shows the best state, extra counts the other devices.
+export function groupByOwner(devices: Device[], now = Date.now()): OwnerGroup[] {
+  const groups = new Map<string, OwnerGroup>();
+  for (const device of devices) {
+    const key = device.userId === undefined ? `device:${deviceKey(device)}` : `user:${device.userId}`;
+    const group = groups.get(key);
+    if (!group) {
+      groups.set(key, { device, extra: 0 });
+      continue;
+    }
+    group.extra += 1;
+    if (FRESHNESS_RANK[freshness(device, now)] < FRESHNESS_RANK[freshness(group.device, now)]) group.device = device;
+  }
+  return Array.from(groups.values());
+}
