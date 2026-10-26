@@ -50,6 +50,8 @@ export default {
     },
     plugins: [
       "expo-router",
+      "expo-font",
+      "expo-status-bar",
       [
         "expo-location",
         {

@@ -1,6 +1,9 @@
 import { Platform } from "react-native";
-import BackgroundService from "react-native-background-actions";
 import { socket, readCredentials } from "@/lib/socket";
+
+// The package has no iOS module, so it must not be loaded there.
+const BackgroundService: typeof import("react-native-background-actions").default | null =
+  Platform.OS === "android" ? require("react-native-background-actions").default : null;
 
 const CHECK_INTERVAL_MS = 10_000;
 
@@ -10,7 +13,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 // is in the background, so the shared socket, its heartbeat and the position
 // reporter keep running. The task itself just makes sure we are connected.
 const keepAlive = async () => {
-  while (BackgroundService.isRunning()) {
+  while (BackgroundService?.isRunning()) {
     if (!socket.connected && !socket.reconnectPending && !socket.rejected) {
       const creds = await readCredentials();
       if (!creds) break;
@@ -34,7 +37,7 @@ const options = {
 };
 
 export async function startWebSocketService() {
-  if (Platform.OS !== "android" || BackgroundService.isRunning()) return;
+  if (!BackgroundService || BackgroundService.isRunning()) return;
   try {
     await BackgroundService.start(keepAlive, options);
   } catch (error) {
@@ -43,7 +46,7 @@ export async function startWebSocketService() {
 }
 
 export async function stopWebSocketService() {
-  if (Platform.OS !== "android" || !BackgroundService.isRunning()) return;
+  if (!BackgroundService || !BackgroundService.isRunning()) return;
   try {
     await BackgroundService.stop();
   } catch (error) {

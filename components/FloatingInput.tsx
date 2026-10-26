@@ -1,6 +1,5 @@
 import React, { useState, useRef } from "react";
-import { KeyboardType } from "react-native";
-import { View, TextInput, StyleSheet, Animated } from "react-native";
+import { View, TextInput, StyleSheet, Animated, type KeyboardTypeOptions } from "react-native";
 import { MaterialIcons as Icon } from "@expo/vector-icons";
 import type { Theme } from "@/themes/Theme";
 
@@ -13,7 +12,7 @@ interface FloatingInputProps {
   animatedValue: Animated.Value;
   colors: Theme;
   customPlaceholder?: string;
-  keyboardType?: KeyboardType;
+  keyboardType?: KeyboardTypeOptions;
   error?: boolean;
   errorMessage?: string;
 }
@@ -41,7 +40,7 @@ const FloatingInput: React.FC<FloatingInputProps> = ({
 }) => {
   const [isFocused, setIsFocused] = useState(false);
   const [showPlaceholder, setShowPlaceholder] = useState(false);
-  const placeholderTimeout = useRef<NodeJS.Timeout | null>(null);
+  const placeholderTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleFocus = () => {
     setIsFocused(true);
