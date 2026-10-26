@@ -142,5 +142,6 @@ const meReady = fetch("/api/me")
     if (!user) return;
     me = user;
     renderAccount();
+    render();
   })
   .catch(() => {});

@@ -31,6 +31,13 @@ let fittedOnce = false;
 let toastTimer = null;
 
 // Device names come from the phones, never put them into HTML unescaped.
+// Device names are only unique per account, so a device is known by owner and name.
+const keyOf = (device) => `${device.userId}:${device.deviceId}`;
+const isOwn = (device) => typeof me !== "undefined" && me !== null && device.userId === me.id;
+const ownerName = (device) => device.owner?.displayName || device.owner?.username || "";
+// "Luis · iPhone"
+const fullName = (device) => (ownerName(device) ? `${ownerName(device)} · ${device.deviceId}` : device.deviceId);
+
 function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -71,7 +78,7 @@ function avatarHtml(device, size = "") {
     ? `<img src="${esc(device.avatarUrl)}" alt="" decoding="async" />`
     : `<span>${esc(initials(device.deviceId))}</span>`;
   const sizeClass = size ? ` avatar--${size}` : "";
-  return `<span class="avatar${sizeClass} ${colourClass(device.deviceId)}" data-state="${freshness(device)}">${inner}</span>`;
+  return `<span class="avatar${sizeClass} ${colourClass(keyOf(device))}" data-state="${freshness(device)}">${inner}</span>`;
 }
 
 function metaText(device) {
@@ -214,13 +221,13 @@ function fitAll(animate) {
 }
 
 function pinHtml(device) {
-  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}</span><span class="pin__label">${esc(device.deviceId)}</span></span>`;
+  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
 }
 
 function syncMarkers() {
   const seen = new Set();
   for (const device of located()) {
-    const id = device.deviceId;
+    const id = keyOf(device);
     const state = freshness(device);
     const lngLat = [device.position.longitude, device.position.latitude];
     seen.add(id);
@@ -240,11 +247,11 @@ function syncMarkers() {
     }
 
     entry.marker.setLngLat(lngLat);
-    const key = `${state}|${device.avatarUrl}`;
+    const key = `${state}|${device.avatarUrl}|${fullName(device)}`;
     if (entry.key !== key) {
       entry.el.innerHTML = pinHtml(device);
       entry.el.dataset.state = state;
-      entry.el.setAttribute("aria-label", `${device.deviceId}, ${STATE_LABELS[state]}`);
+      entry.el.setAttribute("aria-label", `${fullName(device)}, ${STATE_LABELS[state]}`);
       entry.key = key;
     }
     entry.el.classList.toggle("is-selected", id === selectedId);
@@ -268,7 +275,7 @@ function popupHtml(device) {
       <div class="popup__head">
         ${avatarHtml(device, "lg")}
         <div>
-          <strong class="popup__name">${esc(device.deviceId)}</strong>
+          <strong class="popup__name">${esc(fullName(device))}</strong>
           <span class="popup__state">${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}</span>
         </div>
       </div>
@@ -278,24 +285,24 @@ function popupHtml(device) {
 }
 
 function syncPopup() {
-  const device = devices.find((d) => d.deviceId === selectedId);
+  const device = devices.find((d) => keyOf(d) === selectedId);
   if (!device?.position) {
     if (popup.isOpen()) popup.remove();
     return;
   }
   popup.setLngLat([device.position.longitude, device.position.latitude]).setHTML(popupHtml(device));
   if (!popup.isOpen()) popup.addTo(map);
-  popup.getElement().querySelector("[data-ping]")?.addEventListener("click", (event) => pingDevice(device.deviceId, event.currentTarget));
+  popup.getElement().querySelector("[data-ping]")?.addEventListener("click", (event) => pingDevice(device, event.currentTarget));
 }
 
-async function pingDevice(deviceId, button) {
+async function pingDevice(device, button) {
   button.disabled = true;
   button.textContent = "Asking…";
   try {
     const response = await fetch("/api/sendPing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId }),
+      body: JSON.stringify({ deviceId: device.deviceId, userId: device.userId }),
     });
     if (response.status === 401) return (window.location.href = "/login");
     if (!response.ok) toast("The device is not connected right now.");
@@ -315,7 +322,7 @@ function sortedDevices() {
   return [...devices].sort(
     (a, b) =>
       STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
-      a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
+      fullName(a).localeCompare(fullName(b), undefined, { sensitivity: "base" })
   );
 }
 
@@ -340,14 +347,14 @@ function renderPanel() {
 
   listEl.innerHTML = sorted
     .map((device) => {
-      const selected = device.deviceId === selectedId;
+      const selected = keyOf(device) === selectedId;
       return `
         <li>
-          <button class="device${selected ? " is-selected" : ""}" type="button" data-id="${esc(device.deviceId)}"
+          <button class="device${selected ? " is-selected" : ""}" type="button" data-id="${esc(keyOf(device))}"
             data-state="${freshness(device)}" data-located="${Boolean(device.position)}" aria-pressed="${selected}">
             ${avatarHtml(device)}
             <span class="device__text">
-              <span class="device__name">${esc(device.deviceId)}</span>
+              <span class="device__name">${esc(fullName(device))}${isOwn(device) ? ' <span class="own">you</span>' : ""}</span>
               <span class="device__meta">${esc(metaText(device))}</span>
             </span>
             <svg class="icon device__go" aria-hidden="true"><use href="#i-locate" /></svg>
@@ -368,9 +375,9 @@ function render() {
 // to make room for the popup above it.
 function select(id, { zoomIn = true } = {}) {
   selectedId = id;
-  const device = devices.find((d) => d.deviceId === id);
+  const device = devices.find((d) => keyOf(d) === id);
   if (phone.matches && id) setExpanded(false);
-  if (device && !device.position) toast(`${device.deviceId} has not sent a position yet.`);
+  if (device && !device.position) toast(`${fullName(device)} has not sent a position yet.`);
   if (device?.position) {
     map.flyTo({
       center: [device.position.longitude, device.position.latitude],
@@ -410,7 +417,7 @@ refreshButton.addEventListener("click", () => {
 
 function receive(list) {
   devices = list;
-  if (selectedId && !devices.some((d) => d.deviceId === selectedId)) selectedId = null;
+  if (selectedId && !devices.some((d) => keyOf(d) === selectedId)) selectedId = null;
   render();
   if (!fittedOnce && located().length > 0 && !document.body.classList.contains("is-timeline")) {
     fittedOnce = true;
