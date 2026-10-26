@@ -175,6 +175,9 @@ const map = new maplibregl.Map({
   center: [10.45, 51.16],
   zoom: 5,
   attributionControl: false,
+  // One world only: no endless copies of the map when zooming out or panning sideways.
+  renderWorldCopies: false,
+  minZoom: 1.5,
   dragRotate: false,
   pitchWithRotate: false,
 });
