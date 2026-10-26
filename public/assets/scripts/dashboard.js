@@ -446,8 +446,7 @@ function renderPanel() {
   stackEl.innerHTML = groups
     .slice(0, 4)
     .map((group) => {
-      const extra = group.devices.length - 1;
-      return `<span class="stack-item">${personAvatar(group, "sm")}${extra ? `<span class="stack-extra">+${extra}</span>` : ""}</span>`;
+      return `<span class="stack-item">${personAvatar(group, "sm")}</span>`;
     })
     .join("");
 
