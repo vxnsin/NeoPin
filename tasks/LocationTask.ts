@@ -1,15 +1,14 @@
 import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
-import { Platform } from "react-native";
 import { socket, readCredentials, type StoredCredentials } from "@/lib/socket";
 
 export const LOCATION_TASK = "neopin-background-location";
 
 const PUSH_TIMEOUT_MS = 8_000;
 
-// iOS cannot keep a WebSocket open in the background. Instead the system wakes
-// this task on movement and we push the fresh position with a short-lived
-// connection (or over the shared socket if the app is still alive).
+// The system wakes this task on movement, also while the app is in the background.
+// We push the fresh position over the shared socket if it is still alive, or with a
+// short-lived connection of our own.
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (error || !data) return;
   const locations = (data as { locations?: Location.LocationObject[] }).locations ?? [];
@@ -64,29 +63,39 @@ function pushOnce(creds: StoredCredentials, message: Record<string, unknown>): P
   });
 }
 
-export async function startBackgroundLocation(): Promise<boolean> {
-  if (Platform.OS !== "ios") return false;
+export type BackgroundOptions = { timeInterval: number; distanceInterval: number; accuracy: Location.Accuracy };
 
+// Keeps reporting while the app is in the background or closed. On Android this
+// runs as a foreground service with a notification, on iOS the system wakes the
+// task on movement. Restarting applies a changed update preset.
+export async function startBackgroundLocation(options: BackgroundOptions): Promise<boolean> {
   const foreground = await Location.getForegroundPermissionsAsync();
   if (foreground.status !== "granted") return false;
   const background = await Location.requestBackgroundPermissionsAsync().catch(() => null);
   if (background?.status !== "granted") return false;
 
-  if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) return true;
+  if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) {
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK);
+  }
 
   await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: 60_000,
-    distanceInterval: 50,
+    accuracy: options.accuracy,
+    timeInterval: options.timeInterval,
+    distanceInterval: options.distanceInterval,
     pausesUpdatesAutomatically: false,
     showsBackgroundLocationIndicator: true,
     activityType: Location.ActivityType.Other,
+    foregroundService: {
+      notificationTitle: "NeoPin is sharing your location",
+      notificationBody: "Connected to your server",
+      notificationColor: "#d3171e",
+      killServiceOnDestroy: false,
+    },
   });
   return true;
 }
 
 export async function stopBackgroundLocation() {
-  if (Platform.OS !== "ios") return;
   if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK);
   }

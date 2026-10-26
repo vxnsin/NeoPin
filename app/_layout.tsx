@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Dimensions, StyleSheet, AppState, Platform } from "react-native";
+import { View, Dimensions, StyleSheet } from "react-native";
 import { Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
@@ -7,7 +7,6 @@ import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
 import { socket } from "@/lib/socket";
 import { logout } from "@/lib/logout";
-import { startWebSocketService, stopWebSocketService } from "@/services/WebSocketService";
 import { startPositionReporting } from "@/handlers/Location";
 import { startBackgroundLocation } from "@/tasks/LocationTask";
 import {
@@ -42,25 +41,11 @@ function ConnectionLifecycle() {
   useEffect(() => {
     if (!isConnected) return;
     const stop = startPositionReporting({ emit }, REPORTING_PRESETS[preset]);
-    if (Platform.OS === "ios") {
-      startBackgroundLocation().catch((error) =>
-        console.warn("Background location unavailable:", error?.message)
-      );
-    }
+    startBackgroundLocation(REPORTING_PRESETS[preset]).catch((error) =>
+      console.warn("Background location unavailable:", error?.message)
+    );
     return stop;
   }, [isConnected, emit, preset]);
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return;
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "background") {
-        startWebSocketService();
-      } else if (state === "active") {
-        stopWebSocketService();
-      }
-    });
-    return () => subscription.remove();
-  }, []);
 
   return null;
 }
