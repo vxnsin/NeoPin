@@ -214,3 +214,81 @@ export async function fetchTimelineDays(auth: DeviceAuth, deviceId: string, user
     await request(`${httpBase(auth.serverIp)}/api/timeline/days?${timelineQuery(deviceId, userId)}`, { headers: deviceHeaders(auth) })
   );
 }
+
+export type GroupMember = { id: number; username: string; displayName: string; avatarUrl: string | null; role: "owner" | "member" };
+
+export type Group = {
+  id: number;
+  name: string;
+  ownerId: number;
+  role: "owner" | "member";
+  canManage: boolean;
+  members: GroupMember[];
+  // Only managers get these.
+  pendingInvites?: { id: number; user: { id: number; username: string; displayName: string } }[];
+};
+
+export type Invite = {
+  id: number;
+  groupId: number;
+  groupName: string;
+  invitedBy: { id: number; username: string; displayName: string };
+  createdAt: string;
+};
+
+async function noContent(response: Response): Promise<void> {
+  if (!response.ok) throw new ApiError(await problemText(response, defaultProblem(response.status)), response.status);
+}
+
+const api = (auth: DeviceAuth, path: string) => `${httpBase(auth.serverIp)}/api${path}`;
+
+const jsonInit = (auth: DeviceAuth, method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: { ...deviceHeaders(auth), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+export async function fetchGroups(auth: DeviceAuth): Promise<Group[]> {
+  return json(await request(api(auth, "/groups"), jsonInit(auth, "GET")));
+}
+
+export async function fetchInvites(auth: DeviceAuth): Promise<Invite[]> {
+  return json(await request(api(auth, "/invites"), jsonInit(auth, "GET")));
+}
+
+export async function createGroup(auth: DeviceAuth, name: string): Promise<void> {
+  await json(await request(api(auth, "/groups"), jsonInit(auth, "POST", { name })));
+}
+
+export async function renameGroup(auth: DeviceAuth, id: number, name: string): Promise<void> {
+  await json(await request(api(auth, `/groups/${id}`), jsonInit(auth, "PATCH", { name })));
+}
+
+export async function deleteGroup(auth: DeviceAuth, id: number): Promise<void> {
+  await noContent(await request(api(auth, `/groups/${id}`), jsonInit(auth, "DELETE")));
+}
+
+export async function inviteToGroup(auth: DeviceAuth, id: number, username: string): Promise<void> {
+  await json(await request(api(auth, `/groups/${id}/invites`), jsonInit(auth, "POST", { username })));
+}
+
+export async function cancelInvite(auth: DeviceAuth, groupId: number, inviteId: number): Promise<void> {
+  await noContent(await request(api(auth, `/groups/${groupId}/invites/${inviteId}`), jsonInit(auth, "DELETE")));
+}
+
+// The owner removes someone, anyone leaves themself with their own id.
+export async function removeMember(auth: DeviceAuth, groupId: number, userId: number): Promise<void> {
+  await noContent(await request(api(auth, `/groups/${groupId}/members/${userId}`), jsonInit(auth, "DELETE")));
+}
+
+export async function answerInvite(auth: DeviceAuth, inviteId: number, accept: boolean): Promise<void> {
+  await noContent(await request(api(auth, `/invites/${inviteId}/${accept ? "accept" : "decline"}`), jsonInit(auth, "POST")));
+}
+
+export type FoundUser = { id: number; username: string; displayName: string; avatarUrl: string | null };
+
+// People to invite: matches by username or name, without the caller and, with groupId, without members.
+export async function searchUsers(auth: DeviceAuth, query: string, groupId?: number): Promise<FoundUser[]> {
+  const params = `q=${encodeURIComponent(query)}${groupId === undefined ? "" : `&groupId=${groupId}`}`;
+  return json(await request(api(auth, `/users/search?${params}`), jsonInit(auth, "GET")));
+}

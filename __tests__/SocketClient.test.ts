@@ -191,3 +191,12 @@ test("a refused login at connect time notifies as well", async () => {
   await expect(promise).rejects.toThrow();
   expect(refused).toHaveBeenCalledTimes(1);
 });
+
+test("groupsChanged reaches the listeners", async () => {
+  const client = new SocketClient();
+  const received: any[] = [];
+  client.onMessage((data) => received.push(data));
+  const ws = await connectAndAuthenticate(client);
+  ws.receive({ type: "groupsChanged" });
+  expect(received).toEqual([{ type: "groupsChanged" }]);
+});

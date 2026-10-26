@@ -20,6 +20,8 @@ export type Device = {
   status: "online" | "offline";
   avatarUrl?: string | null;
   deviceType?: DeviceType;
+  // Ids of the groups this device shares with the signed-in account.
+  groupIds?: number[];
 };
 
 // Device names are only unique per account.
