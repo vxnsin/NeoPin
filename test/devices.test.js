@@ -1,5 +1,7 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { createUser } from "../src/accounts.js";
+import { initDb } from "../src/db.js";
 import {
   attachSocket,
   detachSocket,
@@ -11,12 +13,17 @@ import {
 } from "../src/devices.js";
 
 const fakeSocket = () => ({ readyState: 1, OPEN: 1 });
+let userId;
 
-beforeEach(() => resetDevices());
+beforeEach(() => {
+  initDb(":memory:");
+  resetDevices();
+  userId = createUser({ username: "luis", password: "correct-horse" }).id;
+});
 
 test("a new device starts online without a position", () => {
-  attachSocket("phone", fakeSocket());
-  assert.deepEqual(serializeDevices(), [
+  attachSocket(userId, "phone", fakeSocket());
+  assert.deepEqual(serializeDevices(userId), [
     { deviceId: "phone", position: null, lastPing: null, status: "online", avatarUrl: null },
   ]);
 });
@@ -24,27 +31,37 @@ test("a new device starts online without a position", () => {
 test("reconnecting returns the socket that was replaced and keeps the position", () => {
   const first = fakeSocket();
   const second = fakeSocket();
-  attachSocket("phone", first);
-  updatePosition("phone", 1, 2);
+  attachSocket(userId, "phone", first);
+  updatePosition(userId, "phone", 1, 2);
 
-  const replaced = attachSocket("phone", second);
+  const replaced = attachSocket(userId, "phone", second);
 
   assert.equal(replaced, first);
-  assert.deepEqual(getDevice("phone").position, { latitude: 1, longitude: 2 });
-  assert.equal(getDevice("phone").status, "online");
+  assert.deepEqual(getDevice(userId, "phone").position, { latitude: 1, longitude: 2 });
+  assert.equal(getDevice(userId, "phone").status, "online");
 });
 
 test("closing an old socket does not mark a reconnected device offline", () => {
   const first = fakeSocket();
   const second = fakeSocket();
-  attachSocket("phone", first);
-  attachSocket("phone", second);
+  attachSocket(userId, "phone", first);
+  attachSocket(userId, "phone", second);
 
-  assert.equal(detachSocket("phone", first), false);
-  assert.equal(getDevice("phone").status, "online");
+  assert.equal(detachSocket(userId, "phone", first), false);
+  assert.equal(getDevice(userId, "phone").status, "online");
 
-  assert.equal(detachSocket("phone", second), true);
-  assert.equal(getDevice("phone").status, "offline");
+  assert.equal(detachSocket(userId, "phone", second), true);
+  assert.equal(getDevice(userId, "phone").status, "offline");
+});
+
+test("the same device name under two accounts stays two devices", () => {
+  const other = createUser({ username: "anna", password: "correct-horse" }).id;
+  attachSocket(userId, "phone", fakeSocket());
+  attachSocket(other, "phone", fakeSocket());
+  updatePosition(userId, "phone", 1, 2);
+
+  assert.equal(serializeDevices(userId).length, 1);
+  assert.equal(serializeDevices(other)[0].position, null);
 });
 
 test("timeAgo picks the largest fitting unit", () => {

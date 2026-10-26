@@ -5,7 +5,12 @@ services:
       - "3012:3012"
     environment:
       - PORT=3012
-      - PASSWORD=change-me
+      # - ALLOW_REGISTRATION=true
+    volumes:
+      - neopin-data:/app/data
     stdin_open: true
     tty: true
     restart: unless-stopped
+
+volumes:
+  neopin-data:
