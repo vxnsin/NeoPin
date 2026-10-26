@@ -1,0 +1,193 @@
+/* Dialogs for the account menu */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(8, 10, 14, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+.modal__card {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+  max-height: min(680px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 8px 20px;
+}
+
+.modal__head strong {
+  font-size: 17px;
+}
+
+.modal__body {
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+
+.rows {
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+}
+
+.row + .row {
+  border-top: 1px solid var(--border);
+}
+
+.row .avatar {
+  margin: 4px;
+}
+
+.row__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.row__text strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row__dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: var(--offline);
+}
+
+.row__dot[data-state="online"] {
+  background: var(--online);
+}
+
+.row__confirm {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.row__confirm span {
+  flex: 1;
+}
+
+.btn[hidden] {
+  display: none;
+}
+
+.btn--danger {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.btn--danger:hover {
+  background: var(--danger);
+  filter: brightness(0.9);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 11px;
+  font-weight: 700;
+  vertical-align: 1px;
+}
+
+.new-account {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+.banner {
+  position: fixed;
+  top: 84px;
+  left: 50%;
+  z-index: 11;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  font-size: 13.5px;
+  font-weight: 500;
+  transform: translateX(-50%);
+}
+
+.banner[hidden] {
+  display: none;
+}
+
+.banner .icon {
+  color: var(--brand);
+}
+
+@media (max-width: 767px) {
+  .banner {
+    top: 72px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .banner span {
+    flex: 1 1 200px;
+  }
+}

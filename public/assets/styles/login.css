@@ -341,3 +341,24 @@ form {
     padding: 28px 20px 24px;
   }
 }
+
+[hidden] {
+  display: none !important;
+}
+
+.field__label small {
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+
+.login__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}

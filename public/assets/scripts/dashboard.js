@@ -149,7 +149,8 @@ updateLabels();
 
 document.documentElement.addEventListener("themechange", (event) => {
   // Markers are DOM elements and survive the style swap.
-  map.setStyle(MAP_STYLES[event.detail]);
+  // No diffing: a diff would quietly remove the timeline's own source instead of reloading.
+  map.setStyle(MAP_STYLES[event.detail], { diff: false });
 });
 
 // Always above the pin, select() moves the map so there is room for it.
@@ -181,6 +182,17 @@ function mapPadding() {
   return { top: 120, bottom: 80, left: expanded ? box.right + 70 : 90, right: 110 };
 }
 
+// The map keeps the padding of its last move and adds new padding on top when it fits bounds.
+// Measuring against a flat map and then easing there keeps repeated fits right.
+function fitBoundsTo(bounds, padding, duration, maxZoom = 15) {
+  const kept = map.getPadding();
+  map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+  const camera = map.cameraForBounds(bounds, { padding, maxZoom });
+  map.setPadding(kept);
+  // With the padding set, the middle of the bounds belongs in the middle of the free area.
+  if (camera) map.easeTo({ center: bounds.getCenter(), zoom: camera.zoom, padding, duration });
+}
+
 function located() {
   return devices.filter((d) => d.position);
 }
@@ -198,7 +210,7 @@ function fitAll(animate) {
     return;
   }
   const bounds = points.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
-  map.fitBounds(bounds, { padding, maxZoom: 15, duration });
+  fitBoundsTo(bounds, padding, duration);
 }
 
 function pinHtml(device) {
@@ -400,7 +412,7 @@ function receive(list) {
   devices = list;
   if (selectedId && !devices.some((d) => d.deviceId === selectedId)) selectedId = null;
   render();
-  if (!fittedOnce && located().length > 0) {
+  if (!fittedOnce && located().length > 0 && !document.body.classList.contains("is-timeline")) {
     fittedOnce = true;
     fitAll(false);
   }
@@ -430,7 +442,13 @@ function connect() {
   });
   socket.addEventListener("close", (event) => {
     if (event.code === 4000) {
-      window.location.href = "/login";
+      // Also sent when the password changes elsewhere or here. A valid session just reconnects.
+      fetch("/api/me")
+        .then((response) => {
+          if (response.ok) reconnectTimer = setTimeout(connect, 500);
+          else window.location.href = "/login";
+        })
+        .catch(() => (reconnectTimer = setTimeout(connect, 3000)));
       return;
     }
     setStatus("offline");
