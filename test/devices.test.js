@@ -17,7 +17,7 @@ beforeEach(() => resetDevices());
 test("a new device starts online without a position", () => {
   attachSocket("phone", fakeSocket());
   assert.deepEqual(serializeDevices(), [
-    { deviceId: "phone", position: null, lastPing: null, status: "online" },
+    { deviceId: "phone", position: null, lastPing: null, status: "online", avatarUrl: null },
   ]);
 });
 

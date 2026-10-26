@@ -35,6 +35,8 @@ export const config = {
   loginRateLimit: { windowMs: 60 * 1000, max: 5 },
   // Wrong passwords over the WebSocket, per IP, before further attempts are refused.
   deviceAuthLimit: { windowMs: 60 * 1000, max: 10 },
+  // Profile picture uploads and downloads per IP, a whole family fits easily.
+  avatarRateLimit: { windowMs: 60 * 1000, max: 120 },
 };
 
 export function setPassword(newPassword) {
