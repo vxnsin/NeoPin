@@ -38,6 +38,15 @@ const ownerName = (device) => device.owner?.displayName || device.owner?.usernam
 // "Luis · iPhone"
 const fullName = (device) => (ownerName(device) ? `${ownerName(device)} · ${device.deviceId}` : device.deviceId);
 
+const TYPE_ICONS = { phone: "i-phone", tablet: "i-tablet", desktop: "i-laptop" };
+const TYPE_LABELS = { phone: "Phone", tablet: "Tablet", desktop: "Computer" };
+
+// Older servers send no type, those devices are phones.
+function typeIcon(device, extra = "") {
+  const type = TYPE_ICONS[device.deviceType] ? device.deviceType : "phone";
+  return `<svg class="icon dtype${extra}" role="img" aria-label="${TYPE_LABELS[type]}"><use href="#${TYPE_ICONS[type]}" /></svg>`;
+}
+
 function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -221,7 +230,7 @@ function fitAll(animate) {
 }
 
 function pinHtml(device) {
-  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
+  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}${typeIcon(device, " dtype--badge")}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
 }
 
 function syncMarkers() {
@@ -247,7 +256,7 @@ function syncMarkers() {
     }
 
     entry.marker.setLngLat(lngLat);
-    const key = `${state}|${device.avatarUrl}|${fullName(device)}`;
+    const key = `${state}|${device.deviceType}|${device.avatarUrl}|${fullName(device)}`;
     if (entry.key !== key) {
       entry.el.innerHTML = pinHtml(device);
       entry.el.dataset.state = state;
@@ -276,7 +285,7 @@ function popupHtml(device) {
         ${avatarHtml(device, "lg")}
         <div>
           <strong class="popup__name">${esc(fullName(device))}</strong>
-          <span class="popup__state">${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}</span>
+          <span class="popup__state">${typeIcon(device)}${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}</span>
         </div>
       </div>
       <p class="popup__coords">${coords}</p>
@@ -354,7 +363,7 @@ function renderPanel() {
             data-state="${freshness(device)}" data-located="${Boolean(device.position)}" aria-pressed="${selected}">
             ${avatarHtml(device)}
             <span class="device__text">
-              <span class="device__name">${esc(fullName(device))}${isOwn(device) ? ' <span class="own">you</span>' : ""}</span>
+              <span class="device__name">${typeIcon(device)}${esc(fullName(device))}${isOwn(device) ? ' <span class="own">you</span>' : ""}</span>
               <span class="device__meta">${esc(metaText(device))}</span>
             </span>
             <svg class="icon device__go" aria-hidden="true"><use href="#i-locate" /></svg>

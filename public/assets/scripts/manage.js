@@ -96,7 +96,7 @@ async function showDevices() {
         <li class="row" data-id="${esc(device.deviceId)}">
           <span class="row__dot" data-state="${device.status === "online" ? "online" : "offline"}"></span>
           <span class="row__text">
-            <strong>${esc(device.deviceId)}</strong>
+            <strong>${typeIcon(device)}${esc(device.deviceId)}</strong>
             <span>${esc(statusText(device))} · linked ${esc(new Date(device.linkedAt).toLocaleDateString())}</span>
           </span>
           <button class="btn btn--small btn--ghost" type="button" data-unlink>Unlink</button>

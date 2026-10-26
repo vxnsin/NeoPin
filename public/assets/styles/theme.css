@@ -338,3 +338,12 @@ input {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Device type glyph next to a name */
+.dtype {
+  width: 15px;
+  height: 15px;
+  margin-right: 5px;
+  color: var(--text-muted);
+  vertical-align: -2px;
+}
