@@ -54,7 +54,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .offline { --ring: ${STATE_COLORS.offline}; }
     .offline.avatar { background: ${STATE_COLORS.offline} !important; }
     .offline.avatar > * { filter: grayscale(1); opacity: .7; }
-    .pin .online.avatar::after { content: ""; position: absolute; inset: -4.5px; border-radius: 50%; border: 2px solid ${STATE_COLORS.online}; animation: ripple 2.4s ease-out infinite; will-change: transform, opacity; backface-visibility: hidden; }
+    .pin .online.avatar::after { content: ""; position: absolute; inset: -4.5px; border-radius: 50%; border: 2px solid ${STATE_COLORS.online}; animation: ripple 6s ease-out infinite; pointer-events: none; will-change: transform, opacity; backface-visibility: hidden; }
     #map.is-moving .pin .online.avatar::after, #map.is-moving .self::after { animation-play-state: paused; }
     .label { position: absolute; top: calc(100% + 9px); max-width: 140px; overflow: hidden; padding: 2px 8px; border-radius: 999px; background: var(--surface); color: var(--text);
       box-shadow: var(--shadow); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
@@ -62,7 +62,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .show-labels .label, .pin.selected .label { opacity: 1; transform: none; }
     .offline .label { color: var(--muted); }
     .self { width: 20px; height: 20px; border-radius: 50%; background: #d3171e; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15), 0 2px 8px rgba(0,0,0,.35); }
-    .self::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: #d3171e; opacity: .35; animation: halo 2s ease-out infinite; z-index: -1; will-change: transform, opacity; backface-visibility: hidden; }
+    .self::after { content: ""; position: absolute; inset: -3px; border-radius: 50%; background: #d3171e; opacity: .35; animation: halo 5s ease-out infinite; pointer-events: none; z-index: -1; will-change: transform, opacity; backface-visibility: hidden; }
 
     .maplibregl-popup-content { padding: 12px 14px; border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: var(--shadow); font: 13px/1.4 system-ui, sans-serif; }
     .maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--surface); }
@@ -75,8 +75,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .stop.active { z-index: 6; background: #0f172a; scale: 1.25; }
     .dark .stop.active { background: #fff; color: #0f172a; border-color: #0f172a; }
 
-    @keyframes ripple { from { transform: scale(1); opacity: .8; } to { transform: scale(1.45); opacity: 0; } }
-    @keyframes halo { from { transform: scale(1); opacity: .45; } to { transform: scale(2.6); opacity: 0; } }
+    @keyframes ripple { 0% { transform: scale(1); opacity: .75; } 25%, 100% { transform: scale(1.4); opacity: 0; } }
+    @keyframes halo { 0% { transform: scale(1); opacity: .4; } 30%, 100% { transform: scale(2.4); opacity: 0; } }
   </style>
 </head>
 <body>
