@@ -9,3 +9,5 @@ ios/Pods/
 .expo/
 dist/
 node_modules/
+.env
+.env.*
