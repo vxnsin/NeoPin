@@ -33,6 +33,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     :root.dark { --surface: #161a22; --text: #f1f4f9; --muted: #98a2b3; --bg: #0a0c10; --shadow: 0 8px 20px -8px rgba(0,0,0,.8), 0 1px 3px rgba(0,0,0,.4); }
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body, #map { height: 100%; width: 100%; background: var(--bg); font-family: system-ui, -apple-system, Roboto, sans-serif; }
+    .credit { position: absolute; left: 8px; bottom: calc(4px + ${bottom}px); z-index: 1; font: 10px system-ui, sans-serif; color: var(--muted); opacity: .75; pointer-events: none; }
     .maplibregl-ctrl-attrib { font-size: 10px; background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted); }
     .maplibregl-ctrl-attrib a { color: inherit; }
     .dark .maplibregl-ctrl-attrib-button { filter: invert(1); }
@@ -85,6 +86,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
 </head>
 <body>
   <div id="map"></div>
+  <div class="credit">© OpenStreetMap · OpenFreeMap</div>
   <script>
     var STYLES = ${JSON.stringify(MAP_STYLES)};
     var STALE_MS = ${STALE_AFTER_MS};
@@ -144,7 +146,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     }
     var map = new maplibregl.Map({
       container: "map", style: STYLES[dark ? "dark" : "light"], center: [10.45, 51.16], zoom: 4,
-      attributionControl: { compact: true }, dragRotate: false, pitchWithRotate: false
+      attributionControl: false, dragRotate: false, pitchWithRotate: false
     });
     if (dark) map.setStyle(STYLES.dark, { diff: false, transformStyle: transformStyle(true) });
     map.touchZoomRotate.disableRotation();
