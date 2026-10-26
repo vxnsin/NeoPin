@@ -165,7 +165,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     }
     var map = new maplibregl.Map({
       container: "map", style: STYLES[dark ? "dark" : "light"], center: [10.45, 51.16], zoom: 4,
-      attributionControl: false, dragRotate: false, pitchWithRotate: false
+      attributionControl: false, renderWorldCopies: false, minZoom: 1.5, dragRotate: false, pitchWithRotate: false
     });
     if (dark) map.setStyle(STYLES.dark, { diff: false, transformStyle: transformStyle(true) });
     map.touchZoomRotate.disableRotation();
