@@ -18,6 +18,7 @@ import {
   setPassword,
   setAvatar,
   unlinkDevice,
+  updateUser,
   userForToken,
   verifyLogin,
 } from "./accounts.js";
@@ -252,6 +253,24 @@ export function createApp({ gracefulShutdown = true } = {}) {
     return requested;
   }
 
+
+  // Shared by "edit my profile" and the admin editing someone else.
+  const ProfileBody = t.object({
+    username: t.string().max(64).optional(),
+    displayName: t.string().max(64).optional(),
+  });
+  function applyProfile(userId, body) {
+    try {
+      const updated = updateUser(userId, body);
+      broadcastDevices();
+      return publicUser(updated);
+    } catch (error) {
+      if (error.code === "taken") throw problem(409, "username-taken", error.message);
+      if (error.code === "invalid") throw problem(400, "invalid-account", error.message);
+      throw error;
+    }
+  }
+
   function linkedDevicesOf(userId) {
     return linkedDevices(userId).map((link) => {
       const live = getDevice(userId, link.deviceId);
@@ -460,6 +479,28 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
+      // The admin edits any account: name, username and, to help someone who is locked out, a new password.
+      api.patch(
+        "/users/:id",
+        {
+          body: ProfileBody.extend({ password: t.string().max(256).optional() }),
+          response: { 200: User, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem(), 409: t.problem() },
+        },
+        (ctx) => {
+          requireAdmin(ctx);
+          const id = Number(ctx.params.id);
+          if (!getUser(id)) throw problem(404, "unknown-user", "No such account");
+          const { password, ...profile } = ctx.body;
+          if (password !== undefined && password.length < 8) throw problem(400, "weak-password", "The password needs at least 8 characters");
+          const updated = applyProfile(id, profile);
+          if (password !== undefined) {
+            setPassword(id, password);
+            disconnectAccount(id, "Password changed");
+          }
+          return updated;
+        }
+      );
+
       api.delete(
         "/users/:id",
         { response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
@@ -473,6 +514,15 @@ export function createApp({ gracefulShutdown = true } = {}) {
           deleteUser(target.id);
           return reply(204);
         }
+      );
+
+      api.patch(
+        "/me",
+        {
+          body: ProfileBody,
+          response: { 200: User, 400: t.problem(), 401: t.problem(), 409: t.problem() },
+        },
+        (ctx) => applyProfile(currentUser(ctx).user.id, ctx.body)
       );
 
       api.post(

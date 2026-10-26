@@ -85,6 +85,25 @@ export function createUser({ username, password, displayName }) {
   return getUser(Number(result.lastInsertRowid));
 }
 
+// Changes the name and/or the username. Throws like createUser on a bad or taken username.
+export function updateUser(userId, { username, displayName }) {
+  const user = getUser(userId);
+  if (typeof username === "string" && username !== user.username) {
+    if (!USERNAME.test(username)) {
+      throw Object.assign(new Error("Username: 3 to 32 letters, digits, dot, dash or underscore"), { code: "invalid" });
+    }
+    const other = getUserByName(username);
+    if (other && other.id !== userId) throw Object.assign(new Error("Username already taken"), { code: "taken" });
+    getDb().prepare("UPDATE users SET username = ? WHERE id = ?").run(username, userId);
+  }
+  if (typeof displayName === "string") {
+    const name = displayName.trim().slice(0, 48);
+    if (!name) throw Object.assign(new Error("The name cannot be empty"), { code: "invalid" });
+    getDb().prepare("UPDATE users SET display_name = ? WHERE id = ?").run(name, userId);
+  }
+  return getUser(userId);
+}
+
 export function verifyLogin(username, password) {
   const user = typeof username === "string" ? getUserByName(username) : null;
   const ok = checkPassword(typeof password === "string" ? password : "", user ? user.password_hash : DUMMY_HASH);

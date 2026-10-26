@@ -221,3 +221,31 @@ test("only the admin may open the timeline and devices of another account", asyn
   assert.deepEqual((await devices.json()).map((d) => d.deviceId), ["phone"]);
   assert.equal((await fetch(`${s.baseUrl}/api/users/${luis.user.id}/devices`, { headers: { cookie: anna.cookie } })).status, 403);
 });
+
+test("everyone edits their own name and username, the admin edits anyone", async () => {
+  const luis = await s.account("luis");
+  const anna = await s.account("anna");
+  const patch = (route, body, cookie) =>
+    fetch(`${s.baseUrl}${route}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify(body),
+    });
+
+  const own = await patch("/api/me", { displayName: "Anna B.", username: "anna_b" }, anna.cookie);
+  assert.equal(own.status, 200);
+  assert.deepEqual([(await own.json()).displayName, (await (await fetch(`${s.baseUrl}/api/me`, { headers: { cookie: anna.cookie } })).json()).username], ["Anna B.", "anna_b"]);
+
+  assert.equal((await patch("/api/me", { username: "luis" }, anna.cookie)).status, 409);
+  assert.equal((await patch("/api/me", { username: "x" }, anna.cookie)).status, 400);
+  assert.equal((await patch("/api/me", { displayName: "  " }, anna.cookie)).status, 400);
+  assert.equal((await patch("/api/me", { displayName: "Nobody" }, undefined)).status, 401);
+
+  assert.equal((await patch(`/api/users/${luis.user.id}`, { displayName: "Boss" }, anna.cookie)).status, 403);
+  const edited = await patch(`/api/users/${anna.user.id}`, { displayName: "Anna K.", password: "a-reset-password" }, luis.cookie);
+  assert.equal(edited.status, 200);
+  assert.equal((await edited.json()).displayName, "Anna K.");
+  assert.equal((await s.post("/login", { username: "anna_b", password: "a-reset-password" })).status, 200);
+  assert.equal((await patch(`/api/users/999`, { displayName: "X" }, luis.cookie)).status, 404);
+  assert.equal((await patch(`/api/users/${anna.user.id}`, { password: "short" }, luis.cookie)).status, 400);
+});
