@@ -35,6 +35,7 @@ export function publicUser(row) {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    isAdmin: row.is_admin === 1,
     avatarUrl: row.avatar_b64 ? `/avatars/${row.id}?v=${row.avatar_version}` : null,
   };
 }
@@ -61,9 +62,11 @@ export function createUser({ username, password, displayName }) {
   }
   if (getUserByName(username)) throw Object.assign(new Error("Username already taken"), { code: "taken" });
   const name = (displayName ?? "").trim().slice(0, 48) || username;
+  // The first account runs the server: it may create and remove the others.
+  const admin = userCount() === 0 ? 1 : 0;
   const result = getDb()
-    .prepare("INSERT INTO users (username, display_name, password_hash, created_at) VALUES (?, ?, ?, ?)")
-    .run(username, name, hashPassword(password), new Date().toISOString());
+    .prepare("INSERT INTO users (username, display_name, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(username, name, hashPassword(password), admin, new Date().toISOString());
   return getUser(Number(result.lastInsertRowid));
 }
 
@@ -71,6 +74,23 @@ export function verifyLogin(username, password) {
   const user = typeof username === "string" ? getUserByName(username) : null;
   const ok = checkPassword(typeof password === "string" ? password : "", user ? user.password_hash : DUMMY_HASH);
   return user && ok ? user : null;
+}
+
+export function deleteUser(userId) {
+  getDb().prepare("DELETE FROM users WHERE id = ?").run(userId);
+}
+
+// Devices that logged in with this account, whether they are connected right now or not.
+export function linkedDevices(userId) {
+  return getDb()
+    .prepare("SELECT device_id, created_at FROM tokens WHERE user_id = ? ORDER BY created_at")
+    .all(userId)
+    .map((r) => ({ deviceId: r.device_id, linkedAt: r.created_at }));
+}
+
+export function unlinkDevice(userId, deviceId) {
+  const result = getDb().prepare("DELETE FROM tokens WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
+  return Number(result.changes) > 0;
 }
 
 export function setPassword(userId, password) {

@@ -82,6 +82,10 @@ export function timeAgo(timestamp) {
   return `${seconds} seconds ago`;
 }
 
+export function removeDevice(userId, deviceId) {
+  devices.delete(keyOf(userId, deviceId));
+}
+
 export function resetDevices() {
   devices.clear();
 }

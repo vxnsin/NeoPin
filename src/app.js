@@ -8,20 +8,26 @@ import {
   avatarFor,
   clearAvatar,
   createUser,
+  deleteUser,
   getUser,
   issueToken,
+  linkedDevices,
+  listUsers,
   publicUser,
   registrationOpen,
   revokeToken,
   setAvatar,
+  unlinkDevice,
   userForToken,
   verifyLogin,
 } from "./accounts.js";
 import {
+  allDevices,
   attachSocket,
   detachSocket,
   getDevice,
   onlineDevices,
+  removeDevice,
   serializeDevices,
   updatePosition,
 } from "./devices.js";
@@ -55,7 +61,16 @@ const User = t.object({
   id: t.number(),
   username: t.string(),
   displayName: t.string(),
+  isAdmin: t.boolean(),
   avatarUrl: t.string().nullable(),
+});
+
+const LinkedDevice = t.object({
+  deviceId: t.string(),
+  linkedAt: t.string(),
+  status: t.enum(["online", "offline"]),
+  lastPing: t.string().nullable(),
+  position: Position.nullable(),
 });
 
 const Visit = t.object({
@@ -218,6 +233,24 @@ export function createApp({ gracefulShutdown = true } = {}) {
     throw problem(401, "unauthorized", "Log in first");
   }
 
+  function requireAdmin(ctx) {
+    const { user } = currentUser(ctx);
+    if (!user.is_admin) throw problem(403, "forbidden", "Only the admin can do this");
+    return user;
+  }
+
+  function linkedDevicesOf(userId) {
+    return linkedDevices(userId).map((link) => {
+      const live = getDevice(userId, link.deviceId);
+      return {
+        ...link,
+        status: live?.status ?? "offline",
+        lastPing: live?.lastPing ?? null,
+        position: live?.position ?? null,
+      };
+    });
+  }
+
   const app = inkan({
     title: "NeoPin Server",
     version: config.version,
@@ -343,6 +376,73 @@ export function createApp({ gracefulShutdown = true } = {}) {
   app.register(
     (api) => {
       api.get("/me", { response: { 200: User, 401: t.problem() } }, (ctx) => publicUser(currentUser(ctx).user));
+
+      // Every device that is linked to the account, connected or not.
+      api.get("/devices", { response: { 200: t.array(LinkedDevice), 401: t.problem() } }, (ctx) =>
+        linkedDevicesOf(currentUser(ctx).user.id)
+      );
+
+      api.delete(
+        "/devices/:deviceId",
+        { response: { 204: t.empty(), 401: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          if (!unlinkDevice(user.id, ctx.params.deviceId)) throw problem(404, "unknown-device", "No such linked device");
+          getDevice(user.id, ctx.params.deviceId)?.socket?.close(CLOSE_POLICY, "Device removed");
+          removeDevice(user.id, ctx.params.deviceId);
+          broadcastDevices(user.id);
+          return reply(204);
+        }
+      );
+
+      // Account management, for the admin (the first account).
+      api.get(
+        "/users",
+        { response: { 200: t.array(User.extend({ devices: t.number() })), 401: t.problem(), 403: t.problem() } },
+        (ctx) => {
+          requireAdmin(ctx);
+          return listUsers().map((u) => ({ ...publicUser(u), devices: linkedDevices(u.id).length }));
+        }
+      );
+
+      api.post(
+        "/users",
+        {
+          body: t.object({
+            username: t.string().max(64),
+            password: t.string().max(256),
+            displayName: t.string().max(64).optional(),
+          }),
+          response: { 201: User, 400: t.problem(), 401: t.problem(), 403: t.problem(), 409: t.problem() },
+        },
+        (ctx) => {
+          requireAdmin(ctx);
+          try {
+            const user = createUser(ctx.body);
+            console.log(chalk.cyan(`[i] Account ${chalk.whiteBright(user.username)} created in the dashboard.`));
+            return reply(201, publicUser(user));
+          } catch (error) {
+            if (error.code === "taken") throw problem(409, "username-taken", error.message);
+            if (error.code === "invalid") throw problem(400, "invalid-account", error.message);
+            throw error;
+          }
+        }
+      );
+
+      api.delete(
+        "/users/:id",
+        { response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const admin = requireAdmin(ctx);
+          const target = getUser(Number(ctx.params.id));
+          if (!target) throw problem(404, "unknown-user", "No such account");
+          if (target.id === admin.id) throw problem(400, "own-account", "The admin cannot remove itself");
+          disconnectAccount(target.id, "Account removed");
+          for (const device of allDevices(target.id)) removeDevice(target.id, device.id);
+          deleteUser(target.id);
+          return reply(204);
+        }
+      );
 
       api.post(
         "/auth/logout",
@@ -562,6 +662,11 @@ export function createApp({ gracefulShutdown = true } = {}) {
     }
   );
 
+  function disconnectAccount(userId, reason) {
+    for (const device of onlineDevices(userId)) device.socket.close(CLOSE_POLICY, reason);
+    for (const [viewer, id] of viewers) if (userId === undefined || id === userId) viewer.close(CLOSE_POLICY, reason);
+  }
+
   return {
     app,
     broadcastDevices,
@@ -571,8 +676,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
     },
     // Closes every device socket and dashboard of one account, or of everyone.
     disconnectUser(userId, reason = "Logged out by server") {
-      for (const device of onlineDevices(userId)) device.socket.close(CLOSE_POLICY, reason);
-      for (const [viewer, id] of viewers) if (userId === undefined || id === userId) viewer.close(CLOSE_POLICY, reason);
+      disconnectAccount(userId, reason);
     },
     resetAuthFailures: () => authFailures.reset(),
     stop() {

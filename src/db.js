@@ -14,6 +14,7 @@ const SCHEMA = `
     avatar_b64 TEXT,
     avatar_type TEXT,
     avatar_version TEXT,
+    is_admin INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS tokens (
@@ -42,6 +43,11 @@ export function initDb(file = config.dbPath) {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
+  // Databases from before admins existed: the first account becomes the admin.
+  if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "is_admin")) {
+    db.exec("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+    db.exec("UPDATE users SET is_admin = 1 WHERE id = (SELECT MIN(id) FROM users)");
+  }
   return db;
 }
 

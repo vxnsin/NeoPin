@@ -98,3 +98,48 @@ test("every account sees only its own devices", async () => {
 
   assert.equal((await s.post("/api/sendPing", { deviceId: "phone" }, { cookie: annaCookie })).status, 200);
 });
+
+test("the admin creates and removes accounts from the dashboard, others cannot", async () => {
+  const luis = await s.account("luis");
+  const create = (body, cookie = luis.cookie) => s.post("/api/users", body, { cookie });
+
+  const made = await create({ username: "anna", password: PASSWORD, displayName: "Anna" });
+  assert.equal(made.status, 201);
+  const anna = await made.json();
+  assert.equal(anna.isAdmin, false);
+  assert.equal((await create({ username: "anna", password: PASSWORD })).status, 409);
+  assert.equal((await create({ username: "bo", password: PASSWORD })).status, 400);
+
+  const annaCookie = await s.cookieFor("anna");
+  assert.equal((await create({ username: "tom", password: PASSWORD }, annaCookie)).status, 403);
+  assert.equal((await fetch(`${s.baseUrl}/api/users`, { headers: { cookie: annaCookie } })).status, 403);
+
+  const users = await (await fetch(`${s.baseUrl}/api/users`, { headers: { cookie: luis.cookie } })).json();
+  assert.deepEqual(users.map((u) => [u.username, u.isAdmin]), [["luis", true], ["anna", false]]);
+
+  const self = await fetch(`${s.baseUrl}/api/users/${luis.user.id}`, { method: "DELETE", headers: { cookie: luis.cookie } });
+  assert.equal(self.status, 400);
+  const removed = await fetch(`${s.baseUrl}/api/users/${anna.id}`, { method: "DELETE", headers: { cookie: luis.cookie } });
+  assert.equal(removed.status, 204);
+  assert.equal((await fetch(`${s.baseUrl}/api/me`, { headers: { cookie: annaCookie } })).status, 401);
+  assert.equal((await s.post("/login", { username: "anna", password: PASSWORD })).status, 401);
+});
+
+test("linked devices are listed with their state and can be unlinked", async () => {
+  const luis = await s.account("luis");
+  const phone = await s.device("luis", "phone", luis.token);
+  await phone.next();
+  await s.tokenFor("luis", "tablet");
+
+  const list = async () => (await fetch(`${s.baseUrl}/api/devices`, { headers: { cookie: luis.cookie } })).json();
+  const linked = await list();
+  assert.deepEqual(linked.map((d) => [d.deviceId, d.status]), [["phone", "online"], ["tablet", "offline"]]);
+  assert.ok(linked[0].linkedAt);
+
+  const gone = await fetch(`${s.baseUrl}/api/devices/phone`, { method: "DELETE", headers: { cookie: luis.cookie } });
+  assert.equal(gone.status, 204);
+  assert.equal((await phone.closed).code, 4000);
+  assert.deepEqual((await list()).map((d) => d.deviceId), ["tablet"]);
+  assert.equal((await fetch(`${s.baseUrl}/api/me`, { headers: deviceHeaders("phone", luis.token) })).status, 401);
+  assert.equal((await fetch(`${s.baseUrl}/api/devices/ghost`, { method: "DELETE", headers: { cookie: luis.cookie } })).status, 404);
+});
