@@ -855,20 +855,17 @@ body.is-timeline .maplibregl-popup {
   margin: 0 8px 8px 0;
 }
 
-.maplibregl-ctrl-attrib,
-.maplibregl-ctrl-attrib-inner,
-.maplibregl-ctrl-attrib a {
-  background: var(--surface) !important;
-  color: var(--text-muted) !important;
-}
-
-.maplibregl-ctrl-attrib-inner,
-.maplibregl-ctrl-attrib a {
-  background: none !important;
-}
-
-:root[data-theme="dark"] .maplibregl-ctrl-attrib-button {
-  filter: invert(1);
+/* The credit line replaces the "i" button: the map data licenses ask for a visible credit. */
+.map-credit {
+  position: fixed;
+  right: 12px;
+  bottom: 6px;
+  z-index: 1;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  opacity: 0.8;
+  pointer-events: none;
 }
 
 /* Toast */

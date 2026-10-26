@@ -170,7 +170,7 @@ const map = new maplibregl.Map({
   style: MAP_STYLES[window.neopinTheme.get()],
   center: [10.45, 51.16],
   zoom: 5,
-  attributionControl: { compact: true },
+  attributionControl: false,
   dragRotate: false,
   pitchWithRotate: false,
 });
