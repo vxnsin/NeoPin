@@ -116,7 +116,8 @@ test("dashboard login issues a session cookie and rejects wrong passwords", asyn
 
   const data = await fetch(`${s.baseUrl}/api/getData`, { headers: { cookie: cookie.split(";")[0] } });
   assert.equal(data.status, 200);
-  assert.deepEqual(await data.json(), []);
+  const listed = await data.json();
+  assert.deepEqual(listed.map((d) => [d.deviceId, d.status]), [["phone", "offline"]], "the linked device shows before it connects");
 
   assert.equal((await fetch(`${s.baseUrl}/api/getData`)).status, 401);
 });

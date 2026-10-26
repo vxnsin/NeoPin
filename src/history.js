@@ -35,6 +35,14 @@ export function positionsBetween(userId, deviceId, from, to) {
     .all(userId, deviceId, from, to);
 }
 
+export function lastPosition(userId, deviceId) {
+  return (
+    getDb()
+      .prepare("SELECT ts, lat, lon FROM positions WHERE user_id = ? AND device_id = ? ORDER BY ts DESC LIMIT 1")
+      .get(userId, deviceId) ?? null
+  );
+}
+
 // Local calendar days that have any data, newest first.
 export function daysWithData(userId, deviceId, tzOffsetMin, limit = 120) {
   const shiftSeconds = Math.round((-tzOffsetMin * 60_000) / 1000);

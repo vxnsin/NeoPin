@@ -1,4 +1,5 @@
-import { getUser, linkedDevices, publicUser } from "./accounts.js";
+import { getUser, linkedDevices, listUsers, publicUser } from "./accounts.js";
+import { lastPosition } from "./history.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
 // account and its name, so two people may both own an "iPhone". A record outlives
@@ -55,22 +56,35 @@ export function updatePosition(userId, deviceId, latitude, longitude) {
 
 // Everyone signed in sees every device. The picture and the name belong to the
 // account that owns the device, so all devices of one person look alike.
+// The list is built from the linked devices in the database, so it survives a server
+// restart: a device that has not connected yet shows as offline with its last stored
+// position. A device whose login was revoked is gone unless it is still connected.
 export function serializeDevices() {
-  const owners = new Map();
-  const ownerOf = (userId) => {
-    if (!owners.has(userId)) owners.set(userId, publicUser(getUser(userId)));
-    return owners.get(userId);
-  };
-  // A device whose login was revoked (logout, password change, unlink) is gone from the list
-  // unless it is still connected.
-  const linked = new Map();
-  const isLinked = (d) => {
-    if (!linked.has(d.userId)) linked.set(d.userId, new Set(linkedDevices(d.userId).map((l) => l.deviceId)));
-    return linked.get(d.userId).has(d.id);
-  };
-  return allDevices().filter((d) => d.status === "online" || isLinked(d)).map((d) => {
-    const owner = ownerOf(d.userId);
-    return {
+  const rows = new Map();
+
+  for (const user of listUsers()) {
+    const owner = publicUser(user);
+    for (const link of linkedDevices(user.id)) {
+      const live = devices.get(keyOf(user.id, link.deviceId));
+      const stored = live?.position ? null : lastPosition(user.id, link.deviceId);
+      rows.set(keyOf(user.id, link.deviceId), {
+        deviceId: link.deviceId,
+        userId: user.id,
+        owner: { username: owner.username, displayName: owner.displayName },
+        position: live?.position ?? (stored ? { latitude: stored.lat, longitude: stored.lon } : null),
+        lastPing: live?.lastPing ?? (stored ? new Date(stored.ts).toISOString() : null),
+        status: live?.status ?? "offline",
+        avatarUrl: owner.avatarUrl,
+        deviceType: live?.deviceType ?? link.deviceType ?? "phone",
+      });
+    }
+  }
+
+  // Connected devices without a stored login (should not happen, but never hide a live one).
+  for (const d of allDevices()) {
+    if (d.status !== "online" || rows.has(keyOf(d.userId, d.id))) continue;
+    const owner = publicUser(getUser(d.userId));
+    rows.set(keyOf(d.userId, d.id), {
       deviceId: d.id,
       userId: d.userId,
       owner: { username: owner?.username ?? "", displayName: owner?.displayName ?? "" },
@@ -79,8 +93,9 @@ export function serializeDevices() {
       status: d.status,
       avatarUrl: owner?.avatarUrl ?? null,
       deviceType: d.deviceType ?? "phone",
-    };
-  });
+    });
+  }
+  return [...rows.values()];
 }
 
 export function timeAgo(timestamp) {

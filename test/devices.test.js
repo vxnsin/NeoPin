@@ -100,3 +100,18 @@ test("a device that is offline and no longer linked drops out of the list", asyn
   setPassword(userId, "another-password");
   assert.equal(serializeDevices().length, 0, "login revoked");
 });
+
+test("linked devices are listed after a restart with their last stored position", async () => {
+  const { issueToken } = await import("../src/accounts.js");
+  const { recordPosition } = await import("../src/history.js");
+  issueToken(userId, "phone", "tablet");
+  recordPosition(userId, "phone", 48.1, 11.5, Date.UTC(2025, 5, 10, 9));
+  resetDevices(); // what a restart does to the in-memory registry
+
+  const [device] = serializeDevices();
+  assert.equal(device.deviceId, "phone");
+  assert.equal(device.status, "offline");
+  assert.equal(device.deviceType, "tablet");
+  assert.deepEqual(device.position, { latitude: 48.1, longitude: 11.5 });
+  assert.equal(device.lastPing, "2025-06-10T09:00:00.000Z");
+});
