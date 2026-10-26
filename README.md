@@ -24,12 +24,12 @@ Every phone runs the NeoPin app and connects to your server over a WebSocket, au
 flowchart LR
     A[📱 Phone A<br/>NeoPin app] <-- WebSocket --> S[(🖥️ NeoPin Server<br/>Node.js + inkan)]
     B[📱 Phone B<br/>NeoPin app] <-- WebSocket --> S
-    S <-- WebSocket + session cookie --> D[🌐 Web dashboard<br/>Leaflet map]
+    S <-- WebSocket + session cookie --> D[🌐 Web dashboard<br/>MapLibre map]
 ```
 
 The app sends its position when it moves and answers when the server asks for a fresh one. On Android a foreground service keeps the connection alive in the background, on iOS the system wakes a background location task. How often positions are sent is up to you: battery saver, balanced or precise.
 
-On the map a device is green while it is online, yellow when its last position is older than ten minutes and grey once it is offline.
+App and dashboard draw the same map, vector tiles from [OpenFreeMap](https://openfreemap.org) on MapLibre, light or dark with the system. Every device is a round picture or its initials, inside a ring that is green while it reports, yellow once its last position is older than ten minutes and grey when it is offline. Zoom in far enough and the names show under the pins. Like in Find My, the bar at the bottom opens the list of all devices, and the gear holds your profile picture, the update presets and the logout.
 
 Nothing is written to disk and no third-party service sees your positions. Restart the server and everything is gone.
 
@@ -143,7 +143,7 @@ themes/               # light and dark palettes
 __tests__/            # Jest tests
 ```
 
-`npm test` runs the tests for the socket client (login, reconnect, queue, heartbeat) against a fake WebSocket.
+`npm test` runs the tests for the socket client (login, reconnect, queue, heartbeat) against a fake WebSocket and for the profile picture upload.
 
 ## Roadmap
 
