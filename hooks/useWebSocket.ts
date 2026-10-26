@@ -10,8 +10,8 @@ export function useWebSocket() {
   useEffect(() => socket.onStatus(setIsConnected), []);
 
   const connect = useCallback(
-    (url: string, deviceId: string, password: string, options?: ConnectOptions) =>
-      socket.connect(url, deviceId, password, options),
+    (url: string, deviceId: string, token: string, options?: ConnectOptions) =>
+      socket.connect(url, deviceId, token, options),
     []
   );
   const close = useCallback(() => socket.close(), []);

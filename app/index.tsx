@@ -42,10 +42,11 @@ export default function Index() {
         return;
       }
       try {
-        if (!socket.connected) await connect(creds.serverIp, creds.deviceId, creds.password);
+        if (!socket.connected) await connect(creds.serverIp, creds.deviceId, creds.token);
         if (active) router.replace("/map");
       } catch (error: any) {
-        if (!active) return;
+        // A refused token already sent the user back to the login.
+        if (!active || socket.rejected) return;
         router.replace({
           pathname: "/error",
           params: {

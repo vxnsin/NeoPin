@@ -1,29 +1,14 @@
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
-import type { StoredCredentials } from "@/lib/socket";
+import { deviceHeaders, httpBase, type DeviceAuth } from "@/lib/api";
+
+export { deviceHeaders, httpBase };
 
 export const AVATAR_SIZE = 128;
 // The server takes no more than this. A 128 px JPEG is a few KiB.
 export const AVATAR_MAX_BYTES = 16 * 1024;
 
-type Credentials = Pick<StoredCredentials, "serverIp" | "deviceId" | "password">;
-
-// The login stores the socket address. The HTTP routes live on the same host and path.
-export function httpBase(socketUrl: string): string {
-  return socketUrl
-    .trim()
-    .replace(/^ws(s?):\/\//i, (_, secure) => (secure ? "https://" : "http://"))
-    .replace(/\/+$/, "");
-}
-
-// Header values have to stay ASCII, device names like "Luis’ iPhone" do not.
-// The server decodes both.
-export function deviceHeaders(creds: Credentials): Record<string, string> {
-  return {
-    "X-Device-Id": encodeURIComponent(creds.deviceId),
-    Authorization: `Bearer ${encodeURIComponent(creds.password)}`,
-  };
-}
+type Credentials = DeviceAuth;
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -47,9 +32,9 @@ export function base64ToBytes(base64: string): Uint8Array {
 function problemMessage(status: number): string {
   switch (status) {
     case 401:
-      return "The server did not accept the password.";
+      return "Your login is no longer valid. Log in again.";
     case 404:
-      return "The server does not know this device yet. Connect first.";
+      return "The server does not know this picture.";
     case 413:
       return "The picture is too large.";
     case 415:

@@ -1,20 +1,21 @@
 export type Message = Record<string, any>;
 export type MessageListener = (data: Message) => void;
 export type StatusListener = (connected: boolean) => void;
+export type RejectedListener = () => void;
 export type ConnectOptions = { autoReconnect?: boolean };
 
 const HEARTBEAT_MS = 25_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MS = 30_000;
 const MAX_QUEUE = 50;
-// The server closes with this code when the password is wrong or it kicked the device.
+// The server closes with this code when the token is invalid or it kicked the device.
 const CLOSE_POLICY = 4000;
 
-type Credentials = { url: string; deviceId: string; password: string };
+type Credentials = { url: string; deviceId: string; token: string };
 
 export class SocketClient {
   connected = false;
-  // Set when the server refused us. Retrying with the same password is pointless
+  // Set when the server refused us. Retrying with the same token is pointless
   // until the user logs in again.
   rejected = false;
 
@@ -27,6 +28,7 @@ export class SocketClient {
   private queue: Message[] = [];
   private listeners: MessageListener[] = [];
   private statusListeners: StatusListener[] = [];
+  private rejectedListeners: RejectedListener[] = [];
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -34,8 +36,8 @@ export class SocketClient {
     return this.reconnectTimer !== null;
   }
 
-  connect(url: string, deviceId: string, password: string, options?: ConnectOptions): Promise<void> {
-    this.credentials = { url, deviceId, password };
+  connect(url: string, deviceId: string, token: string, options?: ConnectOptions): Promise<void> {
+    this.credentials = { url, deviceId, token };
     this.autoReconnect = options?.autoReconnect ?? true;
     this.closedManually = false;
     this.rejected = false;
@@ -79,10 +81,17 @@ export class SocketClient {
     };
   }
 
+  onRejected(listener: RejectedListener): () => void {
+    this.rejectedListeners.push(listener);
+    return () => {
+      this.rejectedListeners = this.rejectedListeners.filter((l) => l !== listener);
+    };
+  }
+
   private open(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.credentials) return reject(new Error("No credentials"));
-      const { url, deviceId, password } = this.credentials;
+      const { url, deviceId, token } = this.credentials;
 
       this.stopHeartbeat();
       const previous = this.socket;
@@ -110,7 +119,7 @@ export class SocketClient {
       }, AUTH_TIMEOUT_MS);
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "authenticate", deviceId, password }));
+        ws.send(JSON.stringify({ type: "authenticate", deviceId, token }));
       };
 
       ws.onmessage = (event) => {
@@ -131,7 +140,7 @@ export class SocketClient {
             settle(resolve);
           } else {
             this.closedManually = true;
-            this.rejected = true;
+            this.markRejected();
             settle(() => reject(new Error("Authentication failed")));
             ws.close();
           }
@@ -151,7 +160,7 @@ export class SocketClient {
         this.socket = null;
         this.stopHeartbeat();
         this.setConnected(false);
-        if (event.code === CLOSE_POLICY) this.rejected = true;
+        if (event.code === CLOSE_POLICY) this.markRejected();
         settle(() => reject(new Error(event.reason || `Connection closed (${event.code})`)));
 
         if (!this.closedManually && !this.rejected && this.autoReconnect && this.everConnected) {
@@ -159,6 +168,13 @@ export class SocketClient {
         }
       };
     });
+  }
+
+  // The login is no longer valid, whoever listens takes the user back to the login.
+  private markRejected() {
+    if (this.rejected) return;
+    this.rejected = true;
+    this.rejectedListeners.forEach((listener) => listener());
   }
 
   private scheduleReconnect() {

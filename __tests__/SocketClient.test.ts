@@ -74,7 +74,7 @@ test("authenticates after the socket opens and resolves on success", async () =>
   const ws = await connectAndAuthenticate(client);
 
   expect(ws.url).toBe("ws://server");
-  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", password: "secret" });
+  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", token: "secret" });
   expect(client.connected).toBe(true);
 });
 
@@ -129,7 +129,7 @@ test("queues messages while offline and flushes them after authentication", asyn
   const ws = await connectAndAuthenticate(client);
 
   expect(ws.sent).toEqual([
-    { type: "authenticate", deviceId: "phone", password: "secret" },
+    { type: "authenticate", deviceId: "phone", token: "secret" },
     { type: "updatePosition", latitude: 1, longitude: 2 },
   ]);
 });
@@ -165,4 +165,29 @@ test("delivers server messages to listeners but swallows pong", async () => {
   ws.receive({ type: "requestLocation", from: "dashboard" });
 
   expect(received).toEqual([{ type: "requestLocation", from: "dashboard" }]);
+});
+
+test("authenticates with the token and tells listeners when it is refused", async () => {
+  const client = new SocketClient();
+  const refused = jest.fn();
+  client.onRejected(refused);
+  const ws = await connectAndAuthenticate(client);
+  expect(ws.sent[0]).toEqual({ type: "authenticate", deviceId: "phone", token: "secret" });
+
+  ws.close(4000, "Unauthorized");
+  expect(refused).toHaveBeenCalledTimes(1);
+  jest.advanceTimersByTime(60_000);
+  expect(FakeWebSocket.instances).toHaveLength(1);
+});
+
+test("a refused login at connect time notifies as well", async () => {
+  const client = new SocketClient();
+  const refused = jest.fn();
+  client.onRejected(refused);
+  const promise = client.connect("ws://server", "phone", "bad");
+  const ws = FakeWebSocket.latest();
+  ws.open();
+  ws.receive({ successful: false });
+  await expect(promise).rejects.toThrow();
+  expect(refused).toHaveBeenCalledTimes(1);
 });

@@ -18,7 +18,7 @@ const keepAlive = async () => {
       const creds = await readCredentials();
       if (!creds) break;
       try {
-        await socket.connect(creds.serverIp, creds.deviceId, creds.password);
+        await socket.connect(creds.serverIp, creds.deviceId, creds.token);
       } catch (error: any) {
         console.warn("Background connect failed:", error?.message);
       }

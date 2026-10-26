@@ -46,7 +46,7 @@ function pushOnce(creds: StoredCredentials, message: Record<string, unknown>): P
     };
 
     ws.onopen = () =>
-      ws.send(JSON.stringify({ type: "authenticate", deviceId: creds.deviceId, password: creds.password }));
+      ws.send(JSON.stringify({ type: "authenticate", deviceId: creds.deviceId, token: creds.token }));
     ws.onmessage = (event) => {
       try {
         const reply = JSON.parse(event.data);

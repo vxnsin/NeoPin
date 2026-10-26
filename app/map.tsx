@@ -8,8 +8,11 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
-import { WebView } from "react-native-webview";
+import { WebView as NativeWebView, type WebViewMessageEvent } from "react-native-webview";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,18 +22,35 @@ import { useAvatars } from "@/hooks/useAvatars";
 import { useWebSocketContext } from "@/context/WebSocket";
 import Avatar from "@/components/Avatar";
 import PulseLogo from "@/components/PulseLogo";
+import TimelinePanel from "@/components/TimelinePanel";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
 import { STATE_COLORS, freshness, type Device } from "@/lib/devices";
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, type StoredCredentials } from "@/lib/socket";
+import { updateStoredUser } from "@/lib/credentials";
+import { fetchMe, type User } from "@/lib/api";
 import {
   REPORTING_PRESETS,
   getReportingPreset,
   setReportingPreset,
   type ReportingPreset,
 } from "@/lib/settings";
+
+type MapWebViewHandle = { postMessage: (message: string) => void };
+type MapWebViewProps = {
+  ref?: React.Ref<MapWebViewHandle>;
+  source: { html: string };
+  style: StyleProp<ViewStyle>;
+  onLoad: () => void;
+  originWhitelist: string[];
+  geolocationEnabled: boolean;
+  onMessage: (event: WebViewMessageEvent) => void;
+};
+
+// The package's own props type collapses to never with this TypeScript version.
+const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
 const STATE_ORDER = { online: 0, stale: 1, offline: 2 };
 
@@ -41,20 +61,32 @@ export default function MapScreen() {
   const c = theme.colors;
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { emit, addMessageListener, isConnected } = useWebSocketContext();
 
-  const webviewRef = useRef<WebView>(null);
+  const webviewRef = useRef<MapWebViewHandle>(null);
   const [webViewLoaded, setWebViewLoaded] = useState(false);
   const [minLoadingTimeFinished, setMinLoadingTimeFinished] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [, setTick] = useState(0);
   const requestedOnce = useRef(false);
-  const avatarFor = useAvatars(devices, creds);
+  const user = creds?.user ?? null;
+  // The account picture is the one every device of it shows. It loads even before the own device is listed.
+  const avatarSources = useMemo<Device[]>(
+    () =>
+      user?.avatarUrl
+        ? [...devices, { deviceId: "", position: null, lastPing: null, status: "offline", avatarUrl: user.avatarUrl }]
+        : devices,
+    [devices, user?.avatarUrl]
+  );
+  const avatarFor = useAvatars(avatarSources, creds);
   // Built once, later theme changes go in as messages so the map does not reload.
   const mapHtml = useMemo(() => buildMapHtml(theme.isDark, insets.bottom), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -63,7 +95,18 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
-    readCredentials().then(setCreds);
+    readCredentials().then((stored) => {
+      setCreds(stored);
+      // The picture or name may have changed on the dashboard.
+      if (stored) {
+        fetchMe(stored)
+          .then((fresh) => {
+            setCreds((current) => (current ? { ...current, user: fresh } : current));
+            updateStoredUser(fresh).catch(() => {});
+          })
+          .catch(() => {});
+      }
+    });
     const timer = setTimeout(() => setMinLoadingTimeFinished(true), 1200);
     return () => clearTimeout(timer);
   }, []);
@@ -135,6 +178,13 @@ export default function MapScreen() {
     await setReportingPreset(next);
   };
 
+  const changeUser = (patch: Partial<User>) => {
+    if (!creds) return;
+    const next = { ...creds.user, ...patch };
+    setCreds({ ...creds, user: next });
+    updateStoredUser(next).catch(() => {});
+  };
+
   const changePhoto = async () => {
     if (!creds || photoBusy) return;
     setPhotoError("");
@@ -142,7 +192,10 @@ export default function MapScreen() {
     try {
       const jpeg = await pickAvatar();
       // The server sends the new avatarUrl to everyone, this screen included.
-      if (jpeg) await uploadAvatar(creds, jpeg);
+      if (jpeg) {
+        const avatarUrl = await uploadAvatar(creds, jpeg);
+        changeUser({ avatarUrl });
+      }
     } catch (error: any) {
       setPhotoError(error?.message || "The photo could not be saved.");
     } finally {
@@ -156,6 +209,7 @@ export default function MapScreen() {
     setPhotoBusy(true);
     try {
       await removeAvatar(creds);
+      changeUser({ avatarUrl: null });
     } catch (error: any) {
       setPhotoError(error?.message || "The photo could not be removed.");
     } finally {
@@ -170,6 +224,8 @@ export default function MapScreen() {
   };
 
   const me = devices.find((d) => d.deviceId === creds?.deviceId);
+  const profileAvatar = user?.avatarUrl ?? null;
+  const panelHeight = Math.round(windowHeight * 0.55);
   const sorted = [...devices].sort(
     (a, b) =>
       Number(b.deviceId === creds?.deviceId) - Number(a.deviceId === creds?.deviceId) ||
@@ -229,6 +285,7 @@ export default function MapScreen() {
           try {
             const data = JSON.parse(event.nativeEvent.data);
             if (data.type === "error") console.warn("Map:", data.message);
+            else if (data.type === "segment" && typeof data.index === "number") setMapTap({ index: data.index, n: Date.now() });
           } catch {
             // ignore
           }
@@ -236,6 +293,7 @@ export default function MapScreen() {
       />
 
       {/* The device bar, like the one at the bottom of Apple's Find My. */}
+      {!timelineOpen && (
       <Pressable
         style={[styles.bar, { bottom: insets.bottom + 12, backgroundColor: c.raised }]}
         onPress={() => setSheet("devices")}
@@ -257,6 +315,14 @@ export default function MapScreen() {
         </View>
         <Pressable
           style={[styles.gear, { backgroundColor: c.subtle }]}
+          onPress={() => setTimelineOpen(true)}
+          hitSlop={6}
+          accessibilityLabel="Timeline"
+        >
+          <MaterialIcons name="timeline" size={20} color={c.primary} />
+        </Pressable>
+        <Pressable
+          style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setSheet("settings")}
           hitSlop={6}
           accessibilityLabel="Settings"
@@ -264,6 +330,19 @@ export default function MapScreen() {
           <MaterialIcons name="settings" size={20} color={c.primary} />
         </Pressable>
       </Pressable>
+      )}
+
+      {timelineOpen && creds && (
+        <TimelinePanel
+          creds={creds}
+          devices={devices}
+          avatarFor={avatarFor}
+          post={post}
+          height={panelHeight}
+          mapTap={mapTap}
+          onClose={() => setTimelineOpen(false)}
+        />
+      )}
 
       <Modal visible={sheet !== null} transparent animationType="slide" onRequestClose={() => setSheet(null)}>
         <Pressable style={styles.backdrop} onPress={() => setSheet(null)} />
@@ -309,8 +388,8 @@ export default function MapScreen() {
               <View style={[styles.profile, { backgroundColor: c.subtle }]}>
                 <Pressable onPress={changePhoto} accessibilityLabel="Change your profile photo" disabled={photoBusy}>
                   <Avatar
-                    name={creds.deviceId}
-                    uri={avatarFor(me?.avatarUrl)}
+                    name={creds.user.displayName}
+                    uri={avatarFor(profileAvatar)}
                     state={me ? freshness(me) : "offline"}
                     size={52}
                     gapColor={c.subtle}
@@ -325,13 +404,16 @@ export default function MapScreen() {
                 </Pressable>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
-                    {creds.deviceId}
+                    {creds.user.displayName}
+                  </Text>
+                  <Text style={[styles.deviceMeta, { color: c.muted }]} numberOfLines={1}>
+                    @{creds.user.username} · {creds.deviceId}
                   </Text>
                   <View style={styles.profileActions}>
                     <Pressable onPress={changePhoto} disabled={photoBusy} hitSlop={8}>
-                      <Text style={[styles.link, { color: c.secondary }]}>{me?.avatarUrl ? "Change photo" : "Add a photo"}</Text>
+                      <Text style={[styles.link, { color: c.secondary }]}>{profileAvatar ? "Change photo" : "Add a photo"}</Text>
                     </Pressable>
-                    {me?.avatarUrl ? (
+                    {profileAvatar ? (
                       <Pressable onPress={deletePhoto} disabled={photoBusy} hitSlop={8}>
                         <Text style={[styles.link, { color: c.muted }]}>Remove</Text>
                       </Pressable>
@@ -362,7 +444,7 @@ export default function MapScreen() {
 
               <Pressable style={[styles.logout, { backgroundColor: c.subtle }]} onPress={logout}>
                 <MaterialIcons name="logout" size={20} color={c.secondary} />
-                <Text style={[styles.logoutText, { color: c.secondary }]}>Disconnect and log out</Text>
+                <Text style={[styles.logoutText, { color: c.secondary }]}>Log out</Text>
               </Pressable>
             </>
           )}

@@ -14,7 +14,11 @@ const BAR_HEIGHT = 96;
 
 // The map page inside the WebView. React Native talks to it with postMessage:
 // { type: "devices", devices }, { type: "self", latitude, longitude, center },
-// { type: "focus", deviceId } and { type: "theme", dark }.
+// { type: "focus", deviceId } and { type: "theme", dark }. The timeline adds
+// { type: "route", segments, bottom } to draw a day (trip lines and numbered stops),
+// { type: "routeFocus", index } to zoom to one segment (null for the whole day)
+// and { type: "routeClear" } to go back to the live pins. The map answers a tap on
+// a stop or a line with { type: "segment", index }.
 export function buildMapHtml(dark: boolean, bottomInset = 0): string {
   const bottom = BAR_HEIGHT + bottomInset;
   return `<!DOCTYPE html>
@@ -62,6 +66,12 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     .popup b { display: block; max-width: 200px; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
     .popup span { color: var(--muted); font-size: 12px; }
 
+    .route-mode .pin { display: none; }
+    .stop { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 2.5px solid #fff; border-radius: 50%; background: #d3171e; color: #fff;
+      box-shadow: var(--shadow); font: 700 13px system-ui, sans-serif; transition: transform .15s; }
+    .stop.active { z-index: 6; background: #0f172a; transform: scale(1.25); }
+    .dark .stop.active { background: #fff; color: #0f172a; border-color: #0f172a; }
+
     @keyframes ripple { from { transform: scale(1); opacity: .8; } to { transform: scale(1.45); opacity: 0; } }
     @keyframes halo { from { transform: scale(1); opacity: .45; } to { transform: scale(2.6); opacity: 0; } }
   </style>
@@ -77,6 +87,9 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     var selfMarker = null;
     var selectedId = null;
     var devices = [];
+    // The day shown by the timeline: { segments, bottom, active }.
+    var route = null;
+    var stops = [];
     // Room above a chosen device for its popup, and below for the app's buttons.
     var PADDING = { top: 220, bottom: ${bottom + 30}, left: 40, right: 40 };
     document.documentElement.classList.toggle("dark", dark);
@@ -187,6 +200,96 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       }
     }
 
+    function lngLat(p) { return [p[1], p[0]]; }
+    function routeData() {
+      return {
+        type: "FeatureCollection",
+        features: route.segments.filter(function (s) { return s.type === "trip"; }).map(function (s) {
+          return {
+            type: "Feature",
+            properties: { color: s.color, index: s.index, active: s.index === route.active ? 1 : 0 },
+            geometry: { type: "LineString", coordinates: s.path.map(lngLat) }
+          };
+        })
+      };
+    }
+    // A style change (theme) drops the source and layers, so this runs again on style.load.
+    function drawLines() {
+      if (!route) return;
+      try {
+        var source = map.getSource("route");
+        if (source) { source.setData(routeData()); return; }
+        map.addSource("route", { type: "geojson", data: routeData() });
+        var width = function (a, b) { return ["case", ["==", ["get", "active"], 1], a, b]; };
+        map.addLayer({ id: "route-casing", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": dark ? "#0a0c10" : "#ffffff", "line-width": width(11, 8), "line-opacity": 0.9 } });
+        map.addLayer({ id: "route-line", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": ["get", "color"], "line-width": width(7, 4.5) } });
+      } catch (e) { /* the style is still loading, style.load tries again */ }
+    }
+    function removeLines() {
+      try {
+        ["route-line", "route-casing"].forEach(function (id) { if (map.getLayer(id)) map.removeLayer(id); });
+        if (map.getSource("route")) map.removeSource("route");
+      } catch (e) { /* ignore */ }
+    }
+    function clearStops() {
+      stops.forEach(function (s) { s.marker.remove(); });
+      stops = [];
+    }
+    function tellSegment(index) {
+      window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({ type: "segment", index: index }));
+    }
+    function routePadding() { return { top: 110, bottom: route.bottom, left: 40, right: 40 }; }
+    function fitRoute(index) {
+      if (!route) return;
+      var bounds = new maplibregl.LngLatBounds();
+      var any = false;
+      route.segments.forEach(function (s) {
+        if (index !== null && index !== undefined && s.index !== index) return;
+        if (s.type === "visit") { bounds.extend([s.lon, s.lat]); any = true; }
+        else s.path.forEach(function (p) { bounds.extend(lngLat(p)); any = true; });
+      });
+      if (!any) return;
+      map.fitBounds(bounds, { padding: routePadding(), maxZoom: 16.5, duration: 600 });
+    }
+    function setActive(index) {
+      route.active = index;
+      stops.forEach(function (s) { s.el.classList.toggle("active", s.index === index); });
+      drawLines();
+    }
+    function showRoute(segments, bottom) {
+      route = { segments: segments || [], bottom: bottom || 260, active: null };
+      selectedId = null;
+      sync();
+      clearStops();
+      route.segments.forEach(function (s) {
+        if (s.type !== "visit") return;
+        var el = document.createElement("button");
+        el.className = "stop";
+        el.textContent = String(s.number);
+        el.addEventListener("click", function (e) { e.stopPropagation(); tellSegment(s.index); });
+        stops.push({ index: s.index, el: el, marker: new maplibregl.Marker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map) });
+      });
+      document.getElementById("map").classList.add("route-mode");
+      removeLines();
+      drawLines();
+      fitRoute(null);
+    }
+    function clearRoute() {
+      route = null;
+      clearStops();
+      removeLines();
+      document.getElementById("map").classList.remove("route-mode");
+    }
+    map.on("style.load", drawLines);
+    map.on("click", function (e) {
+      if (!route || !map.getLayer("route-line")) return;
+      var box = [[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]];
+      var hit = map.queryRenderedFeatures(box, { layers: ["route-line"] });
+      if (hit.length) tellSegment(hit[0].properties.index);
+    });
+
     function updateSelf(lat, lng, center) {
       if (!selfMarker) {
         var el = document.createElement("div");
@@ -212,6 +315,12 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
             map.flyTo({ center: [d.position.longitude, d.position.latitude], zoom: Math.max(map.getZoom(), 15), padding: PADDING });
           }
         }
+        else if (data.type === "route") showRoute(data.segments, data.bottom);
+        else if (data.type === "routeFocus" && route) {
+          setActive(data.index === null ? null : data.index);
+          fitRoute(data.index);
+        }
+        else if (data.type === "routeClear") clearRoute();
         else if (data.type === "theme" && data.dark !== dark) {
           dark = data.dark;
           document.documentElement.classList.toggle("dark", dark);

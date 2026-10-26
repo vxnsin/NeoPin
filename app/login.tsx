@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -15,56 +15,93 @@ import { useRouter } from "expo-router";
 import { MaterialIcons } from "@expo/vector-icons";
 import useThemeManager from "@/hooks/useThemeManager";
 import Field from "@/components/Field";
-import { useAsyncStorage } from "@/hooks/useAsyncStorage";
 import { useWebSocketContext } from "@/context/WebSocket";
-import { STORAGE_KEY } from "@/lib/socket";
+import { fetchStatus, loginRequest, normalizeServerUrl, registerRequest } from "@/lib/api";
+import { saveCredentials } from "@/lib/credentials";
+import { passwordError, usernameError } from "@/lib/validation";
 
-// "192.168.1.20:3012" is what people type, the socket needs a scheme.
-function normalizeUrl(input: string) {
-  const url = input.trim();
-  return /^wss?:\/\//i.test(url) ? url : `ws://${url}`;
-}
+type Mode = "login" | "register";
+type Errors = { server?: string; username?: string; password?: string; name?: string };
 
-type Errors = { server?: string; password?: string; name?: string };
+const STATUS_DELAY_MS = 700;
 
 const Login = () => {
   const { colors } = useThemeManager();
   const router = useRouter();
-  const { storeValue } = useAsyncStorage(STORAGE_KEY);
   const { connect } = useWebSocketContext();
+  const [mode, setMode] = useState<Mode>("login");
   const [server, setServer] = useState("");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [modelName, setModelName] = useState("");
+  // The name is what the server calls this device, its deviceId.
+  const [name, setName] = useState(Device.deviceName || Device.modelName || "My phone");
+  const [registrationOpen, setRegistrationOpen] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [failure, setFailure] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const statusRun = useRef(0);
+
+  const creating = mode === "register";
+
+  // Ask the server whether it takes new accounts once the address looks complete.
+  const checkStatus = (address: string) => {
+    const run = ++statusRun.current;
+    const url = address.trim();
+    if (!url) {
+      setRegistrationOpen(false);
+      return;
+    }
+    fetchStatus(normalizeServerUrl(url))
+      .then((status) => run === statusRun.current && setRegistrationOpen(status.registrationOpen))
+      .catch(() => run === statusRun.current && setRegistrationOpen(false));
+  };
 
   useEffect(() => {
-    setModelName(Device.modelName || "My phone");
-  }, []);
+    const timer = setTimeout(() => checkStatus(server), STATUS_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [server]);
 
-  const handleConnect = async () => {
+  useEffect(() => {
+    if (!registrationOpen && mode === "register") setMode("login");
+  }, [registrationOpen, mode]);
+
+  const clear = (key: keyof Errors) => setErrors((e) => ({ ...e, [key]: undefined }));
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setErrors({});
+    setFailure("");
+  };
+
+  const handleSubmit = async () => {
     if (connecting) return;
-    // The name is what the server calls this device, its deviceId.
     const deviceId = name.trim();
     const url = server.trim();
+    const user = username.trim();
     const next: Errors = {
       server: url ? undefined : "Server address is required",
-      password: password ? undefined : "Password is required",
+      username: creating ? usernameError(user) : user ? undefined : "Username is required",
+      password: passwordError(password, creating),
       name: deviceId ? undefined : "Name is required",
     };
     setErrors(next);
     setFailure("");
-    if (next.server || next.password || next.name) return;
+    if (next.server || next.username || next.password || next.name) return;
 
     setConnecting(true);
-    // Log in with the shared socket right away instead of a throwaway test
-    // connection: it has the auth timeout and clean error handling already.
-    const serverUrl = normalizeUrl(url);
+    const serverUrl = normalizeServerUrl(url);
     try {
-      await connect(serverUrl, deviceId, password);
-      await storeValue(JSON.stringify({ deviceId, serverIp: serverUrl, password }));
+      if (creating) {
+        await registerRequest(serverUrl, { username: user, password, displayName: displayName.trim() || undefined });
+        // A failed login below then retries as a plain login instead of registering twice.
+        setMode("login");
+      }
+      const { token, user: account } = await loginRequest(serverUrl, { username: user, password, deviceId });
+      // Connect with the shared socket right away instead of a throwaway test
+      // connection: it has the auth timeout and clean error handling already.
+      await connect(serverUrl, deviceId, token);
+      await saveCredentials({ serverIp: serverUrl, deviceId, token, user: account });
       router.replace("/");
     } catch (error: any) {
       setFailure(error?.message || "Could not connect");
@@ -81,7 +118,9 @@ const Login = () => {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Image source={require("@/assets/images/logo.png")} style={styles.logo} />
         <Text style={[styles.title, { color: colors.primary }]}>NeoPin</Text>
-        <Text style={[styles.lead, { color: colors.muted }]}>Connect this phone to your NeoPin server.</Text>
+        <Text style={[styles.lead, { color: colors.muted }]}>
+          {creating ? "Create an account on your NeoPin server." : "Log in to your NeoPin server."}
+        </Text>
 
         <View style={styles.form}>
           <Field
@@ -91,39 +130,66 @@ const Login = () => {
             value={server}
             onChangeText={(text) => {
               setServer(text);
-              setErrors((e) => ({ ...e, server: undefined }));
+              clear("server");
             }}
+            onBlur={() => checkStatus(server)}
             keyboardType="url"
             error={errors.server}
             returnKeyType="next"
           />
           <Field
+            label="Username"
+            icon="person-outline"
+            placeholder="username"
+            value={username}
+            onChangeText={(text) => {
+              setUsername(text);
+              clear("username");
+            }}
+            textContentType="username"
+            error={errors.username}
+            returnKeyType="next"
+          />
+          {creating && (
+            <Field
+              label="Display name"
+              icon="badge"
+              placeholder={username.trim() || "How others see you"}
+              value={displayName}
+              onChangeText={setDisplayName}
+              autoCapitalize="words"
+              hint="Optional, shown instead of the username."
+              returnKeyType="next"
+            />
+          )}
+          <Field
             label="Password"
             icon="lock-outline"
-            placeholder="Server password"
+            placeholder={creating ? "At least 8 characters" : "Password"}
             value={password}
             onChangeText={(text) => {
               setPassword(text);
-              setErrors((e) => ({ ...e, password: undefined }));
+              clear("password");
             }}
+            textContentType={creating ? "newPassword" : "password"}
             secret
             error={errors.password}
             returnKeyType="next"
           />
           <Field
-            label="Name"
-            icon="person-outline"
-            placeholder={modelName}
+            label="Device name"
+            icon="smartphone"
+            placeholder="My phone"
             value={name}
             onChangeText={(text) => {
               setName(text);
-              setErrors((e) => ({ ...e, name: undefined }));
+              clear("name");
             }}
             autoCapitalize="words"
             error={errors.name}
-            hint="Everyone on the map sees you under this name."
+            hint="This phone appears on the map under this name."
             returnKeyType="go"
-            onSubmitEditing={handleConnect}
+            onSubmitEditing={handleSubmit}
           />
 
           {failure ? (
@@ -138,7 +204,7 @@ const Login = () => {
               styles.button,
               { backgroundColor: colors.secondary, opacity: connecting ? 0.7 : pressed ? 0.88 : 1 },
             ]}
-            onPress={handleConnect}
+            onPress={handleSubmit}
             disabled={connecting}
             accessibilityRole="button"
           >
@@ -146,11 +212,29 @@ const Login = () => {
               <ActivityIndicator color={colors.onSecondary} />
             ) : (
               <>
-                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>Connect</Text>
+                <Text style={[styles.buttonText, { color: colors.onSecondary }]}>
+                  {creating ? "Create account" : "Log in"}
+                </Text>
                 <MaterialIcons name="arrow-forward" size={20} color={colors.onSecondary} />
               </>
             )}
           </Pressable>
+
+          {(registrationOpen || creating) && (
+            <Pressable
+              onPress={() => switchMode(creating ? "login" : "register")}
+              disabled={connecting}
+              style={styles.switch}
+              hitSlop={8}
+            >
+              <Text style={[styles.switchText, { color: colors.muted }]}>
+                {creating ? "Already have an account? " : "New here? "}
+                <Text style={{ color: colors.secondary, fontWeight: "700" }}>
+                  {creating ? "Log in" : "Create account"}
+                </Text>
+              </Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -176,6 +260,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   buttonText: { fontSize: 17, fontWeight: "700" },
+  switch: { alignItems: "center", paddingVertical: 18 },
+  switchText: { fontSize: 14.5 },
 });
 
 export default Login;

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { View, Dimensions, StyleSheet, AppState, Platform } from "react-native";
-import { Stack, usePathname } from "expo-router";
+import { Stack, usePathname, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
+import { socket } from "@/lib/socket";
+import { logout } from "@/lib/logout";
 import { startWebSocketService, stopWebSocketService } from "@/services/WebSocketService";
 import { startPositionReporting } from "@/handlers/Location";
 import { startBackgroundLocation } from "@/tasks/LocationTask";
@@ -18,7 +20,19 @@ import {
 
 function ConnectionLifecycle() {
   const { emit, isConnected } = useWebSocketContext();
+  const router = useRouter();
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
+
+  // The server no longer accepts the token (logged out elsewhere, kicked, expired).
+  useEffect(
+    () =>
+      socket.onRejected(() => {
+        logout({ remote: false })
+          .catch(() => {})
+          .finally(() => router.replace("/login"));
+      }),
+    [router]
+  );
 
   useEffect(() => {
     loadSettings().then((s) => setPreset(s.reporting));
