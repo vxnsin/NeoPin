@@ -90,7 +90,7 @@ export default {
       },
     },
     owner: "vensin",
-    runtimeVersion: "1.0.1",
+    runtimeVersion: "1.0.0",
     updates: {
       url: "https://u.expo.dev/1808f5ce-26ec-43c7-90fd-cfe81987c07b",
     },
