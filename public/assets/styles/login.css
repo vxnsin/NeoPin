@@ -1,149 +1,261 @@
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    
-    border-color: var(--primary);
-    color: var(--primary);
+body {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  overflow: hidden;
 }
 
-@view-transition {
-    navigation: auto;
+/* A faint map-like grid with the brand glow behind the card. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
 }
 
-html, body {
-    display: grid;
-    height: 100%;
-    width: 100%;
-    place-items: center;
-    background: var(--surface);
-    font-family: 'Roboto', sans-serif;
+.backdrop__grid {
+  position: absolute;
+  inset: -50%;
+  background-image: linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 44px 44px;
+  transform: perspective(900px) rotateX(55deg);
+  mask-image: radial-gradient(circle at 50% 50%, #000 0%, transparent 55%);
 }
 
-::selection {
-    background: var(--secondary);
+.backdrop__glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 640px;
+  height: 640px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, var(--brand-soft) 0%, transparent 65%);
 }
 
-.wrapper {
-    width: 380px;
-    border-radius: 20px;
-    padding: 40px 30px;
-    text-align: center;
+.theme-toggle {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top));
+  right: 16px;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(12px);
 }
 
-.wrapper form .field {
-    height: 60px;
-    width: 100%;
-    margin-top: 40px;
-    margin-bottom: 20px;
-    position: relative;
+.login {
+  position: relative;
+  z-index: 1;
+  width: min(400px, calc(100vw - 32px));
+  text-align: center;
 }
 
-.wrapper form .field input {
-    height: 100%;
-    width: 100%;
-    outline: none;
-    font-size: 18px;
-    padding-left: 20px;
-    border: 2px solid;
-    border-radius: 30px;
-    transition: all 0.3s ease;
-    z-index: 1111;
-    background: transparent;
-    caret-shape:auto;
-    caret-color: transparent;
+.login__card {
+  padding: 36px 32px 32px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(20px) saturate(1.4);
+  animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.wrapper form .field input:focus,
-form .field input:valid {
-    outline: none;
+.login__mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 18px;
+  border-radius: 20px;
+  background: var(--brand);
+  color: var(--on-brand);
+  box-shadow: 0 14px 28px -12px rgba(211, 23, 30, 0.8);
 }
 
-.wrapper form .field label {
-    position: absolute;
-    top: 50%;
-    left: 20px;
-    font-weight: 400;
-    font-size: 18px;
-    pointer-events: none;
-    transform: translateY(-50%);
-    transition: all 0.3s ease;
-    z-index: 2;
+.login__mark .icon {
+  width: 30px;
+  height: 30px;
 }
 
-form .field input:focus~label,
-form .field input:valid~label {
-    top: 0%;
-    font-size: 16px;
-    background: var(--surface); 
-    transform: translateY(-50%);
+.login__ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  border: 2px solid var(--brand);
+  animation: halo 2.6s ease-out infinite;
 }
-::placeholder {
-    color: RGB(44, 45, 51);
+
+h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.login__lead {
+  margin: 6px 0 26px;
+  color: var(--text-muted);
+}
+
+form {
+  display: grid;
+  gap: 14px;
+  text-align: left;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.field__control {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field__control:focus-within {
+  border-color: var(--brand);
+  box-shadow: var(--focus);
+}
+
+.field[data-invalid] .field__control {
+  border-color: var(--danger);
+  animation: shake 0.35s ease;
+}
+
+.field__icon {
+  width: 18px;
+  height: 18px;
+  margin-left: 14px;
+  color: var(--text-muted);
+}
+
+.field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  outline: none;
+  font-size: 16px;
+}
+
+.field input:focus-visible {
+  box-shadow: none;
+}
+
+.field input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
+.field__toggle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-right: 4px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.field__toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.field__toggle .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.login__error {
+  min-height: 20px;
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.login__submit {
+  width: 100%;
+  height: 48px;
+}
+
+.login__submit .icon {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.15s ease;
+}
+
+.login__submit:hover .icon {
+  transform: translateX(3px);
+}
+
+.login__submit.is-busy .icon {
+  display: none;
+}
+
+.login__submit.is-busy::after {
+  content: "";
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.login__foot {
+  margin: 18px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+@keyframes rise {
+  from {
     opacity: 0;
-}
-input:focus::placeholder {
-    opacity: 1;
-}
-
-form .field input[type="submit"] {
-    border: none;
-    padding-left: 0;
-    margin-top: 20px;
-    color: var(--on-secondary);
-    font-size: 20px;
-    font-weight: 500;
-    cursor: pointer;
-    background: rgba(255, 44, 45, 51); 
-    border-radius: 30px;
-    transition: all 0.3s ease;
-    width: 100%;
-    height: 50px;
-}
-
-form .field input[type="submit"]:active {
-    transform: scale(0.95);
-}
-
-.message {
-    position: absolute;
-    color: var(--secondary);
-    font-weight: bold;
-    margin-top: 10px;
-    display: flex;           
-    justify-content: center; 
-    align-items: center;
-    transition: 0.5s ease;
-    left: 50%;
-    top: 56.7%;
-    transform: translate(-50%, -50%); 
-}
-
-.toggle-password {
-    position: absolute;
-    right: 15px;
-    top: 50%;
-    transform: translateY(-50%);
-    cursor: pointer;
-    color: var(--primary);
+    transform: translateY(12px) scale(0.98);
   }
-  
-  .toggle-password:hover {
-    color: var(--primary);
+}
+
+@keyframes halo {
+  from {
+    transform: scale(1);
+    opacity: 0.6;
   }
-
-  theme-switch {
-    width: 64px;
-    padding: 8px;
-    justify-content: center;
-    align-items: center;       
-    position: fixed;
-    top: 16px; 
-    right: 16px; 
-    z-index: 1000;
-    --theme-switch-icon-color: var(--primary);
+  to {
+    transform: scale(1.6);
+    opacity: 0;
   }
+}
 
+@keyframes shake {
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
 
-  
-/*# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImxvZ2luLmNzcyJdLCJuYW1lcyI6W10sIm1hcHBpbmdzIjoiQUFBQSIsImZpbGUiOiJsb2dpbi5jc3MiLCJzb3VyY2VzQ29udGVudCI6WyIqIHtcbiAgICBtYXJnaW46IDA7XG4gICAgcGFkZGluZzogMDtcbiAgICBib3gtc2l6aW5nOiBib3JkZXItYm94O1xuICAgIFxuICAgIGJvcmRlci1jb2xvcjogdmFyKC0tcHJpbWFyeSk7XG4gICAgY29sb3I6IHZhcigtLXByaW1hcnkpO1xufVxuXG5Admlldy10cmFuc2l0aW9uIHtcbiAgICBuYXZpZ2F0aW9uOiBhdXRvO1xufVxuXG5odG1sLCBib2R5IHtcbiAgICBkaXNwbGF5OiBncmlkO1xuICAgIGhlaWdodDogMTAwJTtcbiAgICB3aWR0aDogMTAwJTtcbiAgICBwbGFjZS1pdGVtczogY2VudGVyO1xuICAgIGJhY2tncm91bmQ6IHZhcigtLXN1cmZhY2UpO1xuICAgIGZvbnQtZmFtaWx5OiAnUm9ib3RvJywgc2Fucy1zZXJpZjtcbn1cblxuOjpzZWxlY3Rpb24ge1xuICAgIGJhY2tncm91bmQ6IHZhcigtLXNlY29uZGFyeSk7XG59XG5cbi53cmFwcGVyIHtcbiAgICB3aWR0aDogMzgwcHg7XG4gICAgYm9yZGVyLXJhZGl1czogMjBweDtcbiAgICBwYWRkaW5nOiA0MHB4IDMwcHg7XG4gICAgdGV4dC1hbGlnbjogY2VudGVyO1xufVxuXG4ud3JhcHBlciBmb3JtIC5maWVsZCB7XG4gICAgaGVpZ2h0OiA2MHB4O1xuICAgIHdpZHRoOiAxMDAlO1xuICAgIG1hcmdpbi10b3A6IDQwcHg7XG4gICAgbWFyZ2luLWJvdHRvbTogMjBweDtcbiAgICBwb3NpdGlvbjogcmVsYXRpdmU7XG59XG5cbi53cmFwcGVyIGZvcm0gLmZpZWxkIGlucHV0IHtcbiAgICBoZWlnaHQ6IDEwMCU7XG4gICAgd2lkdGg6IDEwMCU7XG4gICAgb3V0bGluZTogbm9uZTtcbiAgICBmb250LXNpemU6IDE4cHg7XG4gICAgcGFkZGluZy1sZWZ0OiAyMHB4O1xuICAgIGJvcmRlcjogMnB4IHNvbGlkO1xuICAgIGJvcmRlci1yYWRpdXM6IDMwcHg7XG4gICAgdHJhbnNpdGlvbjogYWxsIDAuM3MgZWFzZTtcbiAgICB6LWluZGV4OiAxMTExO1xuICAgIGJhY2tncm91bmQ6IHRyYW5zcGFyZW50O1xuICAgIGNhcmV0LXNoYXBlOmF1dG87XG4gICAgY2FyZXQtY29sb3I6IHRyYW5zcGFyZW50O1xufVxuXG4ud3JhcHBlciBmb3JtIC5maWVsZCBpbnB1dDpmb2N1cyxcbmZvcm0gLmZpZWxkIGlucHV0OnZhbGlkIHtcbiAgICBvdXRsaW5lOiBub25lO1xufVxuXG4ud3JhcHBlciBmb3JtIC5maWVsZCBsYWJlbCB7XG4gICAgcG9zaXRpb246IGFic29sdXRlO1xuICAgIHRvcDogNTAlO1xuICAgIGxlZnQ6IDIwcHg7XG4gICAgZm9udC13ZWlnaHQ6IDQwMDtcbiAgICBmb250LXNpemU6IDE4cHg7XG4gICAgcG9pbnRlci1ldmVudHM6IG5vbmU7XG4gICAgdHJhbnNmb3JtOiB0cmFuc2xhdGVZKC01MCUpO1xuICAgIHRyYW5zaXRpb246IGFsbCAwLjNzIGVhc2U7XG4gICAgei1pbmRleDogMjtcbn1cblxuZm9ybSAuZmllbGQgaW5wdXQ6Zm9jdXN+bGFiZWwsXG5mb3JtIC5maWVsZCBpbnB1dDp2YWxpZH5sYWJlbCB7XG4gICAgdG9wOiAwJTtcbiAgICBmb250LXNpemU6IDE2cHg7XG4gICAgYmFja2dyb3VuZDogdmFyKC0tc3VyZmFjZSk7IFxuICAgIHRyYW5zZm9ybTogdHJhbnNsYXRlWSgtNTAlKTtcbn1cbjo6cGxhY2Vob2xkZXIge1xuICAgIGNvbG9yOiBSR0IoNDQsIDQ1LCA1MSk7XG4gICAgb3BhY2l0eTogMDtcbn1cbmlucHV0OmZvY3VzOjpwbGFjZWhvbGRlciB7XG4gICAgb3BhY2l0eTogMTtcbn1cblxuZm9ybSAuZmllbGQgaW5wdXRbdHlwZT1cInN1Ym1pdFwiXSB7XG4gICAgYm9yZGVyOiBub25lO1xuICAgIHBhZGRpbmctbGVmdDogMDtcbiAgICBtYXJnaW4tdG9wOiAyMHB4O1xuICAgIGNvbG9yOiB2YXIoLS1vbi1zZWNvbmRhcnkpO1xuICAgIGZvbnQtc2l6ZTogMjBweDtcbiAgICBmb250LXdlaWdodDogNTAwO1xuICAgIGN1cnNvcjogcG9pbnRlcjtcbiAgICBiYWNrZ3JvdW5kOiByZ2JhKDI1NSwgNDQsIDQ1LCA1MSk7IFxuICAgIGJvcmRlci1yYWRpdXM6IDMwcHg7XG4gICAgdHJhbnNpdGlvbjogYWxsIDAuM3MgZWFzZTtcbiAgICB3aWR0aDogMTAwJTtcbiAgICBoZWlnaHQ6IDUwcHg7XG59XG5cbmZvcm0gLmZpZWxkIGlucHV0W3R5cGU9XCJzdWJtaXRcIl06YWN0aXZlIHtcbiAgICB0cmFuc2Zvcm06IHNjYWxlKDAuOTUpO1xufVxuXG4ubWVzc2FnZSB7XG4gICAgcG9zaXRpb246IGFic29sdXRlO1xuICAgIGNvbG9yOiB2YXIoLS1zZWNvbmRhcnkpO1xuICAgIGZvbnQtd2VpZ2h0OiBib2xkO1xuICAgIG1hcmdpbi10b3A6IDEwcHg7XG4gICAgZGlzcGxheTogZmxleDsgICAgICAgICAgIFxuICAgIGp1c3RpZnktY29udGVudDogY2VudGVyOyBcbiAgICBhbGlnbi1pdGVtczogY2VudGVyO1xuICAgIHRyYW5zaXRpb246IDAuNXMgZWFzZTtcbiAgICBsZWZ0OiA1MCU7XG4gICAgdG9wOiA1Ni43JTtcbiAgICB0cmFuc2Zvcm06IHRyYW5zbGF0ZSgtNTAlLCAtNTAlKTsgXG59XG5cbi50b2dnbGUtcGFzc3dvcmQge1xuICAgIHBvc2l0aW9uOiBhYnNvbHV0ZTtcbiAgICByaWdodDogMTVweDtcbiAgICB0b3A6IDUwJTtcbiAgICB0cmFuc2Zvcm06IHRyYW5zbGF0ZVkoLTUwJSk7XG4gICAgY3Vyc29yOiBwb2ludGVyO1xuICAgIGNvbG9yOiB2YXIoLS1wcmltYXJ5KTtcbiAgfVxuICBcbiAgLnRvZ2dsZS1wYXNzd29yZDpob3ZlciB7XG4gICAgY29sb3I6IHZhcigtLXByaW1hcnkpO1xuICB9XG5cbiAgdGhlbWUtc3dpdGNoIHtcbiAgICB3aWR0aDogNjRweDtcbiAgICBwYWRkaW5nOiA4cHg7XG4gICAganVzdGlmeS1jb250ZW50OiBjZW50ZXI7XG4gICAgYWxpZ24taXRlbXM6IGNlbnRlcjsgICAgICAgXG4gICAgcG9zaXRpb246IGZpeGVkO1xuICAgIHRvcDogMTZweDsgXG4gICAgcmlnaHQ6IDE2cHg7IFxuICAgIHotaW5kZXg6IDEwMDA7XG4gICAgLS10aGVtZS1zd2l0Y2gtaWNvbi1jb2xvcjogdmFyKC0tcHJpbWFyeSk7XG4gIH1cblxuXG4gICJdfQ== */
+@media (max-width: 420px) {
+  .login__card {
+    padding: 28px 20px 24px;
+  }
+}

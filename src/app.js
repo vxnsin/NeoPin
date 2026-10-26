@@ -6,10 +6,13 @@ import { secureHeaders } from "@inkanjs/secure-headers";
 import { config, passwordMatches, rootDir } from "./config.js";
 import {
   attachSocket,
+  avatarUrl,
+  clearAvatar,
   detachSocket,
   getDevice,
   onlineDevices,
   serializeDevices,
+  setAvatar,
   updatePosition,
 } from "./devices.js";
 import { createAttemptLimiter } from "./rateLimit.js";
@@ -18,6 +21,9 @@ import { isSignedIn, sessionPlugin, signIn } from "./sessions.js";
 const CLOSE_POLICY = 4000;
 const CLOSE_REPLACED = 4001;
 const BROADCAST_THROTTLE_MS = 500;
+// The app sends a 128 px JPEG of a few KiB. The cap matches the socket's maxMessage.
+const AVATAR_MAX_BYTES = 16 * 1024;
+const AVATAR_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const publicDir = path.join(rootDir, "public");
 
 const Position = t.object({
@@ -30,6 +36,7 @@ const Device = t.object({
   position: Position.nullable(),
   lastPing: t.string().nullable(),
   status: t.enum(["online", "offline"]),
+  avatarUrl: t.string().nullable(),
 });
 
 const Message = t.object({ message: t.string() });
@@ -51,6 +58,15 @@ const ClientMessage = t.discriminated("type", {
   getData: bare("getData"),
   pingDevices: bare("pingDevices"),
 });
+
+// The declared type has to match the first bytes, so nothing but a picture is served back.
+function looksLike(type, data) {
+  const ascii = (from, to) => data.subarray(from, to).toString("latin1");
+  if (type === "image/jpeg") return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+  if (type === "image/png") return ascii(1, 4) === "PNG";
+  if (type === "image/webp") return ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP";
+  return false;
+}
 
 function send(socket, payload) {
   if (socket?.readyState === 1) socket.send(payload).catch(() => {});
@@ -109,6 +125,23 @@ export function createApp({ gracefulShutdown = true } = {}) {
     return Promise.all(waits).then(() => targets.length);
   }
 
+  // Devices speak HTTP with the same password as on the socket: the device id in
+  // X-Device-Id, the password as a bearer token. Wrong guesses count against the
+  // same per-IP limit as failed socket logins.
+  function deviceFromHeaders(ctx) {
+    if (authFailures.blocked(ctx.ip)) throw problem(429, "too-many-attempts", "Too many attempts");
+    const deviceId = ctx.headers["x-device-id"];
+    const auth = ctx.headers.authorization;
+    const password = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    if (typeof deviceId !== "string" || !deviceId || !passwordMatches(password)) {
+      if (password !== null) authFailures.fail(ctx.ip);
+      throw problem(401, "unauthorized", "Send X-Device-Id and the server password as a bearer token");
+    }
+    const device = getDevice(deviceId);
+    if (!device) throw problem(404, "unknown-device", `Device ${deviceId} has never connected`);
+    return device;
+  }
+
   const app = inkan({
     title: "NeoPin Server",
     version: config.version,
@@ -121,14 +154,18 @@ export function createApp({ gracefulShutdown = true } = {}) {
     secureHeaders({
       csp: {
         directives: {
+          // MapLibre GL comes from unpkg and starts its tile worker from a blob URL.
           "script-src": ["'self'", "https://unpkg.com"],
-          // The theme switch styles its shadow DOM inline. Scripts stay strict.
-          "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com", "https://cdnjs.cloudflare.com"],
-          "img-src": ["'self'", "data:", "https://*.tile.openstreetmap.org"],
-          "connect-src": ["'self'"],
+          "worker-src": ["'self'", "blob:"],
+          "child-src": ["blob:"],
+          // MapLibre positions its markers and controls with inline styles. Scripts stay strict.
+          "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+          "img-src": ["'self'", "data:", "blob:"],
+          // Style, vector tiles, glyphs and sprites all come from OpenFreeMap.
+          "connect-src": ["'self'", "https://tiles.openfreemap.org"],
         },
       },
-      // OpenStreetMap wants to know which site loads its tiles.
+      // The tile host may see which site loads its tiles, nothing more.
       referrerPolicy: "strict-origin-when-cross-origin",
     })
   );
@@ -203,6 +240,59 @@ export function createApp({ gracefulShutdown = true } = {}) {
     },
     {},
     { prefix: "/api" }
+  );
+
+  // Profile pictures: the device uploads its own, the dashboard and other devices read them.
+  app.register(
+    (avatars) => {
+      avatars.register(rateLimit({ max: config.avatarRateLimit.max, window: config.avatarRateLimit.windowMs }));
+
+      avatars.put(
+        "/api/avatar",
+        {
+          body: t.binary().max(AVATAR_MAX_BYTES).accept(...AVATAR_TYPES),
+          response: {
+            200: t.object({ avatarUrl: t.string() }),
+            400: t.problem(),
+            401: t.problem(),
+            404: t.problem(),
+            413: t.problem(),
+            415: t.problem(),
+            429: t.problem(),
+          },
+        },
+        (ctx) => {
+          const device = deviceFromHeaders(ctx);
+          const type = String(ctx.headers["content-type"]).split(";")[0].trim().toLowerCase();
+          if (!looksLike(type, ctx.body)) throw problem(400, "not-an-image", `The body is no ${type}`);
+          setAvatar(device.id, Buffer.from(ctx.body), type);
+          console.log(chalk.cyan(`[i] Device ${chalk.whiteBright(device.id)} has a new profile picture.`));
+          broadcastDevices();
+          return { avatarUrl: avatarUrl(device) };
+        }
+      );
+
+      avatars.delete(
+        "/api/avatar",
+        { response: { 204: t.empty(), 401: t.problem(), 404: t.problem(), 429: t.problem() } },
+        (ctx) => {
+          clearAvatar(deviceFromHeaders(ctx).id);
+          broadcastDevices();
+          return reply(204);
+        }
+      );
+
+      avatars.get("/avatars/:deviceId", (ctx) => {
+        if (!isSignedIn(ctx.session)) deviceFromHeaders(ctx);
+        const avatar = getDevice(ctx.params.deviceId)?.avatar;
+        if (!avatar) throw problem(404, "no-avatar", "This device has no profile picture");
+        return reply(200, avatar.data, {
+          "content-type": avatar.type,
+          // The URL carries the version, a new picture gets a new URL.
+          "cache-control": "private, max-age=31536000, immutable",
+        });
+      });
+    }
   );
 
   app.ws(

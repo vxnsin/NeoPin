@@ -2,54 +2,93 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NeoPin - Home</title>
-
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
-    <link rel="stylesheet" href="assets/styles/index.css" />
-    <link rel="stylesheet" href="assets/styles/theme.css" />
-    <link rel="icon" type="image/x-icon" href="assets/images/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>NeoPin · Map</title>
+    <script src="/assets/scripts/theme.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css"
+      integrity="sha384-Nq6PQ+9vJPvw7U/VfDELyrWoGQMsy0gi6QShhaSrGzkpF5KkM40csg2leky+YMTd"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="/assets/styles/theme.css" />
+    <link rel="stylesheet" href="/assets/styles/index.css" />
+    <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico" />
   </head>
 
-  <body data-theme="dark">
-    <div id="spinner" class="spinner"></div>
-    <div class="wrapper-body" id="content">
-      <div id="map"></div>
+  <body>
+    <svg class="sprite" aria-hidden="true">
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></symbol>
+      <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2.5" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></symbol>
+      <symbol id="i-fit" viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6" /></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect width="12" height="20" x="6" y="2" rx="2.5" /><path d="M11 18h2" /></symbol>
+    </svg>
 
-      <div class="status-pill" id="status" data-state="connecting">
-        <span class="status-dot"></span>
-        <span class="status-text">Connecting…</span>
+    <div class="loader" id="loader" role="status" aria-label="Loading">
+      <div class="loader__inner">
+        <span class="brand__mark"><svg class="icon"><use href="#i-pin" /></svg></span>
+        <div class="spinner"></div>
       </div>
-
-      <div class="menu-button" id="menuButton" title="Menu">
-        <i class="fas fa-cog"></i>
-      </div>
-
-      <div class="menu-box">
-        <div id="menu" class="dropdown-menu">
-          <div class="icon" id="refreshButton" title="Ask all devices for a fresh position">
-            <i class="fas fa-rotate"></i>
-          </div>
-          <div class="icon" id="listButton" title="Device list">
-            <i class="fas fa-list"></i>
-          </div>
-          <div class="icon" id="logoutButton" title="Logout">
-            <i class="fas fa-right-from-bracket"></i>
-          </div>
-        </div>
-      </div>
-
-      <aside class="device-panel" id="devicePanel">
-        <header>
-          <strong>Devices</strong>
-          <button id="closePanel" aria-label="Close"><i class="fas fa-xmark"></i></button>
-        </header>
-        <ul id="deviceList"></ul>
-      </aside>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="assets/scripts/dashboard.js"></script>
+    <div id="map"></div>
+
+    <aside class="sidebar" id="sidebar" aria-label="Devices">
+      <button class="sidebar__handle" id="sheetHandle" type="button" aria-controls="sidebarBody" aria-expanded="false">
+        <span class="sr-only">Show devices</span>
+      </button>
+
+      <header class="sidebar__header">
+        <span class="brand">
+          <span class="brand__mark"><svg class="icon"><use href="#i-pin" /></svg></span>
+          NeoPin
+        </span>
+        <div class="sidebar__actions">
+          <button class="icon-btn" id="refreshButton" type="button" aria-label="Ask every device for a fresh position" title="Refresh positions">
+            <svg class="icon"><use href="#i-refresh" /></svg>
+          </button>
+          <button class="icon-btn" type="button" data-theme-toggle aria-label="Switch between light and dark mode" title="Light or dark">
+            <svg class="icon theme-icon--dark"><use href="#i-moon" /></svg>
+            <svg class="icon theme-icon--light"><use href="#i-sun" /></svg>
+          </button>
+          <a class="icon-btn" href="/logout" aria-label="Log out" title="Log out">
+            <svg class="icon"><use href="#i-logout" /></svg>
+          </a>
+        </div>
+      </header>
+
+      <div class="sidebar__status">
+        <div class="status-pill" id="status" data-state="connecting" role="status">
+          <span class="status-pill__dot"></span>
+          <span class="status-pill__text">Connecting…</span>
+        </div>
+        <span class="sidebar__count" id="summary">No devices</span>
+        <svg class="icon sidebar__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+      </div>
+
+      <div class="sidebar__body" id="sidebarBody">
+        <label class="search">
+          <svg class="icon"><use href="#i-search" /></svg>
+          <input type="search" id="search" placeholder="Search devices" autocomplete="off" aria-label="Search devices" />
+        </label>
+        <ul class="device-list" id="deviceList" role="list"></ul>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script
+      src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"
+      integrity="sha384-GfxBM9x46BaAFxtCq39Fxir8fNZ4VDnwgfi6Kzi5/F1tAFsm0amuuV8kd+Pxzuf/"
+      crossorigin="anonymous"
+    ></script>
+    <script src="/assets/scripts/dashboard.js"></script>
   </body>
 </html>

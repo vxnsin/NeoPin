@@ -1,60 +1,57 @@
-window.addEventListener("load", function () {
-      const spinner = document.getElementById("spinner");
-      const content = document.getElementById("content");
-      setTimeout(() => {
-          document.body.classList.remove("loading");
-          document.body.classList.add("loaded");
-          content.classList.add("loaded");
-          spinner.style.opacity = 0;
-      }, 1500);
-  });
+const form = document.getElementById("loginForm");
+const input = document.getElementById("password");
+const field = input.closest(".field");
+const toggle = document.getElementById("togglePassword");
+const submit = document.getElementById("submit");
+const message = document.getElementById("message");
 
-  document.getElementById("togglePassword").onclick = function () {
-      const passwordField = document.getElementById("password");
-      if (passwordField.type === "password") {
-          passwordField.type = "text";
-          this.classList.add("fa-eye-slash");
-          this.classList.remove("fa-eye");
-      } else {
-          passwordField.type = "password";
-          this.classList.add("fa-eye");
-          this.classList.remove("fa-eye-slash");
-      }
-  };
+function showError(text) {
+  message.textContent = text;
+  // Take the marker off and back on, so the shake plays on every wrong try.
+  field.removeAttribute("data-invalid");
+  void field.offsetWidth;
+  field.setAttribute("data-invalid", "");
+  input.select();
+}
 
-  document.getElementById("loginForm").onsubmit = function (event) {
-      event.preventDefault();
+toggle.addEventListener("click", () => {
+  const show = input.type === "password";
+  input.type = show ? "text" : "password";
+  toggle.setAttribute("aria-pressed", String(show));
+  toggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  toggle.querySelector("use").setAttribute("href", show ? "#i-eye-off" : "#i-eye");
+  input.focus();
+});
 
-      var password = document.getElementById("password").value;
+input.addEventListener("input", () => {
+  field.removeAttribute("data-invalid");
+  message.textContent = "";
+});
 
-      var requestData = { password: password };
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!input.value) return showError("Enter the server password.");
 
-      fetch("/login", {
-          method: "POST",
-          headers: {
-              "Content-Type": "application/json",
-          },
-          body: JSON.stringify(requestData),
-      })
-          .then((response) => {
-              if (response.ok) {
-                  window.location.href = "/";
-              }
-              if (response.status === 401) {
-                  return "Invalid Password";
-              }
-              if (response.status === 429) {
-                  return "Too many login attempts. Please try again later.";
-              }
-          })
-          .then((errorMessage) => {
-              if (errorMessage) {
-                  document.getElementById("message").textContent = errorMessage;
-              }
-          })
-          .catch((error) => {
-              console.error("Login request failed:", error);
-              document.getElementById("message").textContent =
-                  "Something went wrong. Please try again later.";
-          });
-  };
+  submit.disabled = true;
+  submit.classList.add("is-busy");
+  message.textContent = "";
+  try {
+    const response = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: input.value }),
+    });
+    if (response.ok) {
+      window.location.href = "/";
+      return;
+    }
+    if (response.status === 401) showError("That password is not right.");
+    else if (response.status === 429) showError("Too many attempts. Wait a minute and try again.");
+    else showError("The server could not sign you in. Try again.");
+  } catch {
+    showError("The server is not reachable.");
+  } finally {
+    submit.disabled = false;
+    submit.classList.remove("is-busy");
+  }
+});

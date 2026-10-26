@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 // In-memory device registry. A device record outlives its socket, so a
 // reconnecting device keeps its last position and shows as online again.
 
@@ -19,7 +21,7 @@ export function onlineDevices() {
 export function attachSocket(deviceId, socket) {
   let device = devices.get(deviceId);
   if (!device) {
-    device = { id: deviceId, socket: null, position: null, lastPing: null, status: "offline" };
+    device = { id: deviceId, socket: null, position: null, lastPing: null, status: "offline", avatar: null };
     devices.set(deviceId, device);
   }
   const previous = device.socket;
@@ -45,12 +47,35 @@ export function updatePosition(deviceId, latitude, longitude) {
   return device;
 }
 
+// Pictures live in memory like everything else. The version is part of the URL,
+// so browsers may cache a picture for good and still see a new one right away.
+export function setAvatar(deviceId, data, type) {
+  const device = devices.get(deviceId);
+  if (!device) return null;
+  const version = crypto.createHash("sha256").update(data).digest("base64url").slice(0, 12);
+  device.avatar = { data, type, version };
+  return device;
+}
+
+export function clearAvatar(deviceId) {
+  const device = devices.get(deviceId);
+  if (!device) return null;
+  device.avatar = null;
+  return device;
+}
+
+export function avatarUrl(device) {
+  if (!device?.avatar) return null;
+  return `/avatars/${encodeURIComponent(device.id)}?v=${device.avatar.version}`;
+}
+
 export function serializeDevices() {
   return allDevices().map((d) => ({
     deviceId: d.id,
     position: d.position,
     lastPing: d.lastPing,
     status: d.status,
+    avatarUrl: avatarUrl(d),
   }));
 }
 
