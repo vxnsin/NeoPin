@@ -30,7 +30,7 @@ import PasswordForm from "@/components/PasswordForm";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickAvatar, removeAvatar, uploadAvatar } from "@/lib/avatar";
-import { STATE_COLORS, freshness, type Device } from "@/lib/devices";
+import { STATE_COLORS, deviceKey, deviceLabel, freshness, isOwnDevice, ownerName, type Device } from "@/lib/devices";
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
@@ -150,8 +150,8 @@ export default function MapScreen() {
   // The map gets each device with its picture as a data URI, it cannot send the login headers itself.
   // This phone is the "you are here" dot already, so its own device gets no second pin.
   const mapDevices = devices
-    .filter((device) => device.deviceId !== creds?.deviceId)
-    .map((device) => ({ ...device, avatar: avatarFor(device.avatarUrl) }));
+    .filter((device) => !isOwnDevice(device, user?.id, creds?.deviceId))
+    .map((device) => ({ ...device, key: deviceKey(device), avatar: avatarFor(device.avatarUrl) }));
   const mapDevicesKey = JSON.stringify(mapDevices);
   useEffect(() => {
     if (webViewLoaded) post({ type: "devices", devices: JSON.parse(mapDevicesKey) });
@@ -195,7 +195,7 @@ export default function MapScreen() {
 
   const focusDevice = (device: Device) => {
     if (!device.position) return;
-    post({ type: "focus", deviceId: device.deviceId });
+    post({ type: "focus", key: deviceKey(device) });
     setSheet(null);
   };
 
@@ -264,14 +264,16 @@ export default function MapScreen() {
     router.replace("/login");
   };
 
-  const me = devices.find((d) => d.deviceId === creds?.deviceId);
+  const isMine = (d: Device) => isOwnDevice(d, user?.id, creds?.deviceId);
+  const me = devices.find(isMine);
   const profileAvatar = user?.avatarUrl ?? null;
   const panelHeight = Math.round(windowHeight * 0.55);
   const sorted = [...devices].sort(
     (a, b) =>
-      Number(b.deviceId === creds?.deviceId) - Number(a.deviceId === creds?.deviceId) ||
+      Number(isMine(b)) - Number(isMine(a)) ||
+      Number(b.userId === user?.id) - Number(a.userId === user?.id) ||
       STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
-      a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
+      deviceLabel(a).localeCompare(deviceLabel(b), undefined, { sensitivity: "base" })
   );
   const online = devices.filter((d) => d.status === "online").length;
   const summary = !isConnected
@@ -282,18 +284,18 @@ export default function MapScreen() {
 
   const deviceRow = (device: Device) => {
     const state = freshness(device);
-    const isMe = device.deviceId === creds?.deviceId;
+    const isMe = isMine(device);
     return (
       <Pressable
-        key={device.deviceId}
+        key={deviceKey(device)}
         style={({ pressed }) => [styles.deviceRow, pressed && { backgroundColor: c.subtle }]}
         onPress={() => focusDevice(device)}
-        accessibilityLabel={`${device.deviceId}, ${state}`}
+        accessibilityLabel={`${deviceLabel(device)}, ${state}`}
       >
-        <Avatar name={device.deviceId} uri={avatarFor(device.avatarUrl)} state={state} gapColor={c.raised} />
+        <Avatar name={ownerName(device)} uri={avatarFor(device.avatarUrl)} state={state} gapColor={c.raised} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
-            {device.deviceId}
+            {isMe ? device.deviceId : deviceLabel(device)}
             {isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
           </Text>
           <View style={styles.metaRow}>
@@ -349,8 +351,8 @@ export default function MapScreen() {
         </View>
         <View style={styles.stack}>
           {sorted.slice(0, 4).map((device, index) => (
-            <View key={device.deviceId} style={{ marginLeft: index === 0 ? 0 : -10 }}>
-              <Avatar name={device.deviceId} uri={avatarFor(device.avatarUrl)} state={freshness(device)} size={26} gapColor={c.raised} />
+            <View key={deviceKey(device)} style={{ marginLeft: index === 0 ? 0 : -10 }}>
+              <Avatar name={ownerName(device)} uri={avatarFor(device.avatarUrl)} state={freshness(device)} size={26} gapColor={c.raised} />
             </View>
           ))}
         </View>

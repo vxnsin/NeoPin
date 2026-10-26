@@ -56,7 +56,9 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
 
   const choices = useMemo(() => {
     if (viewingOther) return otherDevices;
-    const list = devices.length ? devices : [{ deviceId: creds.deviceId } as Device];
+    // The map shows everyone's devices, the timeline starts with the own ones.
+    const own = devices.filter((d) => d.userId === undefined || d.userId === creds.user.id);
+    const list = own.length ? own : [{ deviceId: creds.deviceId } as Device];
     return [...list].sort(
       (a, b) =>
         Number(b.deviceId === creds.deviceId) - Number(a.deviceId === creds.deviceId) ||

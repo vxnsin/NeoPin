@@ -14,7 +14,7 @@ const BAR_HEIGHT = 96;
 
 // The map page inside the WebView. React Native talks to it with postMessage:
 // { type: "devices", devices }, { type: "self", latitude, longitude, center },
-// { type: "focus", deviceId } and { type: "theme", dark }. The timeline adds
+// { type: "focus", key } and { type: "theme", dark }. The timeline adds
 // { type: "route", segments, bottom } to draw a day (trip lines and numbered stops),
 // { type: "routeFocus", index } to zoom to one segment (null for the whole day)
 // and { type: "routeClear" } to go back to the live pins. The map answers a tap on
@@ -150,18 +150,22 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       for (var ch of String(name)) hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
       return COLORS[hash % COLORS.length];
     }
+    // Device names are only unique per account, the key is "userId:deviceId".
+    function keyOf(d) { return d.key || d.deviceId; }
+    function ownerName(d) { return d.owner && d.owner.displayName ? d.owner.displayName : d.deviceId; }
+    function fullName(d) { return d.owner && d.owner.displayName ? d.owner.displayName + " \u00b7 " + d.deviceId : d.deviceId; }
     function avatarHtml(d) {
-      var inner = d.avatar ? '<img src="' + esc(d.avatar) + '" alt="">' : "<span>" + esc(initials(d.deviceId)) + "</span>";
-      var bg = d.avatar ? "" : "background:" + colour(d.deviceId);
+      var inner = d.avatar ? '<img src="' + esc(d.avatar) + '" alt="">' : "<span>" + esc(initials(ownerName(d))) + "</span>";
+      var bg = d.avatar ? "" : "background:" + colour(ownerName(d));
       return '<span class="avatar ' + state(d) + '" style="' + bg + '">' + inner + "</span>";
     }
     function popupHtml(d) {
-      return '<div class="popup"><b>' + esc(d.deviceId) + "</b><span>" + (state(d) === "offline" ? "Offline" : "Online") + " · " + esc(ago(d.lastPing)) + "</span></div>";
+      return '<div class="popup"><b>' + esc(fullName(d)) + "</b><span>" + (state(d) === "offline" ? "Offline" : "Online") + " · " + esc(ago(d.lastPing)) + "</span></div>";
     }
 
     function select(id) {
       selectedId = id;
-      var d = devices.find(function (x) { return x.deviceId === id; });
+      var d = devices.find(function (x) { return keyOf(x) === id; });
       if (d && d.position) map.easeTo({ center: [d.position.longitude, d.position.latitude], padding: PADDING, duration: 500 });
       sync();
     }
@@ -170,7 +174,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       var seen = {};
       devices.forEach(function (d) {
         if (!d.position) return;
-        var id = d.deviceId;
+        var id = keyOf(d);
         seen[id] = true;
         var lngLat = [d.position.longitude, d.position.latitude];
         var key = state(d) + "|" + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : "");
@@ -183,7 +187,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         }
         entry.marker.setLngLat(lngLat);
         if (entry.key !== key) {
-          entry.el.innerHTML = '<span class="pin-body ' + state(d) + '"><span class="bubble">' + avatarHtml(d) + '</span><span class="label">' + esc(id) + "</span></span>";
+          entry.el.innerHTML = '<span class="pin-body ' + state(d) + '"><span class="bubble">' + avatarHtml(d) + '</span><span class="label">' + esc(fullName(d)) + "</span></span>";
           entry.key = key;
         }
         entry.el.classList.toggle("selected", id === selectedId);
@@ -191,7 +195,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       Object.keys(markers).forEach(function (id) {
         if (!seen[id]) { markers[id].marker.remove(); delete markers[id]; }
       });
-      var selected = devices.find(function (x) { return x.deviceId === selectedId; });
+      var selected = devices.find(function (x) { return keyOf(x) === selectedId; });
       if (selected && selected.position) {
         popup.setLngLat([selected.position.longitude, selected.position.latitude]).setHTML(popupHtml(selected));
         if (!popup.isOpen()) popup.addTo(map);
@@ -308,9 +312,9 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         if (data.type === "devices") { devices = data.devices || []; sync(); }
         else if (data.type === "self") updateSelf(data.latitude, data.longitude, data.center);
         else if (data.type === "focus") {
-          var d = devices.find(function (x) { return x.deviceId === data.deviceId; });
+          var d = devices.find(function (x) { return keyOf(x) === data.key; });
           if (d && d.position) {
-            selectedId = d.deviceId;
+            selectedId = keyOf(d);
             sync();
             map.flyTo({ center: [d.position.longitude, d.position.latitude], zoom: Math.max(map.getZoom(), 15), padding: PADDING });
           }

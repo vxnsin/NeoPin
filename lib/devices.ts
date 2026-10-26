@@ -1,10 +1,31 @@
 export type Device = {
   deviceId: string;
+  userId?: number;
+  owner?: { username: string; displayName: string };
   position: { latitude: number; longitude: number } | null;
   lastPing: string | null;
   status: "online" | "offline";
   avatarUrl?: string | null;
 };
+
+// Device names are only unique per account.
+export function deviceKey(device: Pick<Device, "deviceId" | "userId">): string {
+  return `${device.userId ?? ""}:${device.deviceId}`;
+}
+
+export function isOwnDevice(device: Pick<Device, "deviceId" | "userId">, userId: number | undefined, deviceId: string | undefined): boolean {
+  return device.userId === userId && device.deviceId === deviceId;
+}
+
+// "Luis · iPhone": the owner first, so devices of different people do not look alike.
+export function deviceLabel(device: Pick<Device, "deviceId" | "owner">): string {
+  return device.owner?.displayName ? `${device.owner.displayName} \u00b7 ${device.deviceId}` : device.deviceId;
+}
+
+// Initials and colour follow the owner, like the picture does.
+export function ownerName(device: Pick<Device, "deviceId" | "owner">): string {
+  return device.owner?.displayName || device.deviceId;
+}
 
 export type Freshness = "online" | "stale" | "offline";
 

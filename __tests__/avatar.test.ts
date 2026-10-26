@@ -111,3 +111,25 @@ test("the map page can draw a day and clear it again", () => {
   for (const type of ["route", "routeFocus", "routeClear"]) expect(html).toContain(`data.type === "${type}"`);
   expect(html).toContain('type: "segment"');
 });
+
+test("devices of different accounts with the same name stay apart", () => {
+  const { deviceKey, deviceLabel, isOwnDevice, ownerName } = require("../lib/devices");
+  const mine = { deviceId: "iPhone", userId: 1, owner: { username: "luis", displayName: "Luis" } };
+  const other = { deviceId: "iPhone", userId: 2, owner: { username: "anna", displayName: "Anna" } };
+  expect(deviceKey(mine)).toBe("1:iPhone");
+  expect(deviceKey(mine)).not.toBe(deviceKey(other));
+  expect(isOwnDevice(mine, 1, "iPhone")).toBe(true);
+  expect(isOwnDevice(other, 1, "iPhone")).toBe(false);
+  expect(isOwnDevice({ deviceId: "iPad", userId: 1 }, 1, "iPhone")).toBe(false);
+  expect(deviceLabel(other)).toBe("Anna · iPhone");
+  expect(deviceLabel({ deviceId: "iPad" })).toBe("iPad");
+  expect(ownerName(other)).toBe("Anna");
+});
+
+test("the map keys pins by owner and device and shows both names", () => {
+  const html = buildMapHtml(false);
+  expect(html).toContain("function keyOf(d)");
+  expect(html).toContain("markers[id]");
+  expect(html).toContain("keyOf(x) === data.key");
+  expect(html).toContain("fullName(d)");
+});
