@@ -260,38 +260,30 @@ input {
 .avatar--c6 { --avatar-bg: #7c3aed; }
 .avatar--c7 { --avatar-bg: #c026d3; }
 
-/* Status pill */
-.status-pill {
+/* Connection indicator: a dot and a word, no pill of its own. */
+.conn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 12px 0 10px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  font-size: 13px;
-  font-weight: 600;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
-.status-pill__dot {
+.conn__dot {
   position: relative;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--offline);
 }
 
-.status-pill[data-state="online"] {
-  background: color-mix(in srgb, var(--online) 14%, transparent);
-  color: color-mix(in srgb, var(--online) 70%, var(--text));
-}
-
-.status-pill[data-state="online"] .status-pill__dot {
+.conn[data-state="online"] .conn__dot {
   background: var(--online);
 }
 
-.status-pill[data-state="online"] .status-pill__dot::after {
+.conn[data-state="online"] .conn__dot::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -300,17 +292,16 @@ input {
   animation: ping 2s ease-out infinite;
 }
 
-.status-pill[data-state="connecting"] .status-pill__dot {
+.conn[data-state="connecting"] .conn__dot {
   background: var(--stale);
   animation: blink 1s ease-in-out infinite;
 }
 
-.status-pill[data-state="offline"] {
-  background: color-mix(in srgb, var(--danger) 14%, transparent);
+.conn[data-state="offline"] {
   color: var(--danger);
 }
 
-.status-pill[data-state="offline"] .status-pill__dot {
+.conn[data-state="offline"] .conn__dot {
   background: var(--danger);
   animation: blink 1s ease-in-out infinite;
 }

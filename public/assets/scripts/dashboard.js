@@ -1,4 +1,6 @@
 const STALE_AFTER_MS = 10 * 60 * 1000;
+// From this zoom on every pin shows its name without being touched.
+const LABEL_ZOOM = 14;
 // OpenFreeMap serves vector tiles without an API key. One style per theme.
 const MAP_STYLES = {
   light: "https://tiles.openfreemap.org/styles/positron",
@@ -9,12 +11,17 @@ const STATE_ORDER = { online: 0, stale: 1, offline: 2 };
 
 const statusEl = document.getElementById("status");
 const summaryEl = document.getElementById("summary");
+const onlineCountEl = document.getElementById("onlineCount");
+const totalCountEl = document.getElementById("totalCount");
+const clockEl = document.getElementById("clock");
+const dateEl = document.getElementById("date");
 const listEl = document.getElementById("deviceList");
-const searchEl = document.getElementById("search");
-const sidebar = document.getElementById("sidebar");
-const sheetHandle = document.getElementById("sheetHandle");
+const stackEl = document.getElementById("avatarStack");
+const panel = document.getElementById("devicesPanel");
+const panelToggle = document.getElementById("panelToggle");
 const refreshButton = document.getElementById("refreshButton");
 const toastEl = document.getElementById("toast");
+const mapEl = document.getElementById("map");
 const phone = window.matchMedia("(max-width: 767px)");
 
 const markers = new Map();
@@ -53,13 +60,14 @@ function initials(name) {
   return letters.toUpperCase() || "?";
 }
 
-// The same name always gets the same colour.
+// The same name always gets the same colour, in the app too.
 function colourClass(name) {
   let hash = 0;
   for (const char of String(name)) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
   return `avatar--c${hash % 8}`;
 }
 
+// The picture comes from avatarUrl only, so where it is stored can change without touching this.
 function avatarHtml(device, size = "") {
   const inner = device.avatarUrl
     ? `<img src="${esc(device.avatarUrl)}" alt="" decoding="async" />`
@@ -76,7 +84,7 @@ function metaText(device) {
 
 function setStatus(state, text) {
   statusEl.dataset.state = state;
-  statusEl.querySelector(".status-pill__text").textContent = text;
+  statusEl.querySelector(".conn__text").textContent = text;
 }
 
 function toast(text) {
@@ -88,6 +96,12 @@ function toast(text) {
 
 function hideLoader() {
   document.getElementById("loader").classList.add("is-hidden");
+}
+
+function updateClock() {
+  const now = new Date();
+  clockEl.textContent = now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  dateEl.textContent = now.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
 }
 
 // Map
@@ -127,6 +141,10 @@ map.on("styleimagemissing", (event) => {
   if (!map.hasImage(event.id)) map.addImage(event.id, { width: 1, height: 1, data: new Uint8Array(4) });
 });
 
+const updateLabels = () => mapEl.classList.toggle("show-labels", map.getZoom() >= LABEL_ZOOM);
+map.on("zoom", updateLabels);
+updateLabels();
+
 document.documentElement.addEventListener("themechange", (event) => {
   // Markers are DOM elements and survive the style swap.
   map.setStyle(MAP_STYLES[event.detail]);
@@ -153,11 +171,12 @@ map.on("click", (event) => {
   select(null);
 });
 
-// Room for the sidebar, so a device never hides behind it.
+// Room for the HUD and the device panel, so a device never hides behind them.
 function mapPadding() {
-  const box = sidebar.getBoundingClientRect();
-  if (phone.matches) return { top: 90, bottom: window.innerHeight - box.top + 70, left: 80, right: 80 };
-  return { top: 90, bottom: 90, left: box.right + 80, right: 120 };
+  const box = panel.getBoundingClientRect();
+  if (phone.matches) return { top: 100, bottom: window.innerHeight - box.top + 60, left: 70, right: 70 };
+  const expanded = panel.dataset.expanded === "true";
+  return { top: 120, bottom: 80, left: expanded ? box.right + 70 : 90, right: 110 };
 }
 
 function located() {
@@ -170,13 +189,14 @@ function fitAll(animate) {
     if (animate) toast("No device has sent a position yet.");
     return;
   }
-  const options = { padding: mapPadding(), maxZoom: 15, duration: animate ? 900 : 0 };
+  const padding = mapPadding();
+  const duration = animate ? 900 : 0;
   if (points.length === 1) {
-    map.easeTo({ center: points[0], zoom: 14, padding: options.padding, duration: options.duration });
+    map.easeTo({ center: points[0], zoom: 14, padding, duration });
     return;
   }
   const bounds = points.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
-  map.fitBounds(bounds, options);
+  map.fitBounds(bounds, { padding, maxZoom: 15, duration });
 }
 
 function pinHtml(device) {
@@ -275,22 +295,24 @@ async function pingDevice(deviceId, button) {
   }
 }
 
-// List
+// Device panel
 
 function sortedDevices() {
-  const query = searchEl.value.trim().toLowerCase();
-  return devices
-    .filter((d) => !query || d.deviceId.toLowerCase().includes(query))
-    .sort(
-      (a, b) =>
-        STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
-        a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
-    );
+  return [...devices].sort(
+    (a, b) =>
+      STATE_ORDER[freshness(a)] - STATE_ORDER[freshness(b)] ||
+      a.deviceId.localeCompare(b.deviceId, undefined, { sensitivity: "base" })
+  );
 }
 
-function renderList() {
+function renderPanel() {
   const online = devices.filter((d) => d.status === "online").length;
-  summaryEl.textContent = devices.length === 0 ? "No devices" : `${online} of ${devices.length} online`;
+  onlineCountEl.textContent = online;
+  totalCountEl.textContent = devices.length;
+  summaryEl.textContent = devices.length === 0 ? "No devices yet" : `${online} of ${devices.length} connected`;
+
+  const sorted = sortedDevices();
+  stackEl.innerHTML = sorted.slice(0, 4).map((device) => avatarHtml(device, "sm")).join("");
 
   if (devices.length === 0) {
     listEl.innerHTML = `
@@ -302,13 +324,7 @@ function renderList() {
     return;
   }
 
-  const visible = sortedDevices();
-  if (visible.length === 0) {
-    listEl.innerHTML = `<li class="empty"><strong>Nothing found</strong>No device matches “${esc(searchEl.value.trim())}”.</li>`;
-    return;
-  }
-
-  listEl.innerHTML = visible
+  listEl.innerHTML = sorted
     .map((device) => {
       const selected = device.deviceId === selectedId;
       return `
@@ -329,9 +345,9 @@ function renderList() {
 
 function render() {
   syncMarkers();
-  renderList();
+  renderPanel();
   syncPopup();
-  document.documentElement.style.setProperty("--sheet-height", `${sidebar.offsetHeight + 16}px`);
+  document.documentElement.style.setProperty("--sheet-height", `${panel.offsetHeight + 16}px`);
 }
 
 // From the list the map zooms in on the device, from a pin it only moves enough
@@ -357,18 +373,13 @@ listEl.addEventListener("click", (event) => {
   if (button) select(button.dataset.id);
 });
 
-searchEl.addEventListener("input", renderList);
-
 function setExpanded(expanded) {
-  sidebar.dataset.expanded = String(expanded);
-  sheetHandle.setAttribute("aria-expanded", String(expanded));
-  document.documentElement.style.setProperty("--sheet-height", `${sidebar.offsetHeight + 16}px`);
+  panel.dataset.expanded = String(expanded);
+  panelToggle.setAttribute("aria-expanded", String(expanded));
+  document.documentElement.style.setProperty("--sheet-height", `${panel.offsetHeight + 16}px`);
 }
 
-sheetHandle.addEventListener("click", () => setExpanded(sidebar.dataset.expanded !== "true"));
-document.querySelector(".sidebar__status").addEventListener("click", () => {
-  if (phone.matches) setExpanded(sidebar.dataset.expanded !== "true");
-});
+panelToggle.addEventListener("click", () => setExpanded(panel.dataset.expanded !== "true"));
 
 refreshButton.addEventListener("click", () => {
   if (socket?.readyState !== WebSocket.OPEN) return toast("Not connected to the server.");
@@ -409,7 +420,7 @@ function connect() {
     }
     if ("successful" in data) {
       if (!data.successful) return (window.location.href = "/login.html");
-      setStatus("online", "Live");
+      setStatus("online", "Connected");
       hideLoader();
       return;
     }
@@ -429,7 +440,10 @@ function connect() {
 
 // Times like "3 min ago" and the stale state move on without new data.
 setInterval(render, 15_000);
-phone.addEventListener("change", () => setExpanded(false));
-setExpanded(false);
+setInterval(updateClock, 5_000);
+// On a phone the list starts folded, so the map stays visible.
+phone.addEventListener("change", (event) => setExpanded(!event.matches));
+setExpanded(!phone.matches);
+updateClock();
 render();
 connect();

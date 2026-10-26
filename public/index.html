@@ -24,7 +24,6 @@
       <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" /></symbol>
       <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol>
       <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></symbol>
-      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></symbol>
       <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="2.5" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></symbol>
       <symbol id="i-fit" viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" /></symbol>
       <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6" /></symbol>
@@ -40,17 +39,29 @@
 
     <div id="map"></div>
 
-    <aside class="sidebar" id="sidebar" aria-label="Devices">
-      <button class="sidebar__handle" id="sheetHandle" type="button" aria-controls="sidebarBody" aria-expanded="false">
-        <span class="sr-only">Show devices</span>
-      </button>
+    <!-- Heads-up display over the map: who is where, how many are online, the time, the connection. -->
+    <header class="hud">
+      <div class="hud-tile hud-brand">
+        <span class="brand__mark"><svg class="icon"><use href="#i-pin" /></svg></span>
+        <div class="hud-brand__text">
+          <strong>NeoPin</strong>
+          <span class="conn" id="status" data-state="connecting" role="status">
+            <span class="conn__dot"></span>
+            <span class="conn__text">Connecting…</span>
+          </span>
+        </div>
+      </div>
 
-      <header class="sidebar__header">
-        <span class="brand">
-          <span class="brand__mark"><svg class="icon"><use href="#i-pin" /></svg></span>
-          NeoPin
-        </span>
-        <div class="sidebar__actions">
+      <div class="hud-right">
+        <div class="hud-tile hud-stat" aria-label="Devices online">
+          <span class="hud-stat__value"><span id="onlineCount">0</span><small>/<span id="totalCount">0</span></small></span>
+          <span class="hud-stat__label">online</span>
+        </div>
+        <div class="hud-tile hud-stat hud-clock">
+          <span class="hud-stat__value" id="clock">--:--</span>
+          <span class="hud-stat__label" id="date"></span>
+        </div>
+        <div class="hud-tile hud-tools">
           <button class="icon-btn" id="refreshButton" type="button" aria-label="Ask every device for a fresh position" title="Refresh positions">
             <svg class="icon"><use href="#i-refresh" /></svg>
           </button>
@@ -62,25 +73,22 @@
             <svg class="icon"><use href="#i-logout" /></svg>
           </a>
         </div>
-      </header>
-
-      <div class="sidebar__status">
-        <div class="status-pill" id="status" data-state="connecting" role="status">
-          <span class="status-pill__dot"></span>
-          <span class="status-pill__text">Connecting…</span>
-        </div>
-        <span class="sidebar__count" id="summary">No devices</span>
-        <svg class="icon sidebar__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
       </div>
+    </header>
 
-      <div class="sidebar__body" id="sidebarBody">
-        <label class="search">
-          <svg class="icon"><use href="#i-search" /></svg>
-          <input type="search" id="search" placeholder="Search devices" autocomplete="off" aria-label="Search devices" />
-        </label>
+    <section class="devices" id="devicesPanel" aria-label="Devices" data-expanded="true">
+      <button class="devices__head" id="panelToggle" type="button" aria-controls="devicesBody" aria-expanded="true">
+        <span class="devices__title">
+          <strong>Devices</strong>
+          <span id="summary">No devices</span>
+        </span>
+        <span class="devices__stack" id="avatarStack" aria-hidden="true"></span>
+        <svg class="icon devices__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
+      </button>
+      <div class="devices__body" id="devicesBody">
         <ul class="device-list" id="deviceList" role="list"></ul>
       </div>
-    </aside>
+    </section>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
