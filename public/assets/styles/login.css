@@ -5,32 +5,135 @@ body {
   overflow: hidden;
 }
 
-/* A faint map-like grid with the brand glow behind the card. */
+/* Behind the card: a slowly drifting town map with device markers popping up. */
 .backdrop {
+  --map-bg: #e9ebef;
+  --map-road: #ffffff;
+  --map-road-major: #ffffff;
+  --map-casing: #d6dae1;
+  --map-water: #c9dcf0;
+  --map-park: #d9eadb;
   position: fixed;
   inset: 0;
   z-index: 0;
+  overflow: hidden;
+  background: var(--map-bg);
   pointer-events: none;
 }
 
-.backdrop__grid {
-  position: absolute;
-  inset: -50%;
-  background-image: linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 44px 44px;
-  transform: perspective(900px) rotateX(55deg);
-  mask-image: radial-gradient(circle at 50% 50%, #000 0%, transparent 55%);
+:root[data-theme="dark"] .backdrop {
+  --map-bg: #0d1016;
+  --map-road: #1b2029;
+  --map-road-major: #252b37;
+  --map-casing: #0d1016;
+  --map-water: #12233a;
+  --map-park: #10201a;
 }
 
-.backdrop__glow {
+.backdrop__map {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 640px;
-  height: 640px;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle, var(--brand-soft) 0%, transparent 65%);
+  inset: -6%;
+  width: 112%;
+  height: 112%;
+  animation: drift 70s ease-in-out infinite alternate;
+}
+
+.backdrop__map .road path {
+  fill: none;
+  stroke: var(--map-road);
+  stroke-width: 9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.backdrop__map .road--major path {
+  stroke: var(--map-road-major);
+  stroke-width: 18;
+  filter: drop-shadow(0 0 1px var(--map-casing));
+}
+
+.backdrop__map .water {
+  fill: none;
+  stroke: var(--map-water);
+  stroke-width: 44;
+  stroke-linecap: round;
+}
+
+.backdrop__map .water-fill {
+  fill: var(--map-water);
+}
+
+.backdrop__map .park {
+  fill: var(--map-park);
+}
+
+/* Softens the map towards the card, so the form stays the calmest spot. */
+.backdrop__shade {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, color-mix(in srgb, var(--map-bg) 70%, transparent) 0%, transparent 60%);
+}
+
+.blip {
+  --blip: var(--brand);
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--blip);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.35);
+  animation: blip-in 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) both, blip-out 0.6s ease 3.4s forwards;
+}
+
+.blip--large {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+}
+
+.blip::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid var(--blip);
+  border-radius: 50%;
+  animation: blip-ripple 1.8s ease-out 0.3s 2 both;
+}
+
+@keyframes drift {
+  from {
+    transform: translate(-2%, -1.5%) scale(1);
+  }
+  to {
+    transform: translate(2%, 1.5%) scale(1.06);
+  }
+}
+
+@keyframes blip-in {
+  from {
+    opacity: 0;
+    transform: scale(0) translateY(8px);
+  }
+}
+
+@keyframes blip-out {
+  to {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+@keyframes blip-ripple {
+  from {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(3);
+  }
 }
 
 .theme-toggle {

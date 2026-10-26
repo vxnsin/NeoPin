@@ -21,9 +21,36 @@
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
     </svg>
 
-    <div class="backdrop" aria-hidden="true">
-      <div class="backdrop__grid"></div>
-      <div class="backdrop__glow"></div>
+    <!-- A drifting sketch of a town; login.js lets device markers pop up on it. -->
+    <div class="backdrop" id="backdrop" aria-hidden="true">
+      <svg class="backdrop__map" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+        <rect class="park" x="590" y="110" width="210" height="140" rx="26" />
+        <rect class="park" x="1230" y="640" width="250" height="170" rx="30" />
+        <rect class="park" x="120" y="380" width="150" height="190" rx="22" />
+        <circle class="water-fill" cx="1010" cy="200" r="70" />
+        <path class="water" d="M-50 720 C200 650 380 800 620 730 S1000 560 1250 620 S1550 760 1700 700" />
+        <g class="road">
+          <path d="M0 120 L1600 170" />
+          <path d="M0 520 L1600 470" />
+          <path d="M180 0 L240 1000" />
+          <path d="M760 0 L700 1000" />
+          <path d="M1350 0 L1420 1000" />
+          <path d="M0 640 C400 600 800 560 1600 600" />
+          <path d="M300 400 L650 520 L820 460" />
+          <path d="M1200 380 L1500 420" />
+          <path d="M560 820 L980 900" />
+          <path d="M40 960 L620 870" />
+          <path d="M1000 980 C1100 880 1300 900 1600 860" />
+          <path d="M600 0 C640 120 560 260 620 380" />
+        </g>
+        <g class="road road--major">
+          <path d="M-50 300 C300 260 600 380 900 330 S1400 220 1700 280" />
+          <path d="M420 -50 C460 200 380 450 470 700 S520 950 500 1050" />
+          <path d="M1100 -50 C1060 250 1180 500 1120 750 S1080 950 1150 1050" />
+          <path d="M-50 860 C500 820 1100 900 1700 800" />
+        </g>
+      </svg>
+      <div class="backdrop__shade"></div>
     </div>
 
     <button class="icon-btn theme-toggle" type="button" data-theme-toggle aria-label="Switch between light and dark mode">

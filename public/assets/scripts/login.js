@@ -1,3 +1,27 @@
+// Device markers pop up on the background map now and then, like phones reporting in.
+const BLIP_COLORS = ["#d3171e", "#22c55e", "#2563eb", "#7c3aed", "#ea580c", "#0284c7", "#db2777"];
+const backdrop = document.getElementById("backdrop");
+
+function blip() {
+  if (document.hidden || backdrop.childElementCount > 9) return;
+  const x = 4 + Math.random() * 92;
+  const y = 6 + Math.random() * 88;
+  // Keep the middle free, the card sits there.
+  if (x > 33 && x < 67 && y > 22 && y < 78) return;
+  const el = document.createElement("span");
+  el.className = Math.random() < 0.3 ? "blip blip--large" : "blip";
+  el.style.left = `${x}%`;
+  el.style.top = `${y}%`;
+  el.style.setProperty("--blip", BLIP_COLORS[Math.floor(Math.random() * BLIP_COLORS.length)]);
+  backdrop.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  for (let i = 0; i < 4; i++) setTimeout(blip, i * 250);
+  setInterval(blip, 700);
+}
+
 const form = document.getElementById("loginForm");
 const input = document.getElementById("password");
 const field = input.closest(".field");
