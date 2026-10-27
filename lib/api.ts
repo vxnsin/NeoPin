@@ -160,6 +160,31 @@ export async function fetchMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me`, { headers: deviceHeaders(auth) }));
 }
 
+export type PlaceKind =
+  | "home"
+  | "work"
+  | "cafe"
+  | "restaurant"
+  | "bar"
+  | "grocery"
+  | "shop"
+  | "station"
+  | "school"
+  | "health"
+  | "sport"
+  | "park"
+  | "culture"
+  | "hotel"
+  | "worship"
+  | "fuel"
+  | "building"
+  | "place";
+
+// Where a visit was: an own place (named or confirmed) or a guess from OpenStreetMap.
+export type VisitPlace = { id: number | null; name: string; kind: PlaceKind; source: "own" | "osm"; osmId: string | null };
+
+export type PlaceChoice = VisitPlace & { distanceM: number };
+
 export type Visit = {
   type: "visit";
   start: number;
@@ -168,6 +193,8 @@ export type Visit = {
   lat: number;
   lon: number;
   pointCount: number;
+  // Servers from before place names leave it out.
+  place?: VisitPlace | null;
 };
 
 export type TripMode = "walking" | "cycling" | "driving";
@@ -189,6 +216,8 @@ export type Timeline = {
   deviceId: string;
   summary: { visits: number; distanceM: number; movingMs: number; pointCount: number };
   segments: Segment[];
+  // Some place names are still being looked up, asking again in a few seconds has them.
+  placesPending?: boolean;
 };
 
 export type AccountSummary = User & { devices: number };
@@ -223,6 +252,39 @@ export async function fetchTimeline(auth: DeviceAuth, deviceId: string, date: st
 export async function fetchTimelineDays(auth: DeviceAuth, deviceId: string, userId?: number): Promise<string[]> {
   return json(
     await request(`${httpBase(auth.serverIp)}/api/timeline/days?${timelineQuery(deviceId, userId)}`, { headers: deviceHeaders(auth) })
+  );
+}
+
+const forUser = (userId?: number) => (userId === undefined ? "" : `userId=${userId}`);
+
+// What a visit could have been: own places close by first, then OpenStreetMap, nearest first.
+export async function fetchPlaceChoices(auth: DeviceAuth, lat: number, lon: number, userId?: number): Promise<PlaceChoice[]> {
+  const query = [`lat=${lat}`, `lon=${lon}`, forUser(userId)].filter(Boolean).join("&");
+  return json(await request(`${httpBase(auth.serverIp)}/api/places/nearby?${query}`, { headers: deviceHeaders(auth) }));
+}
+
+export type PlaceInput = { lat: number; lon: number; name: string; kind?: PlaceKind; osmId?: string | null };
+
+// "I was here": names the spot. An own place that already covers it is corrected.
+export async function savePlaceAt(auth: DeviceAuth, place: PlaceInput, userId?: number): Promise<void> {
+  const { osmId, ...rest } = place;
+  await json(
+    await request(`${httpBase(auth.serverIp)}/api/places?${forUser(userId)}`, {
+      method: "POST",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ ...rest, ...(osmId && { osmId }) }),
+    })
+  );
+}
+
+// An own place close by that did not reach this far grows to cover it.
+export async function growPlace(auth: DeviceAuth, id: number, radiusM: number, userId?: number): Promise<void> {
+  await json(
+    await request(`${httpBase(auth.serverIp)}/api/places/${id}?${forUser(userId)}`, {
+      method: "PATCH",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ radiusM: Math.min(1000, Math.round(radiusM)) }),
+    })
   );
 }
 

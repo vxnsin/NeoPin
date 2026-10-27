@@ -4,6 +4,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
+import PlacePicker from "@/components/PlacePicker";
 import {
   fetchTimeline,
   fetchTimelineDays,
@@ -18,6 +19,7 @@ import {
   MODE_COLORS,
   MODE_ICONS,
   MODE_LABELS,
+  PLACE_ICONS,
   dayKey,
   dayLabel,
   formatClock,
@@ -27,8 +29,14 @@ import {
   routeSegments,
   shiftDay,
   shortDayLabel,
+  visitKind,
   visitNumbers,
+  visitTitle,
 } from "@/lib/timeline";
+
+// Place names the server is still looking up are asked for again, a few times at most.
+const PENDING_RETRY_MS = 4000;
+const PENDING_RETRIES = 5;
 
 type Props = {
   creds: StoredCredentials;
@@ -76,7 +84,10 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   const [reloads, setReloads] = useState(0);
+  // The visit whose place is being picked.
+  const [picking, setPicking] = useState<number | null>(null);
   const run = useRef(0);
+  const pendingTries = useRef(0);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const rows = useRef<Record<number, number>>({});
   const bottomPadding = height + 16;
@@ -131,6 +142,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     setLoading(true);
     setError("");
     setSelected(null);
+    setPicking(null);
+    pendingTries.current = 0;
     fetchTimeline(creds, deviceId, day, queryUser)
       .then((result) => {
         if (current !== run.current) return;
@@ -149,6 +162,23 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   }, [creds, deviceId, queryUser, day, reloads, post, bottomPadding]);
 
   useEffect(() => () => post({ type: "routeClear" }), [post]);
+
+  // Same day again for new place names only: the route on the map stays as it is.
+  const refreshPlaces = useCallback(() => {
+    const current = run.current;
+    fetchTimeline(creds, deviceId, day, queryUser)
+      .then((result) => current === run.current && setTimeline(result))
+      .catch(() => {});
+  }, [creds, deviceId, day, queryUser]);
+
+  useEffect(() => {
+    if (!timeline?.placesPending || pendingTries.current >= PENDING_RETRIES) return;
+    const timer = setTimeout(() => {
+      pendingTries.current += 1;
+      refreshPlaces();
+    }, PENDING_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [timeline, refreshPlaces]);
 
   const select = useCallback(
     (index: number | null) => {
@@ -334,50 +364,87 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
             const first = index === 0;
             const last = index === segments.length - 1;
             const time = `${formatClock(segment.start)} – ${formatClock(segment.end)}`;
+            const kind = segment.type === "visit" ? visitKind(segment) : null;
             return (
-              <Pressable
-                key={`${segment.type}-${segment.start}`}
-                onLayout={(event) => {
-                  rows.current[index] = event.nativeEvent.layout.y;
-                }}
-                onPress={() => select(active ? null : index)}
-                style={styles.row}
-                accessibilityLabel={
-                  segment.type === "visit"
-                    ? `Stop ${numbers.get(index)}, ${time}, ${formatDuration(segment.durationMs)}`
-                    : `${MODE_LABELS[segment.mode]}, ${formatDistance(segment.distanceM)}, ${time}`
-                }
-              >
-                <View style={styles.rail}>
-                  <View style={[styles.line, { backgroundColor: c.subtle, top: first ? 22 : 0, bottom: last ? "70%" : 0 }]} />
+              <React.Fragment key={`${segment.type}-${segment.start}`}>
+                <Pressable
+                  onLayout={(event) => {
+                    rows.current[index] = event.nativeEvent.layout.y;
+                  }}
+                  onPress={() => select(active ? null : index)}
+                  style={styles.row}
+                  accessibilityLabel={
+                    segment.type === "visit"
+                      ? `${visitTitle(segment, numbers.get(index))}, ${time}, ${formatDuration(segment.durationMs)}`
+                      : `${MODE_LABELS[segment.mode]}, ${formatDistance(segment.distanceM)}, ${time}`
+                  }
+                >
+                  <View style={styles.rail}>
+                    <View style={[styles.line, { backgroundColor: c.subtle, top: first ? 22 : 0, bottom: last ? "70%" : 0 }]} />
+                    {segment.type === "visit" ? (
+                      <View style={[styles.stopDot, { backgroundColor: active ? c.primary : c.secondary }]}>
+                        <Text style={[styles.stopNumber, { color: active ? c.raised : c.onSecondary }]}>{numbers.get(index)}</Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.modeDot, { backgroundColor: c.raised, borderColor: MODE_COLORS[segment.mode] }]}>
+                        <MaterialIcons name={MODE_ICONS[segment.mode]} size={14} color={MODE_COLORS[segment.mode]} />
+                      </View>
+                    )}
+                  </View>
                   {segment.type === "visit" ? (
-                    <View style={[styles.stopDot, { backgroundColor: active ? c.primary : c.secondary }]}>
-                      <Text style={[styles.stopNumber, { color: active ? c.raised : c.onSecondary }]}>{numbers.get(index)}</Text>
+                    <View style={[styles.card, { backgroundColor: active ? c.subtle : "transparent" }]}>
+                      <View style={styles.cardText}>
+                        <Text style={[styles.cardTitle, { color: c.primary }]} numberOfLines={1}>
+                          {visitTitle(segment, numbers.get(index))}
+                        </Text>
+                        <Text style={[styles.cardMeta, { color: c.muted }]}>
+                          {time} · {formatDuration(segment.durationMs)}
+                        </Text>
+                        {kind && segment.place ? (
+                          <View style={styles.kindRow}>
+                            <MaterialIcons name={PLACE_ICONS[segment.place.kind] ?? "place"} size={13} color={c.muted} />
+                            <Text style={[styles.cardMeta, styles.kindText, { color: c.muted }]}>{kind}</Text>
+                          </View>
+                        ) : (
+                          <Text style={[styles.cardMeta, { color: c.muted }]}>{formatCoords(segment.lat, segment.lon)}</Text>
+                        )}
+                      </View>
+                      {/* Servers from before place names have no place field and nothing to save to. */}
+                      {segment.place !== undefined && (
+                        <Pressable
+                          style={[styles.editButton, { backgroundColor: picking === index ? c.primary : c.subtle }]}
+                          onPress={() => setPicking(picking === index ? null : index)}
+                          hitSlop={6}
+                          accessibilityLabel="Change the place"
+                        >
+                          <MaterialIcons name="edit" size={16} color={picking === index ? c.raised : c.muted} />
+                        </Pressable>
+                      )}
                     </View>
                   ) : (
-                    <View style={[styles.modeDot, { backgroundColor: c.raised, borderColor: MODE_COLORS[segment.mode] }]}>
-                      <MaterialIcons name={MODE_ICONS[segment.mode]} size={14} color={MODE_COLORS[segment.mode]} />
+                    <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
+                      <Text style={[styles.tripTitle, { color: c.primary }]}>
+                        {MODE_LABELS[segment.mode]} · {formatDistance(segment.distanceM)}
+                      </Text>
+                      <Text style={[styles.cardMeta, { color: c.muted }]}>
+                        {formatDuration(segment.durationMs)} · {time}
+                      </Text>
                     </View>
                   )}
-                </View>
-                {segment.type === "visit" ? (
-                  <View style={[styles.card, { backgroundColor: active ? c.subtle : "transparent" }]}>
-                    <Text style={[styles.cardTitle, { color: c.primary }]}>{time}</Text>
-                    <Text style={[styles.cardMeta, { color: c.muted }]}>
-                      Stayed {formatDuration(segment.durationMs)} · {formatCoords(segment.lat, segment.lon)}
-                    </Text>
-                  </View>
-                ) : (
-                  <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
-                    <Text style={[styles.tripTitle, { color: c.primary }]}>
-                      {MODE_LABELS[segment.mode]} · {formatDistance(segment.distanceM)}
-                    </Text>
-                    <Text style={[styles.cardMeta, { color: c.muted }]}>
-                      {formatDuration(segment.durationMs)} · {time}
-                    </Text>
-                  </View>
+                </Pressable>
+                {picking === index && segment.type === "visit" && (
+                  <PlacePicker
+                    creds={creds}
+                    visit={segment}
+                    userId={queryUser}
+                    onSaved={() => {
+                      setPicking(null);
+                      pendingTries.current = 0;
+                      refreshPlaces();
+                    }}
+                  />
                 )}
-              </Pressable>
+              </React.Fragment>
             );
           })}
         </ScrollView>
@@ -445,7 +512,11 @@ const styles = StyleSheet.create({
   stopDot: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   stopNumber: { fontSize: 12.5, fontWeight: "800" },
   modeDot: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: "center", justifyContent: "center" },
-  card: { flex: 1, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14 },
+  card: { flex: 1, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 14 },
+  cardText: { flex: 1 },
+  kindRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
+  kindText: { marginTop: 0 },
+  editButton: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   cardTitle: { fontSize: 15, fontWeight: "700" },
   cardMeta: { fontSize: 12.5, marginTop: 2 },
   tripRow: { flex: 1, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
