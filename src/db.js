@@ -86,6 +86,10 @@ export function initDb(file = config.dbPath) {
   if (!db.prepare("PRAGMA table_info(tokens)").all().some((c) => c.name === "device_type")) {
     db.exec("ALTER TABLE tokens ADD COLUMN device_type TEXT");
   }
+  // How exact a stored fix is and how fast the phone moved, both straight from its GPS.
+  const positionColumns = db.prepare("PRAGMA table_info(positions)").all().map((c) => c.name);
+  if (!positionColumns.includes("accuracy")) db.exec("ALTER TABLE positions ADD COLUMN accuracy REAL");
+  if (!positionColumns.includes("speed")) db.exec("ALTER TABLE positions ADD COLUMN speed REAL");
   // The device a person picked to stand for them, NULL for the automatic choice.
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "primary_device_id")) {
     db.exec("ALTER TABLE users ADD COLUMN primary_device_id TEXT");

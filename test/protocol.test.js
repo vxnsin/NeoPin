@@ -15,7 +15,7 @@ afterEach(() => s.stop());
 
 test("a device authenticates with its token and receives the device list", async () => {
   const phone = await s.device("luis", "phone");
-  assert.deepEqual(phone.reply, { successful: true });
+  assert.deepEqual(phone.reply, { successful: true, features: ["positionBatch"] });
   const list = await phone.next();
   assert.equal(list.type, "dataResponse");
   assert.equal(list.devices[0].deviceId, "phone");
@@ -77,7 +77,7 @@ test("a reconnecting device replaces its old socket instead of being rejected", 
   const first = await s.device("luis", "phone");
   await first.next();
   const second = await s.device("luis", "phone");
-  assert.deepEqual(second.reply, { successful: true });
+  assert.equal(second.reply.successful, true);
   assert.equal((await first.closed).code, 4001);
   const list = await second.next();
   assert.equal(list.devices.filter((d) => d.deviceId === "phone").length, 1);

@@ -2,9 +2,12 @@ import { config } from "./config.js";
 import { getDb } from "./db.js";
 
 // Stored fixes are thinned out: a new one only when the device moved or a while has passed.
-const MIN_GAP_MS = 15_000;
+// On the move a fix every few seconds is kept, so a bus ride keeps its curves.
+const MIN_GAP_MS = 5_000;
 const MIN_MOVE_M = 15;
 const HEARTBEAT_MS = 5 * 60_000;
+// Fixes less exact than this are noise from inside buildings or a cold GPS.
+export const MAX_ACCURACY_M = 100;
 
 const last = new Map();
 
@@ -16,22 +19,32 @@ export function distanceM(aLat, aLon, bLat, bLon) {
   return 12_742_000 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-export function recordPosition(userId, deviceId, lat, lon, ts = Date.now()) {
+// ts is when the GPS took the fix, so fixes sent later (after a dead spot) land at
+// the right time. Those older than the newest stored one go in as they are, without
+// disturbing the thinning of the live ones.
+export function recordPosition(userId, deviceId, lat, lon, ts = Date.now(), { accuracy = null, speed = null } = {}) {
+  if (accuracy !== null && accuracy > MAX_ACCURACY_M) return false;
   const key = `${userId}:${deviceId}`;
   const prev = last.get(key);
-  if (prev) {
+  const backfill = prev && ts <= prev.ts;
+  if (prev && !backfill) {
     const gap = ts - prev.ts;
+    const moved = distanceM(prev.lat, prev.lon, lat, lon);
     if (gap < MIN_GAP_MS) return false;
-    if (gap < HEARTBEAT_MS && distanceM(prev.lat, prev.lon, lat, lon) < MIN_MOVE_M) return false;
+    if (gap < HEARTBEAT_MS && moved < MIN_MOVE_M) return false;
   }
-  getDb().prepare("INSERT INTO positions (user_id, device_id, ts, lat, lon) VALUES (?, ?, ?, ?, ?)").run(userId, deviceId, ts, lat, lon);
-  last.set(key, { ts, lat, lon });
+  getDb()
+    .prepare("INSERT INTO positions (user_id, device_id, ts, lat, lon, accuracy, speed) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(userId, deviceId, ts, lat, lon, accuracy, speed);
+  if (!backfill) last.set(key, { ts, lat, lon });
   return true;
 }
 
 export function positionsBetween(userId, deviceId, from, to) {
   return getDb()
-    .prepare("SELECT ts, lat, lon FROM positions WHERE user_id = ? AND device_id = ? AND ts >= ? AND ts < ? ORDER BY ts")
+    .prepare(
+      "SELECT ts, lat, lon, accuracy, speed FROM positions WHERE user_id = ? AND device_id = ? AND ts >= ? AND ts < ? ORDER BY ts"
+    )
     .all(userId, deviceId, from, to);
 }
 
