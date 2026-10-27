@@ -60,6 +60,7 @@ import {
   renameGroup,
 } from "./groups.js";
 import { daysWithData, positionsBetween, recordPosition } from "./history.js";
+import { createFinder } from "./find.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
@@ -236,7 +237,24 @@ const ClientMessage = t.discriminated("type", {
   pong: bare("pong"),
   getData: bare("getData"),
   pingDevices: bare("pingDevices"),
+  // "Find me": ask an account, answer, share positions with the other side, stop.
+  findRequest: t.object({ type: t.literal("findRequest"), userId: t.int().min(1) }),
+  findAnswer: t.object({ type: t.literal("findAnswer"), session: t.string().max(32), accept: t.boolean() }),
+  findPosition: Position.extend({
+    type: t.literal("findPosition"),
+    session: t.string().max(32),
+    accuracy: t.number().min(0).max(100_000).optional(),
+    // Which way the phone points, degrees from north, so the other side can show an arrow.
+    heading: t.number().min(0).max(360).optional(),
+  }),
+  findEnd: t.object({ type: t.literal("findEnd"), session: t.string().max(32) }),
 });
+
+// What a phone needs to know about the other side of a find session.
+const peerOf = (userId) => {
+  const { id, username, displayName, avatarUrl } = publicUser(getUser(userId));
+  return { id, username, displayName, avatarUrl };
+};
 
 // The declared type has to match the first bytes, so nothing but a picture is served back.
 function looksLike(type, data) {
@@ -277,6 +295,19 @@ export function createApp({ gracefulShutdown = true } = {}) {
   const viewers = new Map();
   const authFailures = createAttemptLimiter(config.deviceAuthLimit);
   let broadcastTimer = null;
+
+  const sendTo = (userId, deviceId, payload) => send(getDevice(userId, deviceId)?.socket, payload);
+
+  // Whoever is still in a find session hears how it ended. While it was pending, every device
+  // of the asked account had the question open.
+  const finder = createFinder({
+    onEnd(session, reason) {
+      const ended = { type: "findEnded", session: session.id, reason };
+      sendTo(session.asker.userId, session.asker.deviceId, ended);
+      if (session.target.deviceId) sendTo(session.target.userId, session.target.deviceId, ended);
+      else for (const device of onlineDevices(session.target.userId)) send(device.socket, ended);
+    },
+  });
 
   // A device without a socket stays online for two of its report periods (see statusOf).
   // Nothing happens when that time runs out, so this looks now and then and tells everyone.
@@ -1155,7 +1186,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           console.log(chalk.greenBright(`[+] Device ${label} connected.`));
         }
         // What this server understands beyond the basics, so newer apps know what they may send.
-        send(socket, { successful: true, features: ["positionBatch"] });
+        send(socket, { successful: true, features: ["positionBatch", "find"] });
         broadcastDevices();
       };
 
@@ -1193,6 +1224,56 @@ export function createApp({ gracefulShutdown = true } = {}) {
           case "locationError":
             console.log(chalk.yellow(`[!] ${chalk.whiteBright(deviceId)} could not read its location: ${msg.message}`));
             break;
+          case "findRequest": {
+            if (role !== "device") return;
+            const me = getUser(account);
+            const target = getUser(msg.userId);
+            const fail = (reason) => send(socket, { type: "findEnded", session: null, reason });
+            // Only people who see each other on the map, and nobody who hides right now.
+            if (!target || target.id === account || !canSee(me, target.id) || isHidden(target)) return fail("unavailable");
+            const phones = onlineDevices(target.id);
+            if (phones.length === 0) return fail("offline");
+            const session = finder.request({ askerUserId: account, askerDeviceId: deviceId, targetUserId: target.id });
+            const ask = { type: "findRequest", session: session.id, from: peerOf(account), expiresAt: session.expiresAt };
+            for (const phone of phones) send(phone.socket, ask);
+            send(socket, { type: "findPending", session: session.id, peer: peerOf(target.id), expiresAt: session.expiresAt });
+            break;
+          }
+          case "findAnswer": {
+            if (role !== "device") return;
+            const session = finder.answer(msg.session, { userId: account, deviceId, accept: msg.accept });
+            if (!session || session.status !== "active") return;
+            // The other devices of the account drop the question.
+            for (const phone of onlineDevices(account)) {
+              if (phone.id !== deviceId) send(phone.socket, { type: "findEnded", session: session.id, reason: "answered" });
+            }
+            const started = (peerId) => ({ type: "findStarted", session: session.id, peer: peerOf(peerId), expiresAt: session.expiresAt });
+            sendTo(session.asker.userId, session.asker.deviceId, started(account));
+            send(socket, started(session.asker.userId));
+            break;
+          }
+          case "findPosition": {
+            if (role !== "device") return;
+            const session = finder.get(msg.session);
+            const peer = session && finder.peerOf(session, account, deviceId);
+            if (!peer) return;
+            sendTo(peer.userId, peer.deviceId, {
+              type: "findPosition",
+              session: session.id,
+              latitude: msg.latitude,
+              longitude: msg.longitude,
+              accuracy: msg.accuracy ?? null,
+              heading: msg.heading ?? null,
+              at: Date.now(),
+            });
+            break;
+          }
+          case "findEnd": {
+            if (role !== "device") return;
+            const session = finder.get(msg.session);
+            if (session && finder.roleOf(session, account, deviceId)) finder.end(session.id, "ended");
+            break;
+          }
         }
       };
 
@@ -1208,6 +1289,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
         if (role === "device" && !socket.replaced && detachSocket(account, deviceId, socket)) {
           console.log(chalk.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected. Marked offline.`));
+          finder.endAllOf(account, deviceId);
           broadcastDevices();
         }
       });
