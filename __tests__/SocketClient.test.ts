@@ -98,6 +98,52 @@ test("remembers the features of the server it is connected to, per connection", 
   expect(client.features).toEqual([]);
 });
 
+test("waits for beforeConnect, so the login carries what it loaded", async () => {
+  let ready!: () => void;
+  const client = new SocketClient(() => new Promise<void>((resolve) => (ready = resolve)));
+  const promise = client.connect("ws://server", "phone", "secret");
+  expect(FakeWebSocket.instances).toHaveLength(0);
+  ready();
+  await flush();
+  const ws = FakeWebSocket.latest();
+  ws.open();
+  ws.receive({ successful: true });
+  await promise;
+  expect(client.connected).toBe(true);
+});
+
+test("a close while beforeConnect runs opens no socket", async () => {
+  let ready!: () => void;
+  const client = new SocketClient(() => new Promise<void>((resolve) => (ready = resolve)));
+  const promise = client.connect("ws://server", "phone", "secret");
+  client.close();
+  ready();
+  await expect(promise).rejects.toThrow();
+  expect(FakeWebSocket.instances).toHaveLength(0);
+});
+
+test("relogin logs in again on a fresh socket and stays connected", async () => {
+  const client = new SocketClient();
+  const states: boolean[] = [];
+  client.onStatus((connected) => states.push(connected));
+  const first = await connectAndAuthenticate(client);
+  client.relogin();
+  expect(first.readyState).toBe(FakeWebSocket.CLOSED);
+  const second = FakeWebSocket.latest();
+  second.open();
+  expect(second.sent[0].type).toBe("authenticate");
+  second.receive({ successful: true });
+  await flush();
+  expect(client.connected).toBe(true);
+  expect(states).toEqual([true]);
+});
+
+test("relogin does nothing while disconnected", () => {
+  const client = new SocketClient();
+  client.relogin();
+  expect(FakeWebSocket.instances).toHaveLength(0);
+});
+
 test("rejects on a failed authentication and does not reconnect", async () => {
   const client = new SocketClient();
   const promise = client.connect("ws://server", "phone", "wrong");
