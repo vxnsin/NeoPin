@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
+import { setReportInterval } from "@/lib/reportInterval";
 
 export type ReportingPreset = "battery" | "balanced" | "precise";
 
@@ -38,6 +39,10 @@ let settings: Settings = { reporting: "balanced" };
 let loaded = false;
 let listeners: ((s: Settings) => void)[] = [];
 
+// The socket tells the server how often it reports, so keep that in step with the preset.
+const syncInterval = () => setReportInterval(REPORTING_PRESETS[settings.reporting].timeInterval);
+syncInterval();
+
 export async function loadSettings(): Promise<Settings> {
   if (loaded) return settings;
   try {
@@ -50,6 +55,7 @@ export async function loadSettings(): Promise<Settings> {
     // keep defaults
   }
   loaded = true;
+  syncInterval();
   return settings;
 }
 
@@ -59,6 +65,7 @@ export function getReportingPreset(): ReportingPreset {
 
 export async function setReportingPreset(preset: ReportingPreset) {
   settings = { ...settings, reporting: preset };
+  syncInterval();
   listeners.forEach((fn) => fn(settings));
   try {
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
