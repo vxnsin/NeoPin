@@ -110,6 +110,20 @@ test("declining, ending and losing the connection tell the other side", async ()
   assert.equal((await nextOf(target, "findEnded")).reason, "disconnected");
 });
 
+test("meeting ends the search for both sides with the reason met", async () => {
+  const asker = await phone("luis", "phone");
+  const target = await phone("anna", "phone");
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  const { session } = await nextOf(asker, "findPending");
+  await nextOf(target, "findRequest");
+  target.send({ type: "findAnswer", session, accept: true });
+  await nextOf(asker, "findStarted");
+  await nextOf(target, "findStarted");
+  asker.send({ type: "findEnd", session, reason: "met" });
+  assert.equal((await nextOf(asker, "findEnded")).reason, "met");
+  assert.equal((await nextOf(target, "findEnded")).reason, "met");
+});
+
 test("strangers, hidden people and people without a phone cannot be asked", async () => {
   const tom = await s.account("tom");
   const asker = await phone("luis", "phone");
