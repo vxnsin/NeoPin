@@ -77,7 +77,7 @@ test("a reconnecting device replaces its old socket instead of being rejected", 
   const first = await s.device("luis", "phone");
   await first.next();
   const second = await s.device("luis", "phone");
-  assert.deepEqual(second.reply, { successful: true });
+  assert.equal(second.reply.successful, true);
   assert.equal((await first.closed).code, 4001);
   const list = await second.next();
   assert.equal(list.devices.filter((d) => d.deviceId === "phone").length, 1);

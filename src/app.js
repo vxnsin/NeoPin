@@ -962,7 +962,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
         } else {
           console.log(chalk.greenBright(`[+] Device ${label} connected.`));
         }
-        send(socket, { successful: true });
+        // What this server understands beyond the basics, so newer apps know what they may send.
+        send(socket, { successful: true, features: ["positionBatch"] });
         broadcastDevices();
       };
 
