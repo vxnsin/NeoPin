@@ -143,7 +143,8 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 |:--|:--|
 | `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
-| `{ "type": "updatePosition", "latitude", "longitude" }` | Stored and broadcast |
+| `{ "type": "updatePosition", "latitude", "longitude", "battery"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }` |
+| `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
 | `{ "type": "ping" }` | `{ "type": "pong" }` |
@@ -158,7 +159,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | Message | Meaning |
 |:--|:--|
 | `{ "type": "requestLocation", "from"? }` | Send an `updatePosition` now |
-| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, ... }` per device, after every change |
+| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `battery` is `null` until the device reported one |
 
 </details>
 
