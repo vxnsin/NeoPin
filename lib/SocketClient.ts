@@ -1,4 +1,5 @@
 import { currentDeviceType } from "./deviceType";
+import { reportInterval } from "./reportInterval";
 
 export type Message = Record<string, any>;
 export type MessageListener = (data: Message) => void;
@@ -121,7 +122,9 @@ export class SocketClient {
       }, AUTH_TIMEOUT_MS);
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "authenticate", deviceId, token, deviceType: currentDeviceType() }));
+        ws.send(
+          JSON.stringify({ type: "authenticate", deviceId, token, deviceType: currentDeviceType(), interval: reportInterval() })
+        );
       };
 
       ws.onmessage = (event) => {

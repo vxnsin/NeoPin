@@ -3,6 +3,8 @@ import * as Location from "expo-location";
 import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
 import { readBattery } from "@/lib/battery";
+import { reportInterval } from "@/lib/reportInterval";
+import { loadSettings } from "@/lib/settings";
 import { socket, readCredentials, type StoredCredentials } from "@/lib/socket";
 
 export const LOCATION_TASK = "neopin-background-location";
@@ -33,6 +35,8 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 
   const creds = await readCredentials();
   if (!creds) return;
+  // The task may run without the app, the preset has to come from storage then.
+  await loadSettings();
   await pushOnce(creds, message).catch((err) => console.warn("Background push failed:", err?.message));
 });
 
@@ -50,7 +54,16 @@ function pushOnce(creds: StoredCredentials, message: Record<string, unknown>): P
     };
 
     ws.onopen = () =>
-      ws.send(JSON.stringify({ type: "authenticate", deviceId: creds.deviceId, token: creds.token, deviceType: currentDeviceType() }));
+      ws.send(
+        JSON.stringify({
+          type: "authenticate",
+          deviceId: creds.deviceId,
+          token: creds.token,
+          deviceType: currentDeviceType(),
+          // How often it reports: the server keeps it online between these short visits.
+          interval: reportInterval(),
+        })
+      );
     ws.onmessage = (event) => {
       try {
         const reply = JSON.parse(event.data);
