@@ -176,6 +176,8 @@ const Trip = t.object({
   distanceM: t.number(),
   mode: t.enum(["walking", "cycling", "driving"]),
   path: t.array(t.array(t.number())),
+  // No fixes on the way: only where it started and ended is known.
+  gap: t.boolean().optional(),
 });
 
 const Timeline = t.object({

@@ -409,6 +409,7 @@ body.is-timeline .maplibregl-popup {
 .seg--trip[data-mode="walking"] { --mode: #16a34a; }
 .seg--trip[data-mode="cycling"] { --mode: #2563eb; }
 .seg--trip[data-mode="driving"] { --mode: #ea580c; }
+.seg--trip[data-mode="gap"] { --mode: #94a3b8; }
 
 .seg__text {
   display: grid;

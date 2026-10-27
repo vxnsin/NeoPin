@@ -7,6 +7,8 @@ export const MIN_VISIT_MS = 5 * 60_000;
 const MERGE_VISITS_M = 150;
 const MIN_TRIP_M = 150;
 const MAX_SPEED_MS = 70; // faster than this between two fixes is a GPS jump
+// Longer than this without a fix is a gap: the phone was off or out of reach, nobody knows the way.
+export const GAP_MS = 15 * 60_000;
 
 function centroid(points) {
   const n = points.length;
@@ -66,6 +68,38 @@ function tripSegment(points) {
   };
 }
 
+// Where the phone went without a fix for a long time, only start and end are known. The
+// clients draw it dashed, it counts neither as distance nor as moving.
+function gapSegment(a, b) {
+  const distance = distanceM(a.lat, a.lon, b.lat, b.lon);
+  if (distance < MIN_TRIP_M) return null;
+  return { ...tripSegment([a, b]), gap: true };
+}
+
+// The fixes of one way between two stops, split where the phone went silent.
+function tripsAlong(path) {
+  const out = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= 2) {
+      const trip = tripSegment(run);
+      if (trip.distanceM >= MIN_TRIP_M) out.push(trip);
+    }
+  };
+  for (const p of path) {
+    const last = run.at(-1);
+    if (last && p.ts - last.ts > GAP_MS) {
+      flush();
+      const gap = gapSegment(last, p);
+      if (gap) out.push(gap);
+      run = [];
+    }
+    run.push(p);
+  }
+  flush();
+  return out;
+}
+
 export function buildTimeline(rawPoints) {
   const points = dropJumps([...rawPoints].sort((a, b) => a.ts - b.ts));
   const parts = [];
@@ -119,16 +153,25 @@ export function buildTimeline(rawPoints) {
       segments.push(visitSegment(part.points));
       return;
     }
-    // Anchored to the neighbouring visits, so the route has no gap on the map.
-    const from = merged[k - 1]?.kind === "visit" ? [merged[k - 1].points.at(-1)] : [];
-    const to = merged[k + 1]?.kind === "visit" ? [merged[k + 1].points[0]] : [];
-    const path = [...from, ...part.points, ...to];
-    if (path.length < 2) return;
-    const trip = tripSegment(path);
-    if (trip.distanceM >= MIN_TRIP_M) segments.push(trip);
+    // Anchored to the middle of the neighbouring visits, where their markers sit, so the
+    // route starts and ends right at the stops.
+    const prev = merged[k - 1]?.kind === "visit" ? merged[k - 1].points : null;
+    const next = merged[k + 1]?.kind === "visit" ? merged[k + 1].points : null;
+    const from = prev ? [{ ...centroid(prev), ts: prev.at(-1).ts }] : [];
+    const to = next ? [{ ...centroid(next), ts: next[0].ts }] : [];
+    segments.push(...tripsAlong([...from, ...part.points, ...to]));
   });
+  // Two visits right after each other with a gap between them (no fixes in between).
+  for (let k = 1; k < segments.length; k++) {
+    const a = segments[k - 1];
+    const b = segments[k];
+    if (a.type === "visit" && b.type === "visit" && b.start - a.end > GAP_MS) {
+      const gap = gapSegment({ lat: a.lat, lon: a.lon, ts: a.end }, { lat: b.lat, lon: b.lon, ts: b.start });
+      if (gap) segments.splice(k++, 0, gap);
+    }
+  }
 
-  const trips = segments.filter((s) => s.type === "trip");
+  const trips = segments.filter((s) => s.type === "trip" && !s.gap);
   return {
     segments,
     summary: {

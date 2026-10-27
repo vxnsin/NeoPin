@@ -43,8 +43,29 @@ test("a day becomes visits and the trips between them", () => {
   const trip = segments[1];
   assert.equal(trip.mode, "driving");
   assert.ok(trip.distanceM > 5000);
-  assert.deepEqual(trip.path[0], [48.1, 11.5 + (30 % 2) * 0.0001], "starts where the home visit ended");
+  assert.deepEqual(trip.path[0], [home.lat, home.lon], "starts right at the home stop marker");
+  assert.deepEqual(trip.path.at(-1), [there.lat, there.lon], "ends right at the next stop marker");
   assert.ok(trip.path.length >= 6);
+});
+
+test("a stretch without fixes is a gap, it counts neither as distance nor as moving", () => {
+  const points = [];
+  for (let m = 0; m <= 30; m += 5) points.push(at(m, 48.1));
+  // The phone went silent for hours and came back far away.
+  for (let m = 300; m <= 330; m += 5) points.push(at(m, 48.3));
+  const { segments, summary } = buildTimeline(points);
+  assert.deepEqual(segments.map((seg) => seg.type + (seg.gap ? ":gap" : "")), ["visit", "trip:gap", "visit"]);
+  assert.equal(summary.distanceM, 0);
+  assert.equal(summary.movingMs, 0);
+});
+
+test("a way that goes silent halfway is split into the known part and a gap", () => {
+  const points = [];
+  for (let m = 0; m <= 20; m += 5) points.push(at(m, 48.1));
+  for (let i = 1; i <= 5; i++) points.push(at(20 + i, 48.1 + i * 0.002));
+  for (let m = 90; m <= 120; m += 5) points.push(at(m, 48.2));
+  const { segments } = buildTimeline(points);
+  assert.deepEqual(segments.map((seg) => seg.type + (seg.gap ? ":gap" : "")), ["visit", "trip", "trip:gap", "visit"]);
 });
 
 test("fixes that stay close together for a short time are no visit", () => {
