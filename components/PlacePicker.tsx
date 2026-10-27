@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import useThemeManager from "@/hooks/useThemeManager";
-import { fetchPlaceChoices, growPlace, savePlaceAt, type PlaceChoice, type PlaceKind, type Visit } from "@/lib/api";
+import { claimPlace, fetchPlaceChoices, savePlaceAt, type PlaceChoice, type PlaceKind, type Visit } from "@/lib/api";
 import type { StoredCredentials } from "@/lib/credentials";
 import { PLACE_ICONS, PLACE_LABELS, formatDistance } from "@/lib/timeline";
 
@@ -21,7 +21,10 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
   const { colors: c } = useThemeManager();
   const [choices, setChoices] = useState<PlaceChoice[] | null>(null);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<PlaceKind>("place");
+  // Renaming an own place keeps what it is, Home stays Home.
+  const ownKind = visit.place?.source === "own" ? visit.place.kind : null;
+  const [kind, setKind] = useState<PlaceKind>(ownKind ?? "place");
+  const kinds = ownKind && !OWN_KINDS.includes(ownKind) ? [ownKind, ...OWN_KINDS] : OWN_KINDS;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -50,7 +53,7 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
   const pick = (choice: PlaceChoice) =>
     save(() =>
       choice.source === "own" && choice.id !== null
-        ? growPlace(creds, choice.id, choice.distanceM + 25, userId)
+        ? claimPlace(creds, choice.id, visit.lat, visit.lon, userId)
         : savePlaceAt(creds, { lat: visit.lat, lon: visit.lon, name: choice.name, kind: choice.kind, osmId: choice.osmId }, userId)
     );
 
@@ -130,7 +133,7 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
         </Pressable>
       </View>
       <View style={styles.kinds}>
-        {OWN_KINDS.map((k) => {
+        {kinds.map((k) => {
           const active = k === kind;
           return (
             <Pressable

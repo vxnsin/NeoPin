@@ -277,13 +277,14 @@ export async function savePlaceAt(auth: DeviceAuth, place: PlaceInput, userId?: 
   );
 }
 
-// An own place close by that did not reach this far grows to cover it.
-export async function growPlace(auth: DeviceAuth, id: number, radiusM: number, userId?: number): Promise<void> {
+// Picking an own place for a visit: the spot belongs to it from now on. The server grows it
+// to reach the spot and makes closer own places let go of it.
+export async function claimPlace(auth: DeviceAuth, id: number, lat: number, lon: number, userId?: number): Promise<void> {
   await json(
-    await request(`${httpBase(auth.serverIp)}/api/places/${id}?${forUser(userId)}`, {
-      method: "PATCH",
+    await request(`${httpBase(auth.serverIp)}/api/places/${id}/claim?${forUser(userId)}`, {
+      method: "POST",
       headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
-      body: JSON.stringify({ radiusM: Math.min(1000, Math.round(radiusM)) }),
+      body: JSON.stringify({ lat, lon }),
     })
   );
 }

@@ -88,6 +88,9 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const [picking, setPicking] = useState<number | null>(null);
   const run = useRef(0);
   const pendingTries = useRef(0);
+  // Only the newest place refresh may land, an older one would undo a saved place.
+  const refreshRun = useRef(0);
+  const [refreshFailures, setRefreshFailures] = useState(0);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const rows = useRef<Record<number, number>>({});
   const bottomPadding = height + 16;
@@ -166,9 +169,12 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   // Same day again for new place names only: the route on the map stays as it is.
   const refreshPlaces = useCallback(() => {
     const current = run.current;
+    const mine = ++refreshRun.current;
+    const fresh = () => current === run.current && mine === refreshRun.current;
     fetchTimeline(creds, deviceId, day, queryUser)
-      .then((result) => current === run.current && setTimeline(result))
-      .catch(() => {});
+      .then((result) => fresh() && setTimeline(result))
+      // A failed try still counts, the next one is scheduled all the same.
+      .catch(() => fresh() && setRefreshFailures((n) => n + 1));
   }, [creds, deviceId, day, queryUser]);
 
   useEffect(() => {
@@ -178,7 +184,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
       refreshPlaces();
     }, PENDING_RETRY_MS);
     return () => clearTimeout(timer);
-  }, [timeline, refreshPlaces]);
+  }, [timeline, refreshFailures, refreshPlaces]);
 
   const select = useCallback(
     (index: number | null) => {
