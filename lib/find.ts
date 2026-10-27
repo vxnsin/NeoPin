@@ -20,6 +20,13 @@ export type FindState =
 // What the server sends while a search runs.
 export const FIND_MESSAGES = ["findRequest", "findPending", "findStarted", "findPosition", "findEnded"];
 
+// Whether a message is about the search in hand. A request of mine has no session until the
+// server answers, so until then the person it is about has to match.
+function belongsTo(state: FindState | null, session: string, peerId: number): boolean {
+  if (!state || state.phase === "ended") return false;
+  return state.session === session || (state.phase === "pending" && state.session === "" && state.peer.id === peerId);
+}
+
 // The next state after a server message. Messages for another session are ignored, except a
 // fresh request, which always counts.
 export function reduceFind(state: FindState | null, msg: Message): FindState | null {
@@ -29,8 +36,10 @@ export function reduceFind(state: FindState | null, msg: Message): FindState | n
       if (state && (state.phase === "pending" || state.phase === "active")) return state;
       return { phase: "asked", session: msg.session, peer: msg.from, expiresAt: msg.expiresAt };
     case "findPending":
+      if (state && !belongsTo(state, msg.session, msg.peer.id)) return state;
       return { phase: "pending", session: msg.session, peer: msg.peer, expiresAt: msg.expiresAt };
     case "findStarted":
+      if (!belongsTo(state, msg.session, msg.peer.id)) return state;
       return { phase: "active", session: msg.session, peer: msg.peer, expiresAt: msg.expiresAt, theirs: null };
     case "findPosition":
       if (state?.phase !== "active" || state.session !== msg.session) return state;

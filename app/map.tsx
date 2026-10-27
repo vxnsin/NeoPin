@@ -235,6 +235,9 @@ export default function MapScreen() {
       cancelled = true;
       position?.remove();
       compass?.remove();
+      // The next search starts without a stale fix or compass reading from this one.
+      setMyFix(null);
+      setHeading(null);
     };
   }, [findActive, emit]);
 

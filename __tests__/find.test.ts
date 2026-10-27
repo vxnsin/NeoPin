@@ -55,6 +55,21 @@ test("the server's messages move a search along", () => {
   expect(state).toEqual({ phase: "ended", session: "s1", peer, reason: "declined" });
 });
 
+test("only the search in hand moves along, a start for another session is ignored", () => {
+  const other = { id: 3, username: "tom", displayName: "Tom", avatarUrl: null };
+  let state: FindState | null = { phase: "pending", session: "", peer, expiresAt: 1 };
+  expect(reduceFind(state, { type: "findStarted", session: "s9", peer: other, expiresAt: 9 })).toBe(state);
+  expect(reduceFind(state, { type: "findPending", session: "s9", peer: other, expiresAt: 9 })).toBe(state);
+  state = reduceFind(state, { type: "findPending", session: "s1", peer, expiresAt: 10 });
+  expect(state).toMatchObject({ phase: "pending", session: "s1" });
+  expect(reduceFind(state, { type: "findStarted", session: "s2", peer, expiresAt: 9 })).toBe(state);
+  expect(reduceFind(state, { type: "findStarted", session: "s1", peer, expiresAt: 99 })).toMatchObject({ phase: "active", session: "s1" });
+  // Being asked: the start names the session of the question.
+  const asked: FindState = { phase: "asked", session: "s3", peer: me, expiresAt: 9 };
+  expect(reduceFind(asked, { type: "findStarted", session: "s3", peer: me, expiresAt: 99 })).toMatchObject({ phase: "active" });
+  expect(reduceFind(null, { type: "findStarted", session: "s3", peer: me, expiresAt: 99 })).toBeNull();
+});
+
 test("a refused request ends with no session, and being asked opens the question", () => {
   const refused = reduceFind({ phase: "pending", session: "", peer, expiresAt: 1 }, { type: "findEnded", session: null, reason: "offline" });
   expect(refused).toMatchObject({ phase: "ended", reason: "offline", peer });
