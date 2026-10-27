@@ -15,7 +15,7 @@ afterEach(() => s.stop());
 
 test("a device authenticates with its token and receives the device list", async () => {
   const phone = await s.device("luis", "phone");
-  assert.deepEqual(phone.reply, { successful: true, features: ["positionBatch"] });
+  assert.deepEqual(phone.reply, { successful: true, features: ["positionBatch", "find"] });
   const list = await phone.next();
   assert.equal(list.type, "dataResponse");
   assert.equal(list.devices[0].deviceId, "phone");
