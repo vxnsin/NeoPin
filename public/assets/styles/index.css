@@ -1241,7 +1241,13 @@ body.is-timeline .maplibregl-popup {
   stroke: none;
 }
 
-/* One row per person, the devices unfold underneath. */
+/* One row per person, the devices unfold underneath. The ring sits outside the avatar's box,
+   so the gap here reads about 7 px from ring to name. */
+.person__head {
+  gap: 10px;
+  padding: 7px 10px;
+}
+
 .person__chevron {
   width: 18px;
   height: 18px;
