@@ -1,0 +1,44 @@
+import { requireOptionalNativeModule } from "expo";
+
+export type BatteryReport = { level: number; charging: boolean };
+
+// expo-battery needs its native module. Builds from before it was added get this
+// JavaScript through EAS Update too, so it is only loaded where the module exists.
+const Battery: typeof import("expo-battery") | null = requireOptionalNativeModule("ExpoBattery")
+  ? require("expo-battery")
+  : null;
+
+// BatteryState.CHARGING and BatteryState.FULL: plugged in, whether it still charges or not.
+const PLUGGED_IN = [2, 3];
+
+// The charge in whole percent and whether it is plugged in. Simulators and devices
+// without a battery report -1, those get no battery at all.
+export function toReport(level: number, state: number): BatteryReport | null {
+  if (!(level >= 0)) return null;
+  return { level: Math.round(Math.min(1, level) * 100), charging: PLUGGED_IN.includes(state) };
+}
+
+export async function readBattery(): Promise<BatteryReport | null> {
+  if (!Battery) return null;
+  try {
+    const [level, state] = await Promise.all([Battery.getBatteryLevelAsync(), Battery.getBatteryStateAsync()]);
+    return toReport(level, state);
+  } catch {
+    return null;
+  }
+}
+
+// Calls back when the charge moves by a whole percent or the phone is plugged in or
+// out, so a phone lying on the charger still shows how full it is.
+export function watchBattery(onChange: (report: BatteryReport) => void): () => void {
+  if (!Battery) return () => {};
+  let last: BatteryReport | null = null;
+  const check = async () => {
+    const report = await readBattery();
+    if (!report || (last && last.level === report.level && last.charging === report.charging)) return;
+    last = report;
+    onChange(report);
+  };
+  const subscriptions = [Battery.addBatteryLevelListener(check), Battery.addBatteryStateListener(check)];
+  return () => subscriptions.forEach((subscription) => subscription.remove());
+}

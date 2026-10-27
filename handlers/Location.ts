@@ -1,5 +1,6 @@
 import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
+import { readBattery, watchBattery } from "@/lib/battery";
 
 type Emitter = { emit: (msg: Message) => void };
 
@@ -17,10 +18,14 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
   let lastSent = 0;
   const interval = options.timeInterval ?? 15_000;
 
-  const send = (latitude: number, longitude: number) => {
+  const send = async (latitude: number, longitude: number) => {
     lastSent = Date.now();
-    target.emit({ type: "updatePosition", latitude, longitude });
+    const battery = await readBattery();
+    target.emit({ type: "updatePosition", latitude, longitude, ...(battery && { battery }) });
   };
+
+  // A phone on the charger may not move at all, its battery still changes.
+  const stopBattery = watchBattery((battery) => target.emit({ type: "updateBattery", ...battery }));
 
   // iOS ignores timeInterval and only reports movement, so a phone that lies still
   // would go silent. This beat keeps the last ping fresh.
@@ -53,6 +58,7 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
   return () => {
     cancelled = true;
     clearInterval(beat);
+    stopBattery();
     subscription?.remove();
     subscription = null;
   };

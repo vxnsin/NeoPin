@@ -2,6 +2,7 @@ import * as TaskManager from "expo-task-manager";
 import * as Location from "expo-location";
 import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
+import { readBattery } from "@/lib/battery";
 import { socket, readCredentials, type StoredCredentials } from "@/lib/socket";
 
 export const LOCATION_TASK = "neopin-background-location";
@@ -17,10 +18,12 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   const latest = locations[locations.length - 1];
   if (!latest) return;
 
+  const battery = await readBattery();
   const message = {
     type: "updatePosition",
     latitude: latest.coords.latitude,
     longitude: latest.coords.longitude,
+    ...(battery && { battery }),
   };
 
   if (socket.connected) {

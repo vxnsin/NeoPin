@@ -31,6 +31,7 @@ import PasswordForm from "@/components/PasswordForm";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
+import BatteryBadge from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
@@ -38,6 +39,7 @@ import type { CropRect } from "@/lib/crop";
 import {
   DEVICE_ICONS,
   STATE_COLORS,
+  batteryOf,
   deviceKey,
   freshness,
   groupPeople,
@@ -422,7 +424,10 @@ export default function MapScreen() {
           </Text>
           <View style={styles.metaRow}>
             <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[state] }]} />
-            <Text style={[styles.deviceMeta, { color: c.muted }]}>{statusText(device, timeAgo)}</Text>
+            <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
+              {statusText(device, timeAgo)}
+            </Text>
+            {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
           </View>
         </View>
         {device.position && <MaterialIcons name="near-me" size={18} color={c.muted} />}
@@ -449,10 +454,11 @@ export default function MapScreen() {
             </Text>
             <View style={styles.metaRow}>
               <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[freshness(primary)] }]} />
-              <Text style={[styles.deviceMeta, { color: c.muted }]} numberOfLines={1}>
+              <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {primary.deviceId} · {statusText(primary, timeAgo)}
                 {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
               </Text>
+              {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
             </View>
           </View>
           <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={c.muted} />
@@ -816,6 +822,8 @@ const styles = StyleSheet.create({
   deviceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, borderRadius: 14, paddingHorizontal: 6 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
   deviceMeta: { fontSize: 12.5 },
+  // The text gives way first, so a battery next to it stays on the line.
+  metaText: { flexShrink: 1 },
   profile: { flexDirection: "row", alignItems: "center", gap: 14, padding: 14, borderRadius: 18, marginTop: 14 },
   cameraBadge: {
     position: "absolute",

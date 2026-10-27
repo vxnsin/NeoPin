@@ -22,7 +22,16 @@ export type Device = {
   deviceType?: DeviceType;
   // Ids of the groups this device shares with the signed-in account.
   groupIds?: number[];
+  // The last charge the device reported, null until it did. Older servers send none.
+  battery?: DeviceBattery | null;
 };
+
+export type DeviceBattery = { level: number; charging: boolean; updatedAt?: string };
+
+// Only while the device is online: the last reading of a phone that went offline would only mislead.
+export function batteryOf(device: Pick<Device, "battery" | "status">): DeviceBattery | null {
+  return device.status === "online" && device.battery ? device.battery : null;
+}
 
 // Device names are only unique per account.
 export function deviceKey(device: Pick<Device, "deviceId" | "userId">): string {
