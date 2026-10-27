@@ -41,7 +41,9 @@ export default function AvatarCropper({ photo, onCancel, onSave }: Props) {
       viewRef.current = clamped;
       setView(clamped);
     };
+    // The callbacks touch React state, so they run on the JS thread and not as worklets.
     const drag = Gesture.Pan()
+      .runOnJS(true)
       .averageTouches(true)
       .onBegin(() => {
         dragFrom.current = viewRef.current;
@@ -50,6 +52,7 @@ export default function AvatarCropper({ photo, onCancel, onSave }: Props) {
         apply({ ...viewRef.current, x: dragFrom.current.x + e.translationX, y: dragFrom.current.y + e.translationY });
       });
     const pinch = Gesture.Pinch()
+      .runOnJS(true)
       .onStart(() => {
         pinchFrom.current = viewRef.current;
       })

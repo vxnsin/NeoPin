@@ -12,8 +12,8 @@ function asScheme(name: string | null | undefined): Scheme {
 const systemScheme = createSchemeStore({
   read: () => {
     // Following the system is the default anyway; setting it again makes React Native drop its
-    // cached answer and ask the phone.
-    Appearance.setColorScheme("auto");
+    // cached answer and ask the phone. React Native Web has no such call.
+    if (typeof Appearance.setColorScheme === "function") Appearance.setColorScheme("auto");
     return asScheme(Appearance.getColorScheme());
   },
   onChange: (listener) => {
