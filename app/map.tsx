@@ -498,8 +498,8 @@ export default function MapScreen() {
               {person.name}
               {person.isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
             </Text>
+            {/* The ring around the avatar already shows the status, so no dot here. */}
             <View style={styles.metaRow}>
-              <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[freshness(primary)] }]} />
               <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {primary.deviceId} · {statusText(primary, timeAgo)}
                 {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
