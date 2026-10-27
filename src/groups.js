@@ -14,6 +14,15 @@ export function getGroup(groupId) {
   return getDb().prepare("SELECT * FROM user_groups WHERE id = ?").get(groupId) ?? null;
 }
 
+// Puts a new account into every fixed group.
+export function joinFixedGroups(userId) {
+  getDb()
+    .prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) SELECT id, ?, ? FROM user_groups WHERE fixed = 1")
+    .run(userId, now());
+}
+
+export const isFixed = (group) => group?.fixed === 1;
+
 export function isMember(groupId, userId) {
   return !!getDb().prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?").get(groupId, userId);
 }
@@ -129,6 +138,7 @@ export function groupsFor(user) {
       ownerId: g.owner_id,
       role: g.owner_id === user.id ? "owner" : "member",
       canManage: manager,
+      fixed: isFixed(g),
       members: membersOf(g.id).map((id) => memberView(id, g.owner_id)),
       pendingInvites: pending,
     };

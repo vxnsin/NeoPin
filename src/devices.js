@@ -1,4 +1,4 @@
-import { getUser, inferDeviceType, linkedDevices, listUsers, publicUser } from "./accounts.js";
+import { getUser, inferDeviceType, isHidden, linkedDevices, listUsers, publicUser } from "./accounts.js";
 import { lastPosition } from "./history.js";
 import { sharedGroupIds, visibleUserIds } from "./groups.js";
 import { config } from "./config.js";
@@ -97,6 +97,8 @@ export function serializeDevices(viewer) {
 
   for (const user of listUsers()) {
     if (visible && !visible.has(user.id)) continue;
+    // Someone who hides is gone from the map of everyone else, the admin included.
+    if (viewer && user.id !== viewer.id && isHidden(user)) continue;
     const owner = publicUser(user);
     for (const link of linkedDevices(user.id)) {
       const live = devices.get(keyOf(user.id, link.deviceId));

@@ -23,6 +23,10 @@ import {
   updateUser,
   userForToken,
   verifyLogin,
+  HIDDEN_FOREVER,
+  hiddenUntilOf,
+  isHidden,
+  setHiddenUntil,
 } from "./accounts.js";
 import {
   allDevices,
@@ -49,7 +53,9 @@ import {
   groupsFor,
   invite,
   invitesFor,
+  isFixed,
   isMember,
+  joinFixedGroups,
   removeMember,
   renameGroup,
 } from "./groups.js";
@@ -114,6 +120,10 @@ const User = t.object({
   avatarUrl: t.string().nullable(),
   primaryDeviceId: t.string().nullable(),
 });
+
+// The account itself, with what only it sees: until when it hides (ms), null when visible.
+const Me = User.extend({ hiddenUntil: t.number().nullable() });
+const meOf = (user) => ({ ...publicUser(user), hiddenUntil: hiddenUntilOf(user) });
 
 const LinkedDevice = t.object({
   deviceId: t.string(),
@@ -270,8 +280,9 @@ export function createApp({ gracefulShutdown = true } = {}) {
   // Nothing happens when that time runs out, so this looks now and then and tells everyone.
   let lastStatuses = "";
   const sweep = setInterval(() => {
+    // Hiding that ran out shows the person again, so it counts as a change too.
     const statuses = allDevices()
-      .map((d) => `${d.userId}:${d.id}:${statusOf(d)}`)
+      .map((d) => `${d.userId}:${d.id}:${statusOf(d)}:${isHidden(getUser(d.userId))}`)
       .join("|");
     if (statuses === lastStatuses) return;
     lastStatuses = statuses;
@@ -313,6 +324,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
     const targets = onlineDevices().filter(
       (d) =>
         (!viewer || canSee(viewer, d.userId)) &&
+        // A hidden phone is not woken for anyone else.
+        (!viewer || d.userId === viewer.id || !isHidden(getUser(d.userId))) &&
         !(except && d.userId === except.userId && d.id === except.deviceId) &&
         (!only || (d.id === only.deviceId && (only.userId === undefined || d.userId === only.userId)))
     );
@@ -543,7 +556,31 @@ export function createApp({ gracefulShutdown = true } = {}) {
 
   app.register(
     (api) => {
-      api.get("/me", { response: { 200: User, 401: t.problem() } }, (ctx) => publicUser(currentUser(ctx).user));
+      api.get("/me", { response: { 200: Me, 401: t.problem() } }, (ctx) => meOf(currentUser(ctx).user));
+
+      // Hiding: gone from everyone else's map for a while (minutes) or until turned off (no minutes).
+      // The own devices keep reporting, so the own map and timeline go on.
+      api.put(
+        "/me/hidden",
+        {
+          body: t.object({ minutes: t.int().min(1).max(7 * 24 * 60).optional() }),
+          response: { 200: Me, 400: t.problem(), 401: t.problem() },
+        },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          const minutes = ctx.body.minutes;
+          setHiddenUntil(user.id, minutes ? Date.now() + minutes * 60_000 : HIDDEN_FOREVER);
+          broadcastDevices();
+          return meOf(getUser(user.id));
+        }
+      );
+
+      api.delete("/me/hidden", { response: { 200: Me, 401: t.problem() } }, (ctx) => {
+        const { user } = currentUser(ctx);
+        setHiddenUntil(user.id, null);
+        broadcastDevices();
+        return meOf(getUser(user.id));
+      });
 
       // Every device that is linked to the account, connected or not.
       api.get("/devices", { response: { 200: t.array(LinkedDevice), 401: t.problem() } }, (ctx) =>
@@ -641,6 +678,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           requireAdmin(ctx);
           try {
             const user = createUser(ctx.body);
+            joinFixedGroups(user.id);
             console.log(chalk.cyan(`[i] Account ${chalk.whiteBright(user.username)} created in the dashboard.`));
             return reply(201, publicUser(user));
           } catch (error) {
@@ -706,6 +744,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
         ownerId: t.number(),
         role: t.enum(["owner", "member"]),
         canManage: t.boolean(),
+        // Everybody is in it for good: no leaving, no removing, no deleting.
+        fixed: t.boolean(),
         members: t.array(Member),
         pendingInvites: t.array(t.object({ id: t.number(), user: User })),
       });
@@ -767,6 +807,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         { response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
         (ctx) => {
           const { group } = groupFor(ctx, { manage: true });
+          if (isFixed(group)) throw problem(403, "fixed-group", `${group.name} holds everyone and cannot be deleted`);
           const people = deleteGroup(group.id);
           notifyGroups(people);
           return reply(204);
@@ -815,6 +856,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           const { user, group } = groupFor(ctx);
           const target = Number(ctx.params.userId);
           if (!isMember(group.id, target)) throw problem(404, "unknown-member", "Not in this group");
+          if (isFixed(group)) throw problem(403, "fixed-group", `Everybody stays in ${group.name}`);
           if (target === group.owner_id) throw problem(400, "owner", "The owner stays in the group, delete the group instead");
           if (target !== user.id && !canManage(group, user)) throw problem(403, "forbidden", "Only the owner can remove people");
           const people = audience(group.id);
