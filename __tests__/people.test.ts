@@ -29,6 +29,19 @@ test("the primary device is the online one, then phone over tablet over desktop,
   expect(primaryDevice([])).toBeUndefined();
 });
 
+test("a picked device stands for its owner, an online one fills in while it is offline", () => {
+  const pixel = dev(1, "Pixel", "online", "phone", "2025-06-10T10:00:00Z");
+  const iphone = { ...dev(1, "iPhone", "online", "phone", "2025-06-01T09:00:00Z"), primary: true };
+  const pad = { ...dev(1, "iPad", "online", "tablet", "2025-06-01T09:00:00Z"), primary: true };
+  // Picked wins over the phone that reported later, and over the phone rule.
+  expect(primaryDevice([pixel, iphone])?.deviceId).toBe("iPhone");
+  expect(primaryDevice([pixel, pad])?.deviceId).toBe("iPad");
+  // Offline, it gives way to a device that is online.
+  expect(primaryDevice([pixel, { ...iphone, status: "offline" }])?.deviceId).toBe("Pixel");
+  // When everything is offline, the picked one stands for its owner again.
+  expect(primaryDevice([{ ...pixel, status: "offline" }, { ...iphone, status: "offline" }])?.deviceId).toBe("iPhone");
+});
+
 test("people are grouped once, own account first, then online people, then the rest", () => {
   const people = groupPeople(
     [
