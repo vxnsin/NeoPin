@@ -56,6 +56,15 @@ import { daysWithData, positionsBetween, recordPosition } from "./history.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
+import {
+  PLACE_KINDS,
+  deletePlace,
+  listPlaces,
+  namePlaces,
+  placeChoices,
+  savePlaceAt,
+  updatePlace,
+} from "./places.js";
 
 const CLOSE_POLICY = 4000;
 const CLOSE_REPLACED = 4001;
@@ -112,6 +121,28 @@ const LinkedDevice = t.object({
   position: Position.nullable(),
 });
 
+// Where a visit was: an own place (named or confirmed) or a guess from OpenStreetMap.
+const VisitPlace = t.object({
+  id: t.number().nullable(),
+  name: t.string(),
+  kind: t.enum(PLACE_KINDS),
+  source: t.enum(["own", "osm"]),
+  osmId: t.string().nullable(),
+});
+
+const Place = t.object({
+  id: t.number(),
+  name: t.string(),
+  kind: t.enum(PLACE_KINDS),
+  lat: t.number(),
+  lon: t.number(),
+  radiusM: t.number(),
+  osmId: t.string().nullable(),
+});
+
+const PlaceName = t.string().min(1).max(80);
+const PlaceRadius = t.int().min(15).max(1000);
+
 const Visit = t.object({
   type: t.literal("visit"),
   start: t.number(),
@@ -120,6 +151,7 @@ const Visit = t.object({
   lat: t.number(),
   lon: t.number(),
   pointCount: t.number(),
+  place: VisitPlace.nullable(),
 });
 
 const Trip = t.object({
@@ -142,6 +174,8 @@ const Timeline = t.object({
     pointCount: t.number(),
   }),
   segments: t.array(t.union(Visit, Trip)),
+  // Some place names are still being looked up, a reload in a few seconds has them.
+  placesPending: t.boolean(),
 });
 
 const Message = t.object({ message: t.string() });
@@ -841,12 +875,14 @@ export function createApp({ gracefulShutdown = true } = {}) {
           }),
           response: { 200: Timeline, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
-        (ctx) => {
+        async (ctx) => {
           const userId = targetUserId(ctx, ctx.query.userId);
           const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
-          return { date: ctx.query.date, deviceId: ctx.query.deviceId, ...buildTimeline(points) };
+          const timeline = buildTimeline(points);
+          const { pending } = await namePlaces(userId, timeline.segments, { tzOffsetMin: ctx.query.tz ?? 0 });
+          return { date: ctx.query.date, deviceId: ctx.query.deviceId, ...timeline, placesPending: pending };
         }
       );
 
@@ -858,6 +894,79 @@ export function createApp({ gracefulShutdown = true } = {}) {
           response: { 200: t.array(t.string()), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
         (ctx) => daysWithData(targetUserId(ctx, ctx.query.userId), ctx.query.deviceId, ctx.query.tz ?? 0)
+      );
+
+      // Own places: home, work, and every place someone confirmed for a visit. They win
+      // over OpenStreetMap the next time someone stays there. The admin may label the
+      // places of any account, the way it opens their timeline.
+      const ForUser = t.object({ userId: t.number().optional() });
+
+      api.get(
+        "/places",
+        { query: ForUser, response: { 200: t.array(Place), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => listPlaces(targetUserId(ctx, ctx.query.userId))
+      );
+
+      // What a visit could have been: own places close by, then OpenStreetMap, nearest first.
+      api.get(
+        "/places/nearby",
+        {
+          query: ForUser.extend({ lat: t.number().min(-90).max(90), lon: t.number().min(-180).max(180) }),
+          response: {
+            200: t.array(VisitPlace.extend({ distanceM: t.number() })),
+            401: t.problem(),
+            403: t.problem(),
+            404: t.problem(),
+          },
+        },
+        (ctx) => placeChoices(targetUserId(ctx, ctx.query.userId), ctx.query.lat, ctx.query.lon)
+      );
+
+      // "I was here": names the spot. An own place that already covers it is corrected.
+      api.post(
+        "/places",
+        {
+          query: ForUser,
+          body: t.object({
+            lat: t.number().min(-90).max(90),
+            lon: t.number().min(-180).max(180),
+            name: PlaceName,
+            kind: t.enum(PLACE_KINDS).optional(),
+            radiusM: PlaceRadius.optional(),
+            osmId: t.string().max(40).optional(),
+          }),
+          response: { 200: Place, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => savePlaceAt(targetUserId(ctx, ctx.query.userId), { ...ctx.body, name: ctx.body.name.trim() })
+      );
+
+      api.patch(
+        "/places/:id",
+        {
+          query: ForUser,
+          body: t.object({ name: PlaceName.optional(), kind: t.enum(PLACE_KINDS).optional(), radiusM: PlaceRadius.optional() }),
+          response: { 200: Place, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const { name, ...rest } = ctx.body;
+          const place = updatePlace(targetUserId(ctx, ctx.query.userId), Number(ctx.params.id), {
+            ...rest,
+            name: name?.trim(),
+          });
+          if (!place) throw problem(404, "unknown-place", "No such place");
+          return place;
+        }
+      );
+
+      api.delete(
+        "/places/:id",
+        { query: ForUser, response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          if (!deletePlace(targetUserId(ctx, ctx.query.userId), Number(ctx.params.id))) {
+            throw problem(404, "unknown-place", "No such place");
+          }
+          return reply(204);
+        }
       );
     },
     {},

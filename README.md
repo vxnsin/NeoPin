@@ -111,6 +111,8 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `ADMIN_USERNAME` | `admin` | Name of the admin account, only read while it is created on the first start |
 | `ADMIN_PASSWORD` | generated | Password of that account. Without it one is generated and printed once |
 | `HISTORY_DAYS` | `365` | Location history older than this is deleted at startup |
+| `PLACE_LOOKUP_URL` | `https://overpass-api.de/api/interpreter` | Overpass API that names the places in the timeline. It sees the coordinates of the stays it is asked about, each spot once, the answers are cached. Point it at your own Overpass or set `off` |
+| `PLACE_FALLBACK_URL` | `https://photon.komoot.io/reverse` | Photon, asked when Overpass is busy or down. Same privacy as above, `off` turns it off |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
 

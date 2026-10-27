@@ -28,6 +28,12 @@ export const config = {
   adminPassword: process.env.ADMIN_PASSWORD || null,
   // Location history older than this is deleted at startup.
   historyDays: Number(process.env.HISTORY_DAYS) || 365,
+  // Where the names of visited places come from, an Overpass API. "off" turns it off.
+  placeLookupUrl:
+    process.env.PLACE_LOOKUP_URL === "off" ? null : process.env.PLACE_LOOKUP_URL || "https://overpass-api.de/api/interpreter",
+  // Asked when Overpass fails, a Photon reverse endpoint. "off" turns it off.
+  placeFallbackUrl:
+    process.env.PLACE_FALLBACK_URL === "off" ? null : process.env.PLACE_FALLBACK_URL || "https://photon.komoot.io/reverse",
   // Only behind a reverse proxy: take the client IP and https from X-Forwarded-*.
   trustProxy: process.env.TRUST_PROXY === "true",
   // Send the dashboard cookie over HTTPS only. Turn on once the server sits behind TLS.

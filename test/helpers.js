@@ -6,8 +6,12 @@ import { acceptInvite, createGroup, invite } from "../src/groups.js";
 import { initDb, closeDb, getDb } from "../src/db.js";
 import { resetDevices } from "../src/devices.js";
 import { resetHistoryState } from "../src/history.js";
+import { resetPlaceLookups } from "../src/places.js";
 
 config.locationWaitMs = 100;
+// Tests never ask the real Overpass, test/places.test.js brings its own.
+config.placeLookupUrl = null;
+config.placeFallbackUrl = null;
 // Tests log in a lot, and scrypt makes every login slow enough to count.
 config.loginRateLimit.max = 30;
 
@@ -18,6 +22,7 @@ export async function startServer() {
   initDb(":memory:");
   resetDevices();
   resetHistoryState();
+  resetPlaceLookups();
   const server = createApp({ gracefulShutdown: false });
   const http = await server.app.listen(0, "127.0.0.1");
   const { port } = http.address();
