@@ -31,6 +31,7 @@ import {
   onlineDevices,
   removeDevice,
   serializeDevices,
+  updateBattery,
   updatePosition,
 } from "./devices.js";
 import {
@@ -70,6 +71,12 @@ const Position = t.object({
 
 const DeviceType = t.enum(["phone", "tablet", "desktop"]);
 
+// What the app reports about its battery: the charge in percent and whether it is plugged in.
+const Battery = t.object({
+  level: t.int().min(0).max(100),
+  charging: t.boolean(),
+});
+
 const Device = t.object({
   deviceId: t.string(),
   userId: t.number(),
@@ -78,6 +85,7 @@ const Device = t.object({
   position: Position.nullable(),
   lastPing: t.string().nullable(),
   status: t.enum(["online", "offline"]),
+  battery: Battery.extend({ updatedAt: t.string() }).nullable(),
   avatarUrl: t.string().nullable(),
   deviceType: DeviceType,
 });
@@ -145,7 +153,9 @@ const ClientMessage = t.discriminated("type", {
     deviceType: DeviceType.optional(),
     viewer: t.boolean().optional(),
   }),
-  updatePosition: Position.extend({ type: t.literal("updatePosition") }),
+  // The battery rides along with a position; on its own it comes when only the charge changed.
+  updatePosition: Position.extend({ type: t.literal("updatePosition"), battery: Battery.optional() }),
+  updateBattery: Battery.extend({ type: t.literal("updateBattery") }),
   locationError: t.object({ type: t.literal("locationError"), message: t.string().max(500).optional() }),
   ping: bare("ping"),
   pong: bare("pong"),
@@ -923,7 +933,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
           case "updatePosition":
             if (role !== "device") return;
             updatePosition(account, deviceId, msg.latitude, msg.longitude);
+            if (msg.battery) updateBattery(account, deviceId, msg.battery.level, msg.battery.charging);
             recordPosition(account, deviceId, msg.latitude, msg.longitude);
+            broadcastDevices();
+            break;
+          case "updateBattery":
+            if (role !== "device") return;
+            updateBattery(account, deviceId, msg.level, msg.charging);
             broadcastDevices();
             break;
           case "locationError":

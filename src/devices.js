@@ -55,6 +55,15 @@ export function updatePosition(userId, deviceId, latitude, longitude) {
   return device;
 }
 
+// The charge the app last reported, 0 to 100. Kept in memory only: after a restart
+// the next report fills it in again.
+export function updateBattery(userId, deviceId, level, charging) {
+  const device = devices.get(keyOf(userId, deviceId));
+  if (!device) return null;
+  device.battery = { level, charging, updatedAt: new Date().toISOString() };
+  return device;
+}
+
 // Everyone signed in sees every device. The picture and the name belong to the
 // account that owns the device, so all devices of one person look alike.
 // The list is built from the linked devices in the database, so it survives a server
@@ -84,6 +93,7 @@ export function serializeDevices(viewer) {
         position: live?.position ?? (stored ? { latitude: stored.lat, longitude: stored.lon } : null),
         lastPing: live?.lastPing ?? (stored ? new Date(stored.ts).toISOString() : null),
         status: live?.status ?? "offline",
+        battery: live?.battery ?? null,
         avatarUrl: owner.avatarUrl,
         deviceType: live?.deviceType ?? link.deviceType ?? "phone",
         groupIds: groupsOf(user.id),
@@ -102,6 +112,7 @@ export function serializeDevices(viewer) {
       position: d.position,
       lastPing: d.lastPing,
       status: d.status,
+      battery: d.battery ?? null,
       avatarUrl: owner?.avatarUrl ?? null,
       deviceType: d.deviceType ?? inferDeviceType(d.id),
       groupIds: groupsOf(d.userId),

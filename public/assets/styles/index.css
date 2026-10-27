@@ -569,6 +569,7 @@ body.is-timeline .maplibregl-popup {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   color: var(--text-muted);
   font-size: 12.5px;
 }
@@ -1011,6 +1012,72 @@ body.is-timeline .maplibregl-popup {
   width: 13px;
   height: 13px;
   margin-right: 4px;
+}
+
+/* The text gives way first, so the battery next to it stays on the line. */
+.device__meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Battery next to a device: a small cell filled to its charge, then the percent. */
+.battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.battery__cell {
+  position: relative;
+  display: inline-block;
+  width: 18px;
+  height: 9px;
+  padding: 1px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}
+
+.battery__cell::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -4px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+
+.battery__fill {
+  display: block;
+  height: 100%;
+  min-width: 1px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.battery--low {
+  color: var(--danger);
+}
+
+.battery--charging {
+  color: var(--online);
+}
+
+.battery__bolt {
+  width: 11px;
+  height: 11px;
+  margin-left: -2px;
+  fill: currentColor;
+  stroke: none;
 }
 
 /* One row per person, the devices unfold underneath. */

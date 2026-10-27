@@ -31,6 +31,7 @@ test("a new device starts online without a position", () => {
       position: null,
       lastPing: null,
       status: "online",
+      battery: null,
       avatarUrl: null,
       deviceType: "phone",
       groupIds: [],
