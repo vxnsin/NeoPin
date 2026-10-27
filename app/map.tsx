@@ -28,6 +28,7 @@ import { useWebSocketContext } from "@/context/WebSocket";
 import Avatar from "@/components/Avatar";
 import PulseLogo from "@/components/PulseLogo";
 import TimelinePanel from "@/components/TimelinePanel";
+import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
 import ProfileForm from "@/components/ProfileForm";
@@ -121,6 +122,7 @@ export default function MapScreen() {
   const [groupFilter, setGroupFilter] = useState<number | null>(null);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [panelRest, setPanelRest] = useState<number | null>(null);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -407,7 +409,9 @@ export default function MapScreen() {
   const isMine = (d: Device) => isOwnDevice(d, user?.id, creds?.deviceId);
   const me = devices.find(isMine);
   const profileAvatar = user?.avatarUrl ?? null;
-  const panelHeight = Math.round(windowHeight * 0.55);
+  // The timeline panel opens at its middle rest and keeps the height the finger left it at.
+  const panelSnapsNow = panelSnaps(windowHeight, insets.top);
+  const panelHeight = panelRest ?? panelSnapsNow.mid;
   const pending = pendingCount(invites);
   const people = groupPeople(visibleDevices, user?.id);
   const online = visibleDevices.filter((d) => d.status === "online").length;
@@ -590,6 +594,8 @@ export default function MapScreen() {
           avatarFor={avatarFor}
           post={post}
           height={panelHeight}
+          snaps={panelSnapsNow}
+          onHeightChange={setPanelRest}
           mapTap={mapTap}
           onClose={() => setTimelineOpen(false)}
         />

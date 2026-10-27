@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/api";
 import type { StoredCredentials } from "@/lib/credentials";
 import { DEVICE_ICONS, freshness, typeOf, type Device } from "@/lib/devices";
+import { clampDrag, restAfterDrag, type Snaps } from "@/lib/sheetSnap";
 import {
   GAP_COLOR,
   MODE_COLORS,
@@ -45,13 +47,16 @@ type Props = {
   avatarFor: (url?: string | null) => string | null;
   // Sends a message to the map page.
   post: (payload: object) => void;
+  // The height the panel rests at, and the rests the finger can move it to.
   height: number;
+  snaps: Snaps;
+  onHeightChange: (height: number) => void;
   // A stop or a line the user tapped on the map.
   mapTap: { index: number; n: number } | null;
   onClose: () => void;
 };
 
-export default function TimelinePanel({ creds, devices, avatarFor, post, height, mapTap, onClose }: Props) {
+export default function TimelinePanel({ creds, devices, avatarFor, post, height, snaps, onHeightChange, mapTap, onClose }: Props) {
   const { colors: c } = useThemeManager();
   const insets = useSafeAreaInsets();
 
@@ -94,7 +99,40 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const [refreshFailures, setRefreshFailures] = useState(0);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const rows = useRef<Record<number, number>>({});
+  // While the finger drags, the panel follows it; the map only hears about the height it rests at.
+  const [drag, setDrag] = useState<number | null>(null);
+  const shownHeight = drag ?? height;
   const bottomPadding = height + 16;
+  const bottomRef = useRef(bottomPadding);
+  bottomRef.current = bottomPadding;
+  const hasRoute = useRef(false);
+  const heightRef = useRef(height);
+  heightRef.current = height;
+  const dragFrom = useRef(height);
+  const callbacks = useRef({ onClose, onHeightChange });
+  callbacks.current = { onClose, onHeightChange };
+  const { low, mid, high } = snaps;
+  const dragGesture = useMemo(() => {
+    const rests = { low, mid, high };
+    return Gesture.Pan()
+      .runOnJS(true)
+      // A tap on the buttons in the header stays a tap.
+      .activeOffsetY([-6, 6])
+      .onBegin(() => {
+        dragFrom.current = heightRef.current;
+      })
+      .onUpdate((e) => setDrag(clampDrag(dragFrom.current - e.translationY, rests)))
+      .onEnd((e) => {
+        const rest = restAfterDrag(dragFrom.current - e.translationY, e.velocityY, rests);
+        if (rest === null) callbacks.current.onClose();
+        else callbacks.current.onHeightChange(rest);
+      })
+      .onFinalize(() => setDrag(null));
+  }, [low, mid, high]);
+
+  useEffect(() => {
+    if (hasRoute.current) post({ type: "routeBottom", bottom: bottomPadding });
+  }, [bottomPadding, post]);
 
   useEffect(() => {
     if (!admin) return;
@@ -153,17 +191,19 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         if (current !== run.current) return;
         setTimeline(result);
         const segments = routeSegments(result.segments);
-        if (segments.length) post({ type: "route", segments, bottom: bottomPadding });
+        hasRoute.current = segments.length > 0;
+        if (segments.length) post({ type: "route", segments, bottom: bottomRef.current });
         else post({ type: "routeClear" });
       })
       .catch((e: any) => {
         if (current !== run.current) return;
         setTimeline(null);
         setError(e?.message || "The timeline could not be loaded.");
+        hasRoute.current = false;
         post({ type: "routeClear" });
       })
       .finally(() => current === run.current && setLoading(false));
-  }, [creds, deviceId, queryUser, day, reloads, post, bottomPadding]);
+  }, [creds, deviceId, queryUser, day, reloads, post]);
 
   useEffect(() => () => post({ type: "routeClear" }), [post]);
 
@@ -212,28 +252,32 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const chipText = (active: boolean) => ({ color: active ? c.onSecondary : c.primary });
 
   return (
-    <View style={[styles.panel, { height, backgroundColor: c.raised, paddingBottom: insets.bottom + 8 }]}>
-      <View style={[styles.grabber, { backgroundColor: c.muted }]} />
+    <View style={[styles.panel, { height: shownHeight, backgroundColor: c.raised, paddingBottom: insets.bottom + 8 }]}>
+      <GestureDetector gesture={dragGesture}>
+        <View collapsable={false} accessibilityHint="Drag up or down to resize, drag down to close">
+          <View style={[styles.grabber, { backgroundColor: c.muted }]} />
 
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: c.primary }]}>Timeline</Text>
-        <View style={styles.headerActions}>
-          <Pressable
-            style={[styles.iconButton, { backgroundColor: c.subtle }]}
-            onPress={() => setReloads((n) => n + 1)}
-            accessibilityLabel="Reload the timeline"
-          >
-            <MaterialIcons name="refresh" size={20} color={c.primary} />
-          </Pressable>
-          <Pressable
-            style={[styles.iconButton, { backgroundColor: c.subtle }]}
-            onPress={onClose}
-            accessibilityLabel="Close the timeline"
-          >
-            <MaterialIcons name="close" size={20} color={c.primary} />
-          </Pressable>
+          <View style={styles.header}>
+            <Text style={[styles.title, { color: c.primary }]}>Timeline</Text>
+            <View style={styles.headerActions}>
+              <Pressable
+                style={[styles.iconButton, { backgroundColor: c.subtle }]}
+                onPress={() => setReloads((n) => n + 1)}
+                accessibilityLabel="Reload the timeline"
+              >
+                <MaterialIcons name="refresh" size={20} color={c.primary} />
+              </Pressable>
+              <Pressable
+                style={[styles.iconButton, { backgroundColor: c.subtle }]}
+                onPress={onClose}
+                accessibilityLabel="Close the timeline"
+              >
+                <MaterialIcons name="close" size={20} color={c.primary} />
+              </Pressable>
+            </View>
+          </View>
         </View>
-      </View>
+      </GestureDetector>
 
       {admin && users.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
