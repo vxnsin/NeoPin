@@ -1,4 +1,4 @@
-import type { Segment, Trip, TripMode } from "@/lib/api";
+import type { PlaceKind, Segment, Trip, TripMode, Visit } from "@/lib/api";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -65,6 +65,60 @@ export function shortDayLabel(key: string, now = new Date()): string {
   if (label === "Today" || label === "Yesterday") return label;
   const date = parseDay(key);
   return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+}
+
+export const PLACE_LABELS: Record<PlaceKind, string> = {
+  home: "Home",
+  work: "Work",
+  cafe: "Café",
+  restaurant: "Restaurant",
+  bar: "Bar",
+  grocery: "Groceries",
+  shop: "Shop",
+  station: "Station",
+  school: "School",
+  health: "Health",
+  sport: "Sport",
+  park: "Park",
+  culture: "Culture",
+  hotel: "Hotel",
+  worship: "Place of worship",
+  fuel: "Fuel",
+  building: "Building",
+  place: "Place",
+};
+
+export const PLACE_ICONS = {
+  home: "home",
+  work: "work",
+  cafe: "local-cafe",
+  restaurant: "restaurant",
+  bar: "local-bar",
+  grocery: "local-grocery-store",
+  shop: "shopping-bag",
+  station: "train",
+  school: "school",
+  health: "local-hospital",
+  sport: "fitness-center",
+  park: "park",
+  culture: "museum",
+  hotel: "hotel",
+  worship: "church",
+  fuel: "local-gas-station",
+  building: "apartment",
+  place: "place",
+} as const satisfies Record<PlaceKind, string>;
+
+// "Café Mohr", or "Stop 2" while the place has no name.
+export function visitTitle(visit: Visit, number: number | undefined): string {
+  return visit.place?.name ?? `Stop ${number ?? ""}`.trim();
+}
+
+// "Café · suggested" for a guess, "Café" once confirmed, null without a place.
+export function visitKind(visit: Visit): string | null {
+  if (!visit.place) return null;
+  const label = PLACE_LABELS[visit.place.kind] ?? "Place";
+  return visit.place.source === "osm" ? `${label} · suggested` : label;
 }
 
 export const MODE_LABELS: Record<TripMode, string> = {
