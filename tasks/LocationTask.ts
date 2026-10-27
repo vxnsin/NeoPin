@@ -3,6 +3,8 @@ import * as Location from "expo-location";
 import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
 import { readBattery } from "@/lib/battery";
+import { holdFixes, reportMessages, takeHeldFixes, toFix } from "@/lib/fixes";
+import type { Message } from "@/lib/SocketClient";
 import { reportInterval } from "@/lib/reportInterval";
 import { loadSettings } from "@/lib/settings";
 import { socket, readCredentials, type StoredCredentials } from "@/lib/socket";
@@ -16,20 +18,17 @@ const PUSH_TIMEOUT_MS = 8_000;
 // short-lived connection of our own.
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (error || !data) return;
-  const locations = (data as { locations?: Location.LocationObject[] }).locations ?? [];
-  const latest = locations[locations.length - 1];
+  // The system may hand over several fixes at once, iOS does when it defers updates.
+  const fixes = ((data as { locations?: Location.LocationObject[] }).locations ?? []).map(toFix);
+  const latest = fixes.pop();
   if (!latest) return;
 
   const battery = await readBattery();
-  const message = {
-    type: "updatePosition",
-    latitude: latest.coords.latitude,
-    longitude: latest.coords.longitude,
-    ...(battery && { battery }),
-  };
+  const live = { type: "updatePosition", ...latest, ...(battery && { battery }) };
 
   if (socket.connected) {
-    socket.emit(message);
+    const older = [...(await takeHeldFixes()), ...fixes];
+    reportMessages(older, live, socket.features).forEach((msg) => socket.emit(msg));
     return;
   }
 
@@ -37,10 +36,18 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (!creds) return;
   // The task may run without the app, the preset has to come from storage then.
   await loadSettings();
-  await pushOnce(creds, message).catch((err) => console.warn("Background push failed:", err?.message));
+  const older = [...(await takeHeldFixes()), ...fixes];
+  try {
+    await pushOnce(creds, (features) => reportMessages(older, live, features));
+  } catch (err: any) {
+    // No connection right now: everything waits on the phone for the next one.
+    await holdFixes([...older, latest]);
+    console.warn("Background push failed:", err?.message);
+  }
 });
 
-function pushOnce(creds: StoredCredentials, message: Record<string, unknown>): Promise<void> {
+// Logs in, sends what messagesFor returns for the server's features, and closes again.
+function pushOnce(creds: StoredCredentials, messagesFor: (features: string[]) => Message[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(creds.serverIp);
     const timer = setTimeout(() => {
@@ -68,7 +75,8 @@ function pushOnce(creds: StoredCredentials, message: Record<string, unknown>): P
       try {
         const reply = JSON.parse(event.data);
         if (reply.successful) {
-          ws.send(JSON.stringify(message));
+          const features = Array.isArray(reply.features) ? reply.features : [];
+          messagesFor(features).forEach((msg) => ws.send(JSON.stringify(msg)));
           finish(resolve);
         } else if ("successful" in reply) {
           finish(() => reject(new Error("authentication failed")));

@@ -1,6 +1,7 @@
 import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
 import { noteServerDevices, readBattery } from "@/lib/battery";
+import { toFix } from "@/lib/fixes";
 
 type Socket = {
   onMessage: (fn: (data: Message) => void) => () => void;
@@ -25,12 +26,7 @@ export function registerHandlers(ws: Socket) {
           });
 
           const battery = await readBattery();
-          ws.emit({
-            type: "updatePosition",
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            ...(battery && { battery }),
-          });
+          ws.emit({ type: "updatePosition", ...toFix(position), ...(battery && { battery }) });
         } catch (error: any) {
           ws.emit({
             type: "locationError",

@@ -1,6 +1,7 @@
 import { SocketClient } from "@/lib/SocketClient";
 import { registerHandlers } from "@/handlers/WebSocket";
 import { readCredentials } from "@/lib/credentials";
+import { sendHeldFixes } from "@/lib/fixes";
 
 export { readCredentials };
 export type { StoredCredentials } from "@/lib/credentials";
@@ -10,6 +11,10 @@ export type { StoredCredentials } from "@/lib/credentials";
 // single connection per device.
 export const socket = new SocketClient();
 registerHandlers(socket);
+// Fixes the background task could not deliver go out as soon as the socket is back.
+socket.onStatus((connected) => {
+  if (connected) sendHeldFixes(socket).catch(() => {});
+});
 
 export async function connectWithStoredCredentials(): Promise<boolean> {
   const creds = await readCredentials();

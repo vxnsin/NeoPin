@@ -78,6 +78,26 @@ test("authenticates after the socket opens and resolves on success", async () =>
   expect(client.connected).toBe(true);
 });
 
+test("remembers the features of the server it is connected to, per connection", async () => {
+  const client = new SocketClient();
+  const promise = client.connect("ws://server", "phone", "secret");
+  const first = FakeWebSocket.latest();
+  first.open();
+  first.receive({ successful: true, features: ["positionBatch", 7] });
+  await promise;
+  expect(client.features).toEqual(["positionBatch"]);
+
+  first.drop();
+  expect(client.features).toEqual(["positionBatch"]);
+  jest.advanceTimersByTime(2_000);
+  const second = FakeWebSocket.latest();
+  expect(client.features).toEqual([]);
+  second.open();
+  second.receive({ successful: true });
+  await flush();
+  expect(client.features).toEqual([]);
+});
+
 test("rejects on a failed authentication and does not reconnect", async () => {
   const client = new SocketClient();
   const promise = client.connect("ws://server", "phone", "wrong");
