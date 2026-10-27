@@ -1138,6 +1138,26 @@ body.is-timeline .maplibregl-popup {
   height: 16px;
 }
 
+/* The star next to a device: filled for the one picked to stand for its person. */
+.subdevice__star {
+  width: 34px;
+  height: 34px;
+  color: var(--text-muted);
+}
+
+.subdevice__star .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.subdevice__star.is-on {
+  color: var(--stale);
+}
+
+.subdevice__star.is-on .icon {
+  fill: currentColor;
+}
+
 /* Several pins that overlap on the screen become one marker. */
 .pin.is-clustered {
   display: none;

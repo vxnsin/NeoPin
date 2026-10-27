@@ -18,6 +18,7 @@ import {
   revokeToken,
   setPassword,
   setAvatar,
+  setPrimaryDevice,
   unlinkDevice,
   updateUser,
   userForToken,
@@ -88,6 +89,7 @@ const Device = t.object({
   battery: Battery.extend({ updatedAt: t.string() }).nullable(),
   avatarUrl: t.string().nullable(),
   deviceType: DeviceType,
+  primary: t.boolean(),
 });
 
 const User = t.object({
@@ -97,12 +99,14 @@ const User = t.object({
   isAdmin: t.boolean(),
   mustChangePassword: t.boolean(),
   avatarUrl: t.string().nullable(),
+  primaryDeviceId: t.string().nullable(),
 });
 
 const LinkedDevice = t.object({
   deviceId: t.string(),
   linkedAt: t.string(),
   deviceType: DeviceType,
+  primary: t.boolean(),
   status: t.enum(["online", "offline"]),
   lastPing: t.string().nullable(),
   position: Position.nullable(),
@@ -319,10 +323,12 @@ export function createApp({ gracefulShutdown = true } = {}) {
   }
 
   function linkedDevicesOf(userId) {
+    const primary = getUser(userId)?.primary_device_id ?? null;
     return linkedDevices(userId).map((link) => {
       const live = getDevice(userId, link.deviceId);
       return {
         ...link,
+        primary: link.deviceId === primary,
         deviceType: live?.deviceType ?? link.deviceType,
         status: live?.status ?? "offline",
         lastPing: live?.lastPing ?? null,
@@ -479,6 +485,29 @@ export function createApp({ gracefulShutdown = true } = {}) {
           return reply(204);
         }
       );
+
+      // The device that stands for an account in the people lists, or null for the automatic choice.
+      const PrimaryBody = t.object({ deviceId: t.string().min(1).max(64).nullable() });
+      const primaryResponse = { 200: User, 401: t.problem(), 403: t.problem(), 404: t.problem() };
+      const applyPrimary = (userId, deviceId) => {
+        if (deviceId !== null && !linkedDevices(userId).some((d) => d.deviceId === deviceId)) {
+          throw problem(404, "unknown-device", "No such linked device");
+        }
+        setPrimaryDevice(userId, deviceId);
+        broadcastDevices();
+        return publicUser(getUser(userId));
+      };
+
+      api.put("/me/primary-device", { body: PrimaryBody, response: primaryResponse }, (ctx) =>
+        applyPrimary(currentUser(ctx).user.id, ctx.body.deviceId)
+      );
+
+      api.put("/users/:id/primary-device", { body: PrimaryBody, response: primaryResponse }, (ctx) => {
+        requireAdmin(ctx);
+        const id = Number(ctx.params.id);
+        if (!getUser(id)) throw problem(404, "unknown-user", "No such account");
+        return applyPrimary(id, ctx.body.deviceId);
+      });
 
       // Account management, for the admin (the first account).
       api.get(
