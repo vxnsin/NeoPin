@@ -29,6 +29,7 @@ import Avatar from "@/components/Avatar";
 import PulseLogo from "@/components/PulseLogo";
 import TimelinePanel from "@/components/TimelinePanel";
 import PasswordForm from "@/components/PasswordForm";
+import HideSection from "@/components/HideSection";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
@@ -57,6 +58,7 @@ import {
   fetchGroups,
   fetchInvites,
   fetchMe,
+  fetchServerStatus,
   setPrimaryDeviceRequest,
   type Group,
   type Invite,
@@ -109,6 +111,8 @@ export default function MapScreen() {
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
+  // "Server v1.4.0 · 21a136a", under the app version in the settings.
+  const [serverLabel, setServerLabel] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -160,6 +164,13 @@ export default function MapScreen() {
     const timer = setTimeout(() => setMinLoadingTimeFinished(true), 1200);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (sheet !== "settings" || !creds) return;
+    fetchServerStatus(creds.serverIp)
+      .then((status) => setServerLabel(["Server v" + status.version, status.commit?.slice(0, 7)].filter(Boolean).join(" · ")))
+      .catch(() => setServerLabel(null));
+  }, [sheet, creds]);
 
   useEffect(() => {
     const ticker = setInterval(() => setTick((t) => t + 1), 15_000);
@@ -758,6 +769,15 @@ export default function MapScreen() {
               </View>
               <Text style={[styles.presetHint, { color: c.muted }]}>{REPORTING_PRESETS[preset].description}</Text>
 
+              <HideSection
+                auth={creds}
+                hiddenUntil={creds.user.hiddenUntil}
+                onChange={(fresh) => {
+                  setCreds((current) => (current ? { ...current, user: fresh } : current));
+                  updateStoredUser(fresh).catch(() => {});
+                }}
+              />
+
               <PasswordForm auth={creds} onChanged={passwordChanged} />
 
               <Pressable style={[styles.logout, { backgroundColor: c.subtle }]} onPress={logout}>
@@ -778,6 +798,7 @@ export default function MapScreen() {
                 <Text style={[styles.versionText, { color: c.muted }]}>
                   {updateNote ?? `Check for updates${updateLabel() ? ` · ${updateLabel()}` : ""}`}
                 </Text>
+                {serverLabel && <Text style={[styles.versionText, { color: c.muted, marginTop: 4 }]}>{serverLabel}</Text>}
               </Pressable>
             </ScrollView>
           )}

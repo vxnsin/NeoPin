@@ -7,6 +7,8 @@ export type User = {
   avatarUrl: string | null;
   isAdmin?: boolean;
   mustChangePassword?: boolean;
+  // Only on the own account, from servers that can hide: until when (ms), null when visible.
+  hiddenUntil?: number | null;
 };
 
 export type DeviceAuth = { serverIp: string; deviceId: string; token: string };
@@ -160,6 +162,28 @@ export async function fetchMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me`, { headers: deviceHeaders(auth) }));
 }
 
+// Gone from everyone else's map for this many minutes, or until turned off (null).
+export async function setHidden(auth: DeviceAuth, minutes: number | null): Promise<User> {
+  return json(
+    await request(`${httpBase(auth.serverIp)}/api/me/hidden`, {
+      method: "PUT",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify(minutes === null ? {} : { minutes }),
+    })
+  );
+}
+
+export async function showMe(auth: DeviceAuth): Promise<User> {
+  return json(await request(`${httpBase(auth.serverIp)}/api/me/hidden`, { method: "DELETE", headers: deviceHeaders(auth) }));
+}
+
+export type ServerStatus = { version: string; commit?: string | null; builtAt?: string | null };
+
+// Which server build runs. Older servers only know their version.
+export async function fetchServerStatus(serverIp: string): Promise<ServerStatus> {
+  return json(await request(`${httpBase(serverIp)}/api/status`));
+}
+
 export type PlaceKind =
   | "home"
   | "work"
@@ -207,6 +231,8 @@ export type Trip = {
   distanceM: number;
   mode: TripMode;
   path: [number, number][];
+  // No fixes on the way, only where it started and ended is known.
+  gap?: boolean;
 };
 
 export type Segment = Visit | Trip;
@@ -297,6 +323,8 @@ export type Group = {
   ownerId: number;
   role: "owner" | "member";
   canManage: boolean;
+  // Holds everyone for good: no leaving, removing, inviting or deleting. Older servers leave it out.
+  fixed?: boolean;
   members: GroupMember[];
   // Only managers get these.
   pendingInvites?: { id: number; user: { id: number; username: string; displayName: string } }[];

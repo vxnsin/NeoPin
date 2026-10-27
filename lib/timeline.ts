@@ -152,7 +152,10 @@ export function visitNumbers(segments: Segment[]): Map<number, number> {
 // What the map page needs to draw a day: trip lines and numbered stops.
 export type RouteSegment =
   | { type: "visit"; index: number; number: number; lat: number; lon: number }
-  | { type: "trip"; index: number; mode: TripMode; color: string; path: [number, number][] };
+  | { type: "trip"; index: number; mode: TripMode; color: string; path: [number, number][]; gap?: boolean };
+
+// A stretch without fixes is drawn thin, dashed and grey.
+export const GAP_COLOR = "#94a3b8";
 
 export function routeSegments(segments: Segment[]): RouteSegment[] {
   const numbers = visitNumbers(segments);
@@ -161,7 +164,15 @@ export function routeSegments(segments: Segment[]): RouteSegment[] {
     if (segment.type === "visit") {
       out.push({ type: "visit", index, number: numbers.get(index) ?? 0, lat: segment.lat, lon: segment.lon });
     } else if ((segment as Trip).path?.length >= 2) {
-      out.push({ type: "trip", index, mode: segment.mode, color: MODE_COLORS[segment.mode], path: segment.path });
+      const trip = segment as Trip;
+      out.push({
+        type: "trip",
+        index,
+        mode: trip.mode,
+        color: trip.gap ? GAP_COLOR : MODE_COLORS[trip.mode],
+        path: trip.path,
+        ...(trip.gap && { gap: true }),
+      });
     }
   });
   return out;
