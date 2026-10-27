@@ -7,12 +7,12 @@ const MAX_MINUTES = 7 * 24 * 60;
 
 export type HideChoice = { key: string; label: string; minutes: (now: Date) => number | null };
 
-// Next morning at 7, the usual "not tonight" answer.
+// Next morning at 7, the usual "not tonight" answer. Rounded up, so it never ends before 7:00.
 export function minutesUntilMorning(now: Date): number {
   const morning = new Date(now);
   morning.setHours(7, 0, 0, 0);
   if (morning <= now) morning.setDate(morning.getDate() + 1);
-  return Math.min(MAX_MINUTES, Math.max(1, Math.round((morning.getTime() - now.getTime()) / 60_000)));
+  return Math.min(MAX_MINUTES, Math.max(1, Math.ceil((morning.getTime() - now.getTime()) / 60_000)));
 }
 
 // null minutes: until it is turned off.
