@@ -48,4 +48,10 @@ export const config = {
   deviceAuthLimit: { windowMs: 60 * 1000, max: 10 },
   // Profile picture uploads and downloads per IP, a whole family fits easily.
   avatarRateLimit: { windowMs: 60 * 1000, max: 120 },
+  // A device without an open socket still counts as online until two of its report
+  // periods passed, plus some slack, and never shorter than minMs. Apps that do not
+  // say how often they report are taken to report every defaultIntervalMs.
+  onlineGrace: { minMs: 2 * 60 * 1000, slackMs: 60 * 1000, defaultIntervalMs: 2 * 60 * 1000 },
+  // How often the server looks whether such a device has run out of time.
+  statusSweepMs: 30 * 1000,
 };

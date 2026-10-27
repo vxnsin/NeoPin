@@ -1,6 +1,7 @@
 import { getUser, inferDeviceType, linkedDevices, listUsers, publicUser } from "./accounts.js";
 import { lastPosition } from "./history.js";
 import { sharedGroupIds, visibleUserIds } from "./groups.js";
+import { config } from "./config.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
 // account and its name, so two people may both own an "iPhone". A record outlives
@@ -23,8 +24,21 @@ export function onlineDevices(userId) {
   return allDevices(userId).filter((d) => d.status === "online" && d.socket);
 }
 
+// Online while the socket is open, and after it closed for two report periods: a phone
+// whose foreground service is gone (its notification swiped away on Android) still
+// reports through short visits of its background task, and is not offline in between.
+export function statusOf(device, now = Date.now()) {
+  if (!device) return "offline";
+  if (device.socket) return "online";
+  if (!device.lastPing) return "offline";
+  const { minMs, slackMs, defaultIntervalMs } = config.onlineGrace;
+  const grace = Math.max(minMs, 2 * (device.intervalMs ?? defaultIntervalMs) + slackMs);
+  return now - Date.parse(device.lastPing) <= grace ? "online" : "offline";
+}
+
 // Registers a socket for a device and returns the socket it replaces, if any.
-export function attachSocket(userId, deviceId, socket, deviceType) {
+// intervalMs is how often the app means to report, from its update preset.
+export function attachSocket(userId, deviceId, socket, deviceType, intervalMs) {
   const key = keyOf(userId, deviceId);
   let device = devices.get(key);
   if (!device) {
@@ -35,6 +49,7 @@ export function attachSocket(userId, deviceId, socket, deviceType) {
   device.socket = socket;
   device.status = "online";
   if (deviceType) device.deviceType = deviceType;
+  if (intervalMs) device.intervalMs = intervalMs;
   return previous && previous !== socket ? previous : null;
 }
 
@@ -92,7 +107,7 @@ export function serializeDevices(viewer) {
         owner: { username: owner.username, displayName: owner.displayName },
         position: live?.position ?? (stored ? { latitude: stored.lat, longitude: stored.lon } : null),
         lastPing: live?.lastPing ?? (stored ? new Date(stored.ts).toISOString() : null),
-        status: live?.status ?? "offline",
+        status: statusOf(live),
         battery: live?.battery ?? null,
         avatarUrl: owner.avatarUrl,
         deviceType: live?.deviceType ?? link.deviceType ?? "phone",
@@ -113,7 +128,7 @@ export function serializeDevices(viewer) {
       owner: { username: owner?.username ?? "", displayName: owner?.displayName ?? "" },
       position: d.position,
       lastPing: d.lastPing,
-      status: d.status,
+      status: statusOf(d),
       battery: d.battery ?? null,
       avatarUrl: owner?.avatarUrl ?? null,
       deviceType: d.deviceType ?? inferDeviceType(d.id),
