@@ -48,7 +48,7 @@ test("a day becomes visits and the trips between them", () => {
 });
 
 test("fixes that stay close together for a short time are no visit", () => {
-  const points = [at(0, 48.1), at(3, 48.1), at(6, 48.1002), at(9, 48.1003)];
+  const points = [at(0, 48.1), at(1, 48.1), at(2, 48.1002), at(4, 48.1003)];
   const { segments } = buildTimeline(points);
   assert.equal(segments.filter((s) => s.type === "visit").length, 0);
 });

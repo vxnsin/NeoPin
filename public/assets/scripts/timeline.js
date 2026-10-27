@@ -5,6 +5,29 @@ const MODES = {
   driving: { label: "Driving", icon: "#i-car", color: "#ea580c" },
 };
 const TL_SOURCE = "timeline";
+const KIND_LABELS = {
+  home: "Home",
+  work: "Work",
+  cafe: "Café",
+  restaurant: "Restaurant",
+  bar: "Bar",
+  grocery: "Groceries",
+  shop: "Shop",
+  station: "Station",
+  school: "School",
+  health: "Health",
+  sport: "Sport",
+  park: "Park",
+  culture: "Culture",
+  hotel: "Hotel",
+  worship: "Place of worship",
+  fuel: "Fuel",
+  building: "Building",
+  place: "Place",
+};
+// Place names that are still looked up are asked for again, a few times at most.
+const PENDING_RETRY_MS = 4000;
+const PENDING_RETRIES = 5;
 
 const tlButton = document.getElementById("timelineButton");
 const tlPanel = document.getElementById("timelinePanel");
@@ -16,7 +39,7 @@ const tlPrev = document.getElementById("tlPrev");
 const tlNext = document.getElementById("tlNext");
 const tlBody = document.getElementById("tlBody");
 
-const tl = { on: false, userId: null, deviceId: null, date: null, days: [], data: null, active: null, loadId: 0, markers: [] };
+const tl = { on: false, userId: null, deviceId: null, date: null, days: [], data: null, active: null, loadId: 0, markers: [], retries: 0 };
 
 function localDay(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -24,7 +47,9 @@ function localDay(date = new Date()) {
 }
 
 // An admin looking at somebody else's account adds that account's id.
-const tzQuery = () => `tz=${new Date().getTimezoneOffset()}${tl.userId && tl.userId !== me?.id ? `&userId=${tl.userId}` : ""}`;
+const userQuery = () => (tl.userId && tl.userId !== me?.id ? `userId=${tl.userId}` : "");
+const tzQuery = () => [`tz=${new Date().getTimezoneOffset()}`, userQuery()].filter(Boolean).join("&");
+const withUser = (path) => (userQuery() ? `${path}${path.includes("?") ? "&" : "?"}${userQuery()}` : path);
 
 function formatTime(ms) {
   return new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -45,6 +70,20 @@ function formatDistance(meters) {
 
 async function getJson(url) {
   const response = await fetch(url);
+  if (response.status === 401) {
+    window.location.href = "/login";
+    throw new Error("signed-out");
+  }
+  if (!response.ok) throw new Error("failed");
+  return response.json();
+}
+
+async function sendJson(url, method, body) {
+  const response = await fetch(url, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (response.status === 401) {
     window.location.href = "/login";
     throw new Error("signed-out");
@@ -121,7 +160,7 @@ function drawMarkers() {
     el.className = "tl-marker";
     el.textContent = String(number);
     el.dataset.index = String(index);
-    el.setAttribute("aria-label", `Stop ${number}, ${formatTime(segment.start)}`);
+    el.setAttribute("aria-label", `${segment.place?.name ?? `Stop ${number}`}, ${formatTime(segment.start)}`);
     el.addEventListener("click", (event) => {
       event.stopPropagation();
       focusSegment(index, { scroll: true });
@@ -147,9 +186,7 @@ function fitDay() {
   fitBoundsTo(bounds, timelinePadding(), 800);
 }
 
-function focusSegment(index, { scroll = false } = {}) {
-  const segment = tl.data?.segments[index];
-  if (!segment) return;
+function markActive(index) {
   tl.active = index;
   tlBody.querySelectorAll(".seg").forEach((el) => el.classList.toggle("is-active", Number(el.dataset.index) === index));
   for (const marker of tl.markers) {
@@ -157,6 +194,12 @@ function focusSegment(index, { scroll = false } = {}) {
     el.classList.toggle("is-active", Number(el.dataset.index) === index);
   }
   map.getSource(TL_SOURCE)?.setData(linesData());
+}
+
+function focusSegment(index, { scroll = false } = {}) {
+  const segment = tl.data?.segments[index];
+  if (!segment) return;
+  markActive(index);
 
   if (phone.matches) setSheetOpen(false);
   const padding = timelinePadding();
@@ -187,16 +230,25 @@ function renderSegments(segments) {
     const times = `${formatTime(segment.start)} – ${formatTime(segment.end)}`;
     if (segment.type === "visit") {
       number += 1;
+      const place = segment.place;
+      // A guess from OpenStreetMap says so until someone confirms it.
+      const about = place
+        ? `<span class="seg__meta">${esc(KIND_LABELS[place.kind] ?? "Place")}${place.source === "osm" ? " · suggested" : ""}</span>`
+        : `<span class="seg__meta seg__coords">${segment.lat.toFixed(4)}, ${segment.lon.toFixed(4)}</span>`;
       return `
-        <li>
+        <li class="seg-item">
           <button class="seg seg--visit" type="button" data-index="${index}">
             <span class="seg__badge">${number}</span>
             <span class="seg__text">
-              <span class="seg__title">Stop ${number} · ${esc(formatDuration(segment.durationMs))}</span>
-              <span class="seg__meta">${esc(times)}</span>
-              <span class="seg__meta seg__coords">${segment.lat.toFixed(4)}, ${segment.lon.toFixed(4)}</span>
+              <span class="seg__title">${esc(place?.name ?? `Stop ${number}`)}</span>
+              <span class="seg__meta">${esc(times)} · ${esc(formatDuration(segment.durationMs))}</span>
+              ${about}
             </span>
           </button>
+          <button class="seg__edit" type="button" data-edit="${index}" aria-label="Change the place" title="Change the place">
+            <svg class="icon"><use href="#i-edit" /></svg>
+          </button>
+          <div class="place-picker" data-picker="${index}" hidden></div>
         </li>`;
     }
     const mode = MODES[segment.mode] ?? MODES.walking;
@@ -236,15 +288,21 @@ function updateNav() {
   tlNext.dataset.day = next ?? "";
 }
 
-async function loadDay() {
+// keepView reloads the same day in place (new place names), the map and the list stay where they are.
+async function loadDay({ keepView = false } = {}) {
   const id = ++tl.loadId;
-  tl.data = null;
-  tl.active = null;
-  clearMarkers();
-  ensureLayers();
-  updateNav();
-  if (!tl.deviceId) return renderBody("nodevice");
-  renderBody("loading");
+  const active = keepView ? tl.active : null;
+  const scroll = tlBody.scrollTop;
+  if (!keepView) {
+    tl.data = null;
+    tl.active = null;
+    tl.retries = 0;
+    clearMarkers();
+    ensureLayers();
+    updateNav();
+    if (!tl.deviceId) return renderBody("nodevice");
+    renderBody("loading");
+  }
   try {
     const data = await getJson(`/api/timeline?deviceId=${encodeURIComponent(tl.deviceId)}&date=${tl.date}&${tzQuery()}`);
     if (id !== tl.loadId) return;
@@ -252,9 +310,91 @@ async function loadDay() {
     renderBody("ready");
     ensureLayers();
     drawMarkers();
-    fitDay();
+    if (keepView) {
+      tlBody.scrollTop = scroll;
+      if (active !== null) markActive(active);
+    } else fitDay();
+    if (data.placesPending && tl.retries < PENDING_RETRIES) {
+      tl.retries += 1;
+      setTimeout(() => id === tl.loadId && tl.on && loadDay({ keepView: true }), PENDING_RETRY_MS);
+    }
   } catch (error) {
-    if (id === tl.loadId && error.message !== "signed-out") renderBody("error");
+    if (id === tl.loadId && error.message !== "signed-out" && !keepView) renderBody("error");
+  }
+}
+
+// Places
+
+async function openPicker(index) {
+  const segment = tl.data?.segments[index];
+  const picker = tlBody.querySelector(`.place-picker[data-picker="${index}"]`);
+  if (!segment || !picker) return;
+  const open = picker.hidden;
+  tlBody.querySelectorAll(".place-picker").forEach((el) => (el.hidden = true));
+  if (!open) return;
+  picker.hidden = false;
+  picker.innerHTML = '<div class="place-picker__note"><div class="spinner"></div></div>';
+  let choices = [];
+  try {
+    choices = await getJson(withUser(`/api/places/nearby?lat=${segment.lat}&lon=${segment.lon}`));
+  } catch (error) {
+    if (error.message === "signed-out") return;
+  }
+  const current = segment.place;
+  const confirm =
+    current?.source === "osm"
+      ? `<button class="place-choice place-choice--confirm" type="button" data-confirm>
+          <span>Yes, I was at ${esc(current.name)}</span><small>Confirm the suggestion</small>
+        </button>`
+      : "";
+  const list =
+    choices
+      .map(
+        (c, i) => `<button class="place-choice${current && c.name === current.name ? " is-current" : ""}" type="button" data-choice="${i}">
+          <span>${esc(c.name)}</span>
+          <small>${esc(KIND_LABELS[c.kind] ?? "Place")} · ${esc(formatDistance(c.distanceM))}${c.source === "own" ? " · yours" : ""}</small>
+        </button>`
+      )
+      .join("") || '<div class="place-picker__note">Nothing named close by.</div>';
+  picker.innerHTML = `
+    ${confirm}
+    <div class="place-picker__list">${list}</div>
+    <form class="place-picker__own">
+      <input name="name" maxlength="80" placeholder="Name it yourself" required autocomplete="off" />
+      <select name="kind" aria-label="Kind of place">
+        <option value="place">Place</option>
+        <option value="home">Home</option>
+        <option value="work">Work</option>
+      </select>
+      <button class="place-picker__save" type="submit">Save</button>
+    </form>
+    <div class="place-picker__error" hidden>Could not save, try again.</div>`;
+  picker.dataset.choices = JSON.stringify(choices);
+}
+
+// Saving names the spot of the visit. Picking an own place claims the spot for it.
+async function savePlace(index, choice) {
+  const segment = tl.data?.segments[index];
+  const picker = tlBody.querySelector(`.place-picker[data-picker="${index}"]`);
+  if (!segment || !picker || !choice) return;
+  picker.querySelectorAll("button, input, select").forEach((el) => (el.disabled = true));
+  try {
+    if (choice.source === "own" && choice.id) {
+      await sendJson(withUser(`/api/places/${choice.id}/claim`), "POST", { lat: segment.lat, lon: segment.lon });
+    } else {
+      await sendJson(withUser("/api/places"), "POST", {
+        lat: segment.lat,
+        lon: segment.lon,
+        name: choice.name,
+        kind: choice.kind,
+        ...(choice.osmId && { osmId: choice.osmId }),
+      });
+    }
+    await loadDay({ keepView: true });
+  } catch (error) {
+    if (error.message === "signed-out") return;
+    picker.querySelectorAll("button, input, select").forEach((el) => (el.disabled = false));
+    picker.querySelector(".place-picker__error").hidden = false;
   }
 }
 
@@ -376,8 +516,30 @@ tlPrev.addEventListener("click", () => tlPrev.dataset.day && setDay(tlPrev.datas
 tlNext.addEventListener("click", () => tlNext.dataset.day && setDay(tlNext.dataset.day));
 
 tlBody.addEventListener("click", (event) => {
+  const edit = event.target.closest(".seg__edit");
+  if (edit) return openPicker(Number(edit.dataset.edit));
+  const picker = event.target.closest(".place-picker");
+  if (picker) {
+    const index = Number(picker.dataset.picker);
+    const pick = event.target.closest("[data-choice]");
+    if (pick) savePlace(index, JSON.parse(picker.dataset.choices ?? "[]")[Number(pick.dataset.choice)]);
+    if (event.target.closest("[data-confirm]")) {
+      const { name, kind, osmId } = tl.data.segments[index].place;
+      savePlace(index, { name, kind, osmId, source: "osm" });
+    }
+    return;
+  }
   const seg = event.target.closest(".seg");
   if (seg) focusSegment(Number(seg.dataset.index));
+});
+
+tlBody.addEventListener("submit", (event) => {
+  const form = event.target.closest(".place-picker__own");
+  if (!form) return;
+  event.preventDefault();
+  const name = form.elements.name.value.trim();
+  if (!name) return;
+  savePlace(Number(form.closest(".place-picker").dataset.picker), { name, kind: form.elements.kind.value, source: "typed" });
 });
 
 // On a phone a tap on the head folds the sheet or brings the list back.

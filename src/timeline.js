@@ -3,7 +3,7 @@ import { distanceM } from "./history.js";
 // Turns a day of position fixes into what Google Timeline shows: the places you
 // stayed at ("visits") and the ways between them ("trips").
 export const STOP_RADIUS_M = 75;
-export const MIN_VISIT_MS = 10 * 60_000;
+export const MIN_VISIT_MS = 5 * 60_000;
 const MERGE_VISITS_M = 150;
 const MIN_TRIP_M = 150;
 const MAX_SPEED_MS = 70; // faster than this between two fixes is a GPS jump

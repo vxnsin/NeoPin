@@ -54,6 +54,23 @@ const SCHEMA = `
     UNIQUE (group_id, user_id)
   );
   CREATE INDEX IF NOT EXISTS positions_lookup ON positions(user_id, device_id, ts);
+  CREATE TABLE IF NOT EXISTS places (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'place',
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    radius_m INTEGER NOT NULL DEFAULT 60,
+    osm_id TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS places_user ON places(user_id);
+  CREATE TABLE IF NOT EXISTS place_cache (
+    cell TEXT PRIMARY KEY,
+    fetched_at INTEGER NOT NULL,
+    candidates TEXT NOT NULL
+  );
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.
