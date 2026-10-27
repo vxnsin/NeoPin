@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["NearbyModule"]
+  },
+  "android": {
+    "modules": ["de.vensin.neopin.nearby.NearbyModule"]
+  }
+}

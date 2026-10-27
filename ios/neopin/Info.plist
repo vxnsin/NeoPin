@@ -53,6 +53,8 @@
     <string>Allow $(PRODUCT_NAME) to access your location</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>This app needs your location to display the map correctly.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>NeoPin uses Bluetooth to tell how close a person you are finding is.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>This app needs your location to display the map correctly.</string>
     <key>NSUserActivityTypes</key>

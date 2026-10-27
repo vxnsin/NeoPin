@@ -32,6 +32,7 @@ import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
 import FindSheet from "@/components/FindSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
+import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
@@ -129,6 +130,9 @@ export default function MapScreen() {
   const [find, setFind] = useState<FindState | null>(null);
   const [myFix, setMyFix] = useState<FindFix | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
+  // Bluetooth on the last metres: how strong the other phone comes in, and whether it can.
+  const [nearby, setNearby] = useState<NearbyReading | null>(null);
+  const [nearbyState, setNearbyState] = useState<NearbyState>("unavailable");
   // A search cancelled before the server named its session is ended as soon as it does.
   const abortNextPending = useRef(false);
   const serverFinds = isConnected && socket.features.includes("find");
@@ -238,6 +242,29 @@ export default function MapScreen() {
       // The next search starts without a stale fix or compass reading from this one.
       setMyFix(null);
       setHeading(null);
+    };
+  }, [findActive, emit]);
+
+  // Bluetooth runs for the whole search, it costs little and is ready once the two get close.
+  // Right next to each other for a few seconds ends the search as met.
+  useEffect(() => {
+    if (!findActive) return;
+    let met = false;
+    const stop = startNearby(
+      findActive,
+      (reading, metNow) => {
+        setNearby(reading);
+        if (metNow && !met) {
+          met = true;
+          emit({ type: "findEnd", session: findActive, reason: "met" });
+        }
+      },
+      setNearbyState
+    );
+    return () => {
+      stop();
+      setNearby(null);
+      setNearbyState("unavailable");
     };
   }, [findActive, emit]);
 
@@ -765,6 +792,8 @@ export default function MapScreen() {
               state={find}
               mine={myFix}
               heading={heading}
+              nearby={nearby}
+              nearbyState={nearbyState}
               avatarFor={avatarFor}
               onAccept={() => answerFind(true)}
               onDecline={() => answerFind(false)}
