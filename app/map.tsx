@@ -608,8 +608,8 @@ export default function MapScreen() {
               {person.name}
               {person.isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
             </Text>
+            {/* The ring around the avatar already shows the status, so no dot here. */}
             <View style={styles.metaRow}>
-              <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[freshness(primary)] }]} />
               <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {primary.deviceId} · {statusText(primary, timeAgo)}
                 {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
@@ -1017,7 +1017,7 @@ const styles = StyleSheet.create({
   linked: { marginLeft: 22, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: "rgba(128,128,128,0.25)", marginBottom: 6 },
   linkedRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12 },
   linkedName: { fontSize: 14.5, fontWeight: "600" },
-  deviceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, borderRadius: 14, paddingHorizontal: 6 },
+  deviceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, borderRadius: 14, paddingHorizontal: 6 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
   findButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
   deviceMeta: { fontSize: 12.5 },
