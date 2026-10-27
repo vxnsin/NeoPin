@@ -145,6 +145,17 @@ export async function updateProfileRequest(
   );
 }
 
+// Picks the device that stands for your account, null goes back to the automatic choice.
+export async function setPrimaryDeviceRequest(auth: DeviceAuth, deviceId: string | null): Promise<User> {
+  return json(
+    await request(`${httpBase(auth.serverIp)}/api/me/primary-device`, {
+      method: "PUT",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId }),
+    })
+  );
+}
+
 export async function fetchMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me`, { headers: deviceHeaders(auth) }));
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Modal,
   PanResponder,
@@ -52,7 +53,15 @@ import {
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
-import { fetchGroups, fetchInvites, fetchMe, type Group, type Invite, type User } from "@/lib/api";
+import {
+  fetchGroups,
+  fetchInvites,
+  fetchMe,
+  setPrimaryDeviceRequest,
+  type Group,
+  type Invite,
+  type User,
+} from "@/lib/api";
 import {
   badgeText,
   filterByGroup,
@@ -407,7 +416,18 @@ export default function MapScreen() {
     focusDevice(person.primary, false);
   };
 
-  const linkedDevice = (device: Device) => {
+  // Your own device stands for you; a second tap on the filled star goes back to automatic.
+  const pickPrimary = async (device: Device) => {
+    if (!creds) return;
+    try {
+      // The new list arrives over the socket and redraws the rows.
+      await setPrimaryDeviceRequest(creds, device.primary ? null : device.deviceId);
+    } catch (error: any) {
+      Alert.alert("Main device", error?.message || "The main device could not be changed.");
+    }
+  };
+
+  const linkedDevice = (device: Device, pickable: boolean) => {
     const state = freshness(device);
     return (
       <Pressable
@@ -430,6 +450,21 @@ export default function MapScreen() {
             {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
           </View>
         </View>
+        {pickable ? (
+          <Pressable
+            onPress={() => pickPrimary(device)}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityState={{ selected: Boolean(device.primary) }}
+            accessibilityLabel={device.primary ? `${device.deviceId} is your main device` : `Make ${device.deviceId} your main device`}
+          >
+            <MaterialIcons
+              name={device.primary ? "star" : "star-border"}
+              size={20}
+              color={device.primary ? STATE_COLORS.stale : c.muted}
+            />
+          </Pressable>
+        ) : null}
         {device.position && <MaterialIcons name="near-me" size={18} color={c.muted} />}
       </Pressable>
     );
@@ -463,7 +498,11 @@ export default function MapScreen() {
           </View>
           <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={c.muted} />
         </Pressable>
-        {open && <View style={styles.linked}>{person.devices.map(linkedDevice)}</View>}
+        {open && (
+          <View style={styles.linked}>
+            {person.devices.map((device) => linkedDevice(device, person.isMe && person.devices.length > 1))}
+          </View>
+        )}
       </View>
     );
   };

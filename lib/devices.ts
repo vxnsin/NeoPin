@@ -24,6 +24,8 @@ export type Device = {
   groupIds?: number[];
   // The last charge the device reported, null until it did. Older servers send none.
   battery?: DeviceBattery | null;
+  // Picked by its owner to stand for them. Older servers send none.
+  primary?: boolean;
 };
 
 export type DeviceBattery = { level: number; charging: boolean; updatedAt?: string };
@@ -91,9 +93,12 @@ const pingTime = (device: Device) => (device.lastPing ? new Date(device.lastPing
 
 // The device that stands for its owner: the one online now, else phone over tablet over
 // desktop, else the one that reported last.
+// A device its owner picked wins among the online ones. When it is offline, a device that
+// is online stands in for it, so the list never shows yesterday's place of someone on the go.
 export function comparePrimary(a: Device, b: Device): number {
   return (
     Number(b.status === "online") - Number(a.status === "online") ||
+    Number(Boolean(b.primary)) - Number(Boolean(a.primary)) ||
     TYPE_RANK[typeOf(a)] - TYPE_RANK[typeOf(b)] ||
     pingTime(b) - pingTime(a) ||
     a.deviceId.localeCompare(b.deviceId)
