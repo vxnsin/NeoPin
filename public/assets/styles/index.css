@@ -1248,6 +1248,11 @@ body.is-timeline .maplibregl-popup {
   padding: 7px 10px;
 }
 
+/* The ring around the avatar already shows the status, the dot would say it twice. */
+.person__head .device__meta::before {
+  display: none;
+}
+
 .person__chevron {
   width: 18px;
   height: 18px;
