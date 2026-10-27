@@ -32,6 +32,8 @@ const DEFAULT_RADIUS_M = 60;
 // OSM places further from where the person stayed than this are not offered.
 const MATCH_M = 80;
 const CELL_DEG = 0.0005;
+// Part of every cache key. Raise it when the kinds change, cached cells are then asked again.
+const CACHE_VERSION = 1;
 const QUERY_RADIUS_M = 120;
 const CACHE_MS = 30 * 86_400_000;
 const RETRY_MS = 10 * 60_000;
@@ -127,6 +129,7 @@ const KINDS_BY_TAG = {
     pharmacy: "health",
     place_of_worship: "worship",
     fuel: "fuel",
+    bus_station: "station",
     bank: "shop",
     post_office: "shop",
     townhall: "building",
@@ -140,6 +143,7 @@ const KINDS_BY_TAG = {
 };
 
 export function kindForTags(tags = {}) {
+  if (tags.building === "train_station") return "station";
   for (const [key, values] of Object.entries(KINDS_BY_TAG)) {
     const value = tags[key];
     if (!value) continue;
@@ -176,7 +180,7 @@ export function toCandidates(elements = []) {
 const cellOf = (lat, lon) => {
   const y = Math.round(lat / CELL_DEG);
   const x = Math.round(lon / CELL_DEG);
-  return { key: `${y}:${x}`, lat: y * CELL_DEG, lon: x * CELL_DEG };
+  return { key: `${CACHE_VERSION}:${y}:${x}`, lat: y * CELL_DEG, lon: x * CELL_DEG };
 };
 
 function cachedCell(key, now = Date.now()) {
@@ -346,6 +350,8 @@ function score(candidate, visit, local) {
   // A named building or office says less about the stay than a café inside it.
   if (candidate.kind === "building") s += 40;
   if (candidate.kind === "work") s += 10;
+  // Waiting at a station, the bakery inside it is not where you were.
+  if (candidate.kind === "station") s -= 50;
   // Nobody sits in a café for half a day.
   if (FOOD.has(candidate.kind) && visit.durationMs > 3 * 3_600_000) s += 40;
   if (openAt(candidate.openingHours, local.day, local.minute) === false) s += 60;

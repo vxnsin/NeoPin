@@ -70,6 +70,7 @@ test("OSM tags turn into a few kinds, things nobody stays at are left out", () =
   assert.equal(kindForTags({ shop: "shoes" }), "shop");
   assert.equal(kindForTags({ railway: "station" }), "station");
   assert.equal(kindForTags({ office: "it" }), "work");
+  assert.equal(kindForTags({ building: "train_station", name: "Würzburg Hbf" }), "station");
   assert.equal(kindForTags({ highway: "bus_stop" }), null);
   assert.deepEqual(
     toCandidates([cafe, office, busStop]).map((c) => [c.osmId, c.kind]),
@@ -96,6 +97,13 @@ test("the café wins while it is open, the office when the café is closed", () 
   const at = (hour) => ({ lat: 49.794, lon: 9.951, start: DAY0 + hour * 60 * MIN, end: DAY0 + (hour + 1) * 60 * MIN, durationMs: 60 * MIN });
   assert.equal(bestCandidate(candidates, at(10)).name, "Café Mohr");
   assert.equal(bestCandidate(candidates, at(21)).name, "Flyeralarm");
+});
+
+test("at a station the station wins over the shops inside it", () => {
+  const bakery = { osmId: "node/5", name: "Bakery", kind: "grocery", lat: 49.8015, lon: 9.9353 };
+  const hbf = { osmId: "way/6", name: "Würzburg Hbf", kind: "station", lat: 49.8019, lon: 9.9355 };
+  const visit = { lat: 49.8015, lon: 9.9353, start: DAY0, end: DAY0 + 20 * MIN, durationMs: 20 * MIN };
+  assert.equal(bestCandidate([bakery, hbf], visit).name, "Würzburg Hbf");
 });
 
 test("a visit gets its place from OpenStreetMap, each spot is asked once", async () => {
