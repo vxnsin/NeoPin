@@ -1,5 +1,6 @@
 import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
+import { noteServerDevices, readBattery } from "@/lib/battery";
 
 type Socket = {
   onMessage: (fn: (data: Message) => void) => () => void;
@@ -23,10 +24,12 @@ export function registerHandlers(ws: Socket) {
             accuracy: Location.Accuracy.High,
           });
 
+          const battery = await readBattery();
           ws.emit({
             type: "updatePosition",
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
+            ...(battery && { battery }),
           });
         } catch (error: any) {
           ws.emit({
@@ -40,8 +43,11 @@ export function registerHandlers(ws: Socket) {
         ws.emit({ type: "pong" });
         break;
 
-      case "groupsChanged":
       case "dataResponse":
+        noteServerDevices(data.devices);
+        break;
+
+      case "groupsChanged":
         break;
 
       default:

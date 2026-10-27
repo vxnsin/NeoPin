@@ -236,8 +236,13 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       var bg = d.avatar ? "" : "background:" + colour(ownerName(d));
       return '<span class="avatar ' + state(d) + '" style="' + bg + '">' + inner + "</span>";
     }
+    // "64 %" or "100 %, charging", only while the device is online.
+    function batteryText(d) {
+      if (d.status !== "online" || !d.battery) return "";
+      return " · " + Math.round(d.battery.level) + " %" + (d.battery.charging ? ", charging" : "");
+    }
     function popupHtml(d) {
-      return '<div class="popup"><b>' + esc(fullName(d)) + "</b><span>" + (state(d) === "offline" ? "Offline" : "Online") + " · " + esc(ago(d.lastPing)) + "</span></div>";
+      return '<div class="popup"><b>' + esc(fullName(d)) + "</b><span>" + (state(d) === "offline" ? "Offline" : "Online") + " · " + esc(ago(d.lastPing)) + esc(batteryText(d)) + "</span></div>";
     }
 
     function select(id) {
