@@ -4,6 +4,7 @@ const MODES = {
   cycling: { label: "Cycling", icon: "#i-bike", color: "#2563eb" },
   driving: { label: "Driving", icon: "#i-car", color: "#ea580c" },
 };
+const GAP_COLOR = "#94a3b8";
 const TL_SOURCE = "timeline";
 const KIND_LABELS = {
   home: "Home",
@@ -104,7 +105,12 @@ function linesData() {
       ? [
           {
             type: "Feature",
-            properties: { index, color: MODES[segment.mode]?.color ?? "#64748b", active: index === tl.active },
+            properties: {
+              index,
+              color: segment.gap ? GAP_COLOR : (MODES[segment.mode]?.color ?? "#64748b"),
+              active: index === tl.active,
+              gap: !!segment.gap,
+            },
             geometry: { type: "LineString", coordinates: segment.path.map(([lat, lon]) => [lon, lat]) },
           },
         ]
@@ -118,10 +124,20 @@ function ensureLayers() {
   if (!map.getStyle()) return;
   if (!map.getSource(TL_SOURCE)) {
     map.addSource(TL_SOURCE, { type: "geojson", data: emptyLines() });
+    // Stretches without fixes: only start and end are known, so a thin dashed line.
+    map.addLayer({
+      id: "tl-gap",
+      type: "line",
+      source: TL_SOURCE,
+      filter: ["get", "gap"],
+      layout: { "line-cap": "round" },
+      paint: { "line-color": GAP_COLOR, "line-width": ["case", ["get", "active"], 3.5, 2.5], "line-dasharray": [1.5, 2.5] },
+    });
     map.addLayer({
       id: "tl-casing",
       type: "line",
       source: TL_SOURCE,
+      filter: ["!", ["get", "gap"]],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": "#ffffff", "line-opacity": 0.9, "line-width": ["case", ["get", "active"], 9, 6] },
     });
@@ -129,6 +145,7 @@ function ensureLayers() {
       id: "tl-line",
       type: "line",
       source: TL_SOURCE,
+      filter: ["!", ["get", "gap"]],
       layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": ["get", "color"], "line-width": ["case", ["get", "active"], 6, 3.5] },
     });
@@ -196,6 +213,15 @@ function markActive(index) {
   map.getSource(TL_SOURCE)?.setData(linesData());
 }
 
+// Whether all these points are on screen, outside the panel and the edges.
+function inView(points, padding) {
+  const canvas = map.getCanvas().getBoundingClientRect();
+  return points.every(([lon, lat]) => {
+    const p = map.project([lon, lat]);
+    return p.x >= padding.left && p.x <= canvas.width - padding.right && p.y >= padding.top && p.y <= canvas.height - padding.bottom;
+  });
+}
+
 function focusSegment(index, { scroll = false } = {}) {
   const segment = tl.data?.segments[index];
   if (!segment) return;
@@ -203,12 +229,13 @@ function focusSegment(index, { scroll = false } = {}) {
 
   if (phone.matches) setSheetOpen(false);
   const padding = timelinePadding();
-  if (segment.type === "visit") {
-    map.flyTo({ center: [segment.lon, segment.lat], zoom: Math.max(map.getZoom(), 15), padding, duration: 800 });
-  } else if (segment.path.length > 0) {
-    const first = [segment.path[0][1], segment.path[0][0]];
-    const bounds = segment.path.reduce((b, [lat, lon]) => b.extend([lon, lat]), new maplibregl.LngLatBounds(first, first));
-    fitBoundsTo(bounds, timelinePadding(), 800);
+  const points = segment.type === "visit" ? [[segment.lon, segment.lat]] : segment.path.map(([lat, lon]) => [lon, lat]);
+  if (points.length && !inView(points, padding)) {
+    if (points.length === 1) map.easeTo({ center: points[0], padding, duration: 600 });
+    else {
+      const bounds = points.reduce((b, p) => b.extend(p), new maplibregl.LngLatBounds(points[0], points[0]));
+      fitBoundsTo(bounds, padding, 600, Math.max(map.getZoom(), 12));
+    }
   }
   if (scroll) tlBody.querySelector(`.seg[data-index="${index}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
@@ -250,6 +277,18 @@ function renderSegments(segments) {
           </button>
           <div class="place-picker" data-picker="${index}" hidden></div>
         </li>`;
+    }
+    if (segment.gap) {
+      return `
+      <li>
+        <button class="seg seg--trip" type="button" data-index="${index}" data-mode="gap">
+          <span class="seg__badge seg__badge--trip"><svg class="icon"><use href="#i-gap" /></svg></span>
+          <span class="seg__text">
+            <span class="seg__title">No data · ${esc(formatDistance(segment.distanceM))}</span>
+            <span class="seg__meta">${esc(times)} · ${esc(formatDuration(segment.durationMs))}</span>
+          </span>
+        </button>
+      </li>`;
     }
     const mode = MODES[segment.mode] ?? MODES.walking;
     return `

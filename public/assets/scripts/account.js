@@ -32,8 +32,29 @@ function renderAccount() {
   accountWrap.hidden = false;
 }
 
+// Which server build runs: "NeoPin server v1.4.0 · b102d1a · built 27 Oct", the commit links to GitHub.
+async function renderAbout() {
+  const about = document.getElementById("aboutServer");
+  try {
+    const status = await (await fetch("/api/status")).json();
+    const parts = [`NeoPin server v${esc(status.version)}`];
+    if (status.commit) {
+      const short = esc(status.commit.slice(0, 7));
+      parts.push(`<a href="https://github.com/vxnsin/NeoPin/commit/${esc(status.commit)}" target="_blank" rel="noopener">${short}</a>`);
+    }
+    if (status.builtAt) {
+      const built = new Date(status.builtAt);
+      if (!Number.isNaN(built.getTime())) parts.push(`built ${esc(built.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }))}`);
+    }
+    about.innerHTML = parts.join(" · ");
+  } catch {
+    about.textContent = "";
+  }
+}
+
 function setMenu(open) {
   accountMenu.hidden = !open;
+  if (open) renderAbout();
   accountButton.setAttribute("aria-expanded", String(open));
 }
 

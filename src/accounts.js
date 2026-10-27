@@ -56,6 +56,24 @@ export function publicUser(row) {
   };
 }
 
+// "Until I turn it off" is stored as the latest date JavaScript knows.
+export const HIDDEN_FOREVER = 8_640_000_000_000_000;
+
+// Whether the account hides its devices from everyone else right now.
+export function isHidden(row, now = Date.now()) {
+  return !!row && row.hidden_until !== null && row.hidden_until !== undefined && Number(row.hidden_until) > now;
+}
+
+// until: ms since the epoch, HIDDEN_FOREVER, or null to be seen again.
+export function setHiddenUntil(userId, until) {
+  getDb().prepare("UPDATE users SET hidden_until = ? WHERE id = ?").run(until, userId);
+}
+
+// What the account itself sees about its hiding: until when, or null when visible.
+export function hiddenUntilOf(row, now = Date.now()) {
+  return isHidden(row, now) ? Number(row.hidden_until) : null;
+}
+
 // The device that stands for the account in lists, or null to let the clients pick.
 export function setPrimaryDevice(userId, deviceId) {
   getDb().prepare("UPDATE users SET primary_device_id = ? WHERE id = ?").run(deviceId, userId);

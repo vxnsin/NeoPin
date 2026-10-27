@@ -71,7 +71,8 @@ const roleTag = (role) => `<span class="tag">${role === "owner" ? "Owner" : "Mem
 const personName = (user) => esc(user.displayName || user.username);
 
 function memberRow(group, member) {
-  const removable = group.canManage && member.role !== "owner" && member.id !== me?.id;
+  // A fixed group holds everyone for good, nobody is removed from it.
+  const removable = group.canManage && !group.fixed && member.role !== "owner" && member.id !== me?.id;
   return `
     <li class="row" data-user="${member.id}">
       ${accountAvatarHtml(member, "sm")}
@@ -98,8 +99,10 @@ function pendingRow(invite) {
 function groupCard(group) {
   const members = group.members.map((m) => memberRow(group, m)).join("");
   const pending = (group.pendingInvites ?? []).map(pendingRow).join("");
-  const manage = group.canManage
-    ? `
+  // Everybody is in a fixed group already, there is nobody to invite.
+  const invites = group.fixed
+    ? ""
+    : `
       <form class="group__form" data-invite-form novalidate>
         <div class="combo">
           <input class="select" name="username" placeholder="Invite by username" autocomplete="off" autocapitalize="none" spellcheck="false"
@@ -107,7 +110,9 @@ function groupCard(group) {
           <ul class="combo__list" id="suggest-${group.id}" role="listbox" aria-label="Matching people" hidden></ul>
         </div>
         <button class="btn btn--small" type="submit">Invite</button>
-      </form>
+      </form>`;
+  const manage = group.canManage
+    ? `${invites}
       <form class="group__form" data-rename-form novalidate hidden>
         <input class="select" name="name" value="${esc(group.name)}" maxlength="40" aria-label="Group name" />
         <button class="btn btn--small" type="submit">Save</button>
@@ -116,10 +121,11 @@ function groupCard(group) {
   return `
     <section class="group" data-group="${group.id}">
       <div class="row group__head">
-        <span class="row__text"><strong>${esc(group.name)}${roleTag(group.role)}</strong><span>${group.members.length} ${group.members.length === 1 ? "person" : "people"}</span></span>
+        <span class="row__text"><strong>${esc(group.name)}${group.fixed ? '<span class="tag">Everyone, always</span>' : roleTag(group.role)}</strong><span>${group.members.length} ${group.members.length === 1 ? "person" : "people"}</span></span>
         <span class="row__actions">
-          ${group.canManage ? '<button class="btn btn--small btn--ghost" type="button" data-rename>Rename</button><button class="btn btn--small btn--ghost" type="button" data-delete>Delete</button>' : ""}
-          ${group.role === "member" ? '<button class="btn btn--small btn--ghost" type="button" data-leave>Leave</button>' : ""}
+          ${group.canManage ? '<button class="btn btn--small btn--ghost" type="button" data-rename>Rename</button>' : ""}
+          ${group.canManage && !group.fixed ? '<button class="btn btn--small btn--ghost" type="button" data-delete>Delete</button>' : ""}
+          ${group.role === "member" && !group.fixed ? '<button class="btn btn--small btn--ghost" type="button" data-leave>Leave</button>' : ""}
         </span>
       </div>
       <ul class="rows">${members}${pending}</ul>

@@ -27,7 +27,11 @@ test("a fresh database gets an admin with a generated password that must be chan
 
 test("there is no self-service sign-up", async () => {
   assert.equal((await s.post("/api/register", { username: "luis", password: PASSWORD })).status, 404);
-  assert.deepEqual(await (await fetch(`${s.baseUrl}/api/status`)).json(), { version: config.version });
+  assert.deepEqual(await (await fetch(`${s.baseUrl}/api/status`)).json(), {
+    version: config.version,
+    commit: config.commit,
+    builtAt: config.builtAt,
+  });
 });
 
 test("usernames and passwords are validated, names are unique regardless of case", async () => {

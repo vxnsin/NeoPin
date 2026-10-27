@@ -327,6 +327,18 @@ function clusterHtml(people) {
   return `<span class="cluster__avatars">${avatars}</span>${badge}`;
 }
 
+// A cluster sits in the middle of its devices. Phones report every few seconds and their GPS
+// wobbles indoors, so the middle wobbles too. The cluster only follows once it is this far
+// off, and not at all while the pointer is on it: a marker that slides away is hard to click.
+const CLUSTER_STICKY_PX = 16;
+
+function placeCluster(entry) {
+  if (entry.held || !entry.target) return;
+  const shown = map.project(entry.marker.getLngLat());
+  const next = map.project(entry.target);
+  if (Math.hypot(next.x - shown.x, next.y - shown.y) > CLUSTER_STICKY_PX) entry.marker.setLngLat(entry.target);
+}
+
 function updateClusters() {
   const byId = new Map(located().map((d) => [keyOf(d), d]));
   const points = [...byId.keys()].sort().map((id) => {
@@ -358,11 +370,20 @@ function updateClusters() {
         event.stopPropagation();
         openCluster(clusterMarkers.get(key));
       });
-      entry = { marker: new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map), el, key: "", members };
+      // Under the pointer the cluster holds still, it catches up once the pointer leaves.
+      el.addEventListener("pointerenter", () => (clusterMarkers.get(key).held = true));
+      el.addEventListener("pointerleave", () => {
+        const current = clusterMarkers.get(key);
+        if (!current) return;
+        current.held = false;
+        placeCluster(current);
+      });
+      entry = { marker: new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map), el, key: "", members, held: false };
       clusterMarkers.set(key, entry);
     }
     entry.members = members;
-    entry.marker.setLngLat([lng, lat]);
+    entry.target = [lng, lat];
+    placeCluster(entry);
     const sig = people.map(({ device }) => `${device.userId}|${device.avatarUrl}|${freshness(device)}|${ownerName(device)}`).join(";");
     if (entry.key !== sig) {
       entry.el.innerHTML = clusterHtml(people);
