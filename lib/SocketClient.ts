@@ -35,6 +35,10 @@ export class SocketClient {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // beforeConnect runs before the first login of a connect(), e.g. to load what the
+  // login tells the server.
+  constructor(private beforeConnect?: () => Promise<unknown>) {}
+
   get reconnectPending() {
     return this.reconnectTimer !== null;
   }
@@ -47,7 +51,21 @@ export class SocketClient {
     this.everConnected = false;
     this.retries = 0;
     this.clearReconnectTimer();
-    return this.open();
+    if (!this.beforeConnect) return this.open();
+    return this.beforeConnect()
+      .catch(() => {})
+      .then(() => {
+        if (this.closedManually) throw new Error("Connection closed");
+        return this.open();
+      });
+  }
+
+  // Logs in again on a fresh socket while connected, so the server learns what changed
+  // in the login (the report interval).
+  relogin() {
+    if (!this.connected || !this.credentials || this.closedManually || this.rejected) return;
+    this.clearReconnectTimer();
+    this.open().catch(() => {});
   }
 
   close() {
