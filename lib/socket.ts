@@ -1,6 +1,7 @@
 import { SocketClient } from "@/lib/SocketClient";
 import { registerHandlers } from "@/handlers/WebSocket";
 import { readCredentials } from "@/lib/credentials";
+import { sendHeldFixes } from "@/lib/fixes";
 import { loadSettings, onSettingsChange } from "@/lib/settings";
 
 export { readCredentials };
@@ -12,6 +13,10 @@ export type { StoredCredentials } from "@/lib/credentials";
 // The login carries the report interval, so the saved preset has to be loaded first.
 export const socket = new SocketClient(loadSettings);
 registerHandlers(socket);
+// Fixes the background task could not deliver go out as soon as the socket is back.
+socket.onStatus((connected) => {
+  if (connected) sendHeldFixes(socket).catch(() => {});
+});
 // A changed preset changes the interval, the server learns it with a fresh login.
 onSettingsChange(() => socket.relogin());
 

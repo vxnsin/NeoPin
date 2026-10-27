@@ -21,6 +21,8 @@ export class SocketClient {
   // Set when the server refused us. Retrying with the same token is pointless
   // until the user logs in again.
   rejected = false;
+  // What the server said it understands beyond the basics, from its login reply.
+  features: string[] = [];
 
   private socket: WebSocket | null = null;
   private credentials: Credentials | null = null;
@@ -115,6 +117,7 @@ export class SocketClient {
       const { url, deviceId, token } = this.credentials;
 
       this.stopHeartbeat();
+      this.features = [];
       const previous = this.socket;
       this.socket = null;
       previous?.close();
@@ -155,6 +158,7 @@ export class SocketClient {
 
         if ("successful" in data) {
           if (data.successful) {
+            this.features = Array.isArray(data.features) ? data.features.filter((f: unknown) => typeof f === "string") : [];
             this.retries = 0;
             this.everConnected = true;
             this.setConnected(true);
