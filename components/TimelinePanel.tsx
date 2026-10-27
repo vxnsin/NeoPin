@@ -16,6 +16,7 @@ import {
 import type { StoredCredentials } from "@/lib/credentials";
 import { DEVICE_ICONS, freshness, typeOf, type Device } from "@/lib/devices";
 import {
+  GAP_COLOR,
   MODE_COLORS,
   MODE_ICONS,
   MODE_LABELS,
@@ -382,7 +383,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                   accessibilityLabel={
                     segment.type === "visit"
                       ? `${visitTitle(segment, numbers.get(index))}, ${time}, ${formatDuration(segment.durationMs)}`
-                      : `${MODE_LABELS[segment.mode]}, ${formatDistance(segment.distanceM)}, ${time}`
+                      : `${segment.gap ? "No data" : MODE_LABELS[segment.mode]}, ${formatDistance(segment.distanceM)}, ${time}`
                   }
                 >
                   <View style={styles.rail}>
@@ -392,8 +393,12 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                         <Text style={[styles.stopNumber, { color: active ? c.raised : c.onSecondary }]}>{numbers.get(index)}</Text>
                       </View>
                     ) : (
-                      <View style={[styles.modeDot, { backgroundColor: c.raised, borderColor: MODE_COLORS[segment.mode] }]}>
-                        <MaterialIcons name={MODE_ICONS[segment.mode]} size={14} color={MODE_COLORS[segment.mode]} />
+                      <View style={[styles.modeDot, { backgroundColor: c.raised, borderColor: segment.gap ? GAP_COLOR : MODE_COLORS[segment.mode] }]}>
+                        <MaterialIcons
+                          name={segment.gap ? "more-horiz" : MODE_ICONS[segment.mode]}
+                          size={14}
+                          color={segment.gap ? GAP_COLOR : MODE_COLORS[segment.mode]}
+                        />
                       </View>
                     )}
                   </View>
@@ -430,7 +435,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                   ) : (
                     <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
                       <Text style={[styles.tripTitle, { color: c.primary }]}>
-                        {MODE_LABELS[segment.mode]} · {formatDistance(segment.distanceM)}
+                        {segment.gap ? "No data" : MODE_LABELS[segment.mode]} · {formatDistance(segment.distanceM)}
                       </Text>
                       <Text style={[styles.cardMeta, { color: c.muted }]}>
                         {formatDuration(segment.durationMs)} · {time}

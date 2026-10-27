@@ -382,7 +382,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         features: route.segments.filter(function (s) { return s.type === "trip"; }).map(function (s) {
           return {
             type: "Feature",
-            properties: { color: s.color, index: s.index, active: s.index === route.active ? 1 : 0 },
+            properties: { color: s.color, index: s.index, active: s.index === route.active ? 1 : 0, gap: s.gap ? 1 : 0 },
             geometry: { type: "LineString", coordinates: s.path.map(lngLat) }
           };
         })
@@ -396,15 +396,18 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         if (source) { source.setData(routeData()); return; }
         map.addSource("route", { type: "geojson", data: routeData() });
         var width = function (a, b) { return ["case", ["==", ["get", "active"], 1], a, b]; };
-        map.addLayer({ id: "route-casing", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" },
+        var solid = ["==", ["get", "gap"], 0];
+        map.addLayer({ id: "route-gap", type: "line", source: "route", filter: ["==", ["get", "gap"], 1], layout: { "line-cap": "round" },
+          paint: { "line-color": ["get", "color"], "line-width": width(4, 3), "line-dasharray": [1.5, 2.5] } });
+        map.addLayer({ id: "route-casing", type: "line", source: "route", filter: solid, layout: { "line-cap": "round", "line-join": "round" },
           paint: { "line-color": dark ? "#0a0c10" : "#ffffff", "line-width": width(11, 8), "line-opacity": 0.9 } });
-        map.addLayer({ id: "route-line", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" },
+        map.addLayer({ id: "route-line", type: "line", source: "route", filter: solid, layout: { "line-cap": "round", "line-join": "round" },
           paint: { "line-color": ["get", "color"], "line-width": width(7, 4.5) } });
       } catch (e) { /* the style is still loading, style.load tries again */ }
     }
     function removeLines() {
       try {
-        ["route-line", "route-casing"].forEach(function (id) { if (map.getLayer(id)) map.removeLayer(id); });
+        ["route-line", "route-casing", "route-gap"].forEach(function (id) { if (map.getLayer(id)) map.removeLayer(id); });
         if (map.getSource("route")) map.removeSource("route");
       } catch (e) { /* ignore */ }
     }
@@ -461,7 +464,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     map.on("click", function (e) {
       if (!route || !map.getLayer("route-line")) return;
       var box = [[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]];
-      var hit = map.queryRenderedFeatures(box, { layers: ["route-line"] });
+      var hit = map.queryRenderedFeatures(box, { layers: ["route-line", "route-gap"] });
       if (hit.length) tellSegment(hit[0].properties.index);
     });
 

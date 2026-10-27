@@ -202,24 +202,26 @@ function GroupCard({
           {group.name}
         </Text>
         <View style={[styles.tag, { backgroundColor: c.raised }]}>
-          <Text style={[styles.tagText, { color: c.muted }]}>{isOwner ? "Owner" : "Member"}</Text>
+          <Text style={[styles.tagText, { color: c.muted }]}>{group.fixed ? "Everyone, always" : isOwner ? "Owner" : "Member"}</Text>
         </View>
         {group.canManage && (
           <>
             <Pressable onPress={() => setRenaming((open) => !open)} hitSlop={8} accessibilityLabel="Rename the group">
               <MaterialIcons name="edit" size={20} color={c.muted} />
             </Pressable>
-            <Pressable
-              onPress={() =>
-                confirm("Delete group", `Delete "${group.name}"? Its members stop seeing each other through it.`, "Delete", () =>
-                  run(() => deleteGroup(auth, group.id))
-                )
-              }
-              hitSlop={8}
-              accessibilityLabel="Delete the group"
-            >
-              <MaterialIcons name="delete-outline" size={21} color={c.secondary} />
-            </Pressable>
+            {!group.fixed && (
+              <Pressable
+                onPress={() =>
+                  confirm("Delete group", `Delete "${group.name}"? Its members stop seeing each other through it.`, "Delete", () =>
+                    run(() => deleteGroup(auth, group.id))
+                  )
+                }
+                hitSlop={8}
+                accessibilityLabel="Delete the group"
+              >
+                <MaterialIcons name="delete-outline" size={21} color={c.secondary} />
+              </Pressable>
+            )}
           </>
         )}
       </View>
@@ -237,7 +239,7 @@ function GroupCard({
 
       {group.members.map((member) => {
         const self = member.id === userId;
-        const removable = group.canManage && member.id !== group.ownerId && !self;
+        const removable = group.canManage && !group.fixed && member.id !== group.ownerId && !self;
         return (
           <View key={member.id} style={styles.member}>
             <Avatar name={member.displayName} uri={avatarFor(member.avatarUrl)} state="offline" size={30} gapColor={c.subtle} />
@@ -291,7 +293,7 @@ function GroupCard({
         </>
       )}
 
-      {group.canManage && (
+      {group.canManage && !group.fixed && (
         <View style={styles.inline}>
           <View style={{ flex: 1 }}>
             <Field
@@ -339,7 +341,7 @@ function GroupCard({
         </View>
       )}
 
-      {!isOwner && (
+      {!isOwner && !group.fixed && (
         <Pressable
           style={[styles.wide, { backgroundColor: c.raised }]}
           disabled={busy}
