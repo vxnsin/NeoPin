@@ -28,6 +28,22 @@ export async function readBattery(): Promise<BatteryReport | null> {
   }
 }
 
+// Servers that know about batteries list a battery (or null) with every device. Older
+// ones would close the socket on an updateBattery, so that message waits until the
+// server has shown it knows. The battery inside updatePosition is safe either way,
+// unknown fields are dropped there.
+let serverKnowsBattery = false;
+
+export function noteServerDevices(devices: unknown) {
+  if (Array.isArray(devices) && devices.some((d) => d && typeof d === "object" && "battery" in d)) {
+    serverKnowsBattery = true;
+  }
+}
+
+export function serverTakesBattery(): boolean {
+  return serverKnowsBattery;
+}
+
 // Calls back when the charge moves by a whole percent or the phone is plugged in or
 // out, so a phone lying on the charger still shows how full it is.
 export function watchBattery(onChange: (report: BatteryReport) => void): () => void {

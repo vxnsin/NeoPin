@@ -15,7 +15,7 @@ jest.mock("expo-battery", () => ({
   },
 }));
 
-import { readBattery, toReport, watchBattery } from "../lib/battery";
+import { noteServerDevices, readBattery, serverTakesBattery, toReport, watchBattery } from "../lib/battery";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const fire = async () => {
@@ -45,6 +45,17 @@ test("reads the battery from the native module", async () => {
   native.level = 0.12;
   native.state = 2;
   expect(await readBattery()).toEqual({ level: 12, charging: true });
+});
+
+test("updateBattery waits until the server has shown it knows batteries", () => {
+  // An older server lists devices without a battery field.
+  noteServerDevices([{ deviceId: "phone", status: "online" }]);
+  expect(serverTakesBattery()).toBe(false);
+  noteServerDevices("not a list");
+  expect(serverTakesBattery()).toBe(false);
+  // A newer one lists it, null until the device reported.
+  noteServerDevices([{ deviceId: "phone", status: "online", battery: null }]);
+  expect(serverTakesBattery()).toBe(true);
 });
 
 test("reports a change once, not every time the system calls", async () => {

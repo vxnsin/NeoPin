@@ -1,6 +1,6 @@
 import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
-import { readBattery } from "@/lib/battery";
+import { noteServerDevices, readBattery } from "@/lib/battery";
 
 type Socket = {
   onMessage: (fn: (data: Message) => void) => () => void;
@@ -43,8 +43,11 @@ export function registerHandlers(ws: Socket) {
         ws.emit({ type: "pong" });
         break;
 
-      case "groupsChanged":
       case "dataResponse":
+        noteServerDevices(data.devices);
+        break;
+
+      case "groupsChanged":
         break;
 
       default:
