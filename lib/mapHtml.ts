@@ -464,7 +464,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     map.on("click", function (e) {
       if (!route || !map.getLayer("route-line")) return;
       var box = [[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]];
-      var hit = map.queryRenderedFeatures(box, { layers: ["route-line"] });
+      var hit = map.queryRenderedFeatures(box, { layers: ["route-line", "route-gap"] });
       if (hit.length) tellSegment(hit[0].properties.index);
     });
 
