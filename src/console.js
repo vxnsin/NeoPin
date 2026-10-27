@@ -1,7 +1,7 @@
 import readline from "readline";
 import chalk from "chalk";
 import { createUser, getUserByName, listUsers, setPassword } from "./accounts.js";
-import { allDevices, onlineDevices, timeAgo } from "./devices.js";
+import { allDevices, onlineDevices, statusOf, timeAgo } from "./devices.js";
 import { destroyAllSessions } from "./sessions.js";
 
 export function startConsole(sockets) {
@@ -59,7 +59,7 @@ export function startConsole(sockets) {
         const prefix = devices.length === 1 ? "━" : index === 0 ? "┏" : index === devices.length - 1 ? "┗" : "┣";
         const position = d.position ? `${d.position.latitude} | ${d.position.longitude}` : "no position";
         const ping = d.lastPing ? `last ping ${timeAgo(d.lastPing)}` : "never reported";
-        const status = d.status === "online" ? chalk.green("online") : chalk.gray("offline");
+        const status = statusOf(d) === "online" ? chalk.green("online") : chalk.gray("offline");
         console.log(`${prefix} ${chalk.whiteBright(userName(d.userId))}/${chalk.whiteBright(d.id)} ${status} · ${position} · ${ping}`);
       });
     },

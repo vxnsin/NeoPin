@@ -31,6 +31,7 @@ import {
   getDevice,
   onlineDevices,
   removeDevice,
+  statusOf,
   serializeDevices,
   updateBattery,
   updatePosition,
@@ -155,6 +156,8 @@ const ClientMessage = t.discriminated("type", {
     deviceId: t.string().min(1).max(64).optional(),
     token: t.string().max(256).optional(),
     deviceType: DeviceType.optional(),
+    // How often the app means to report, in ms, from its update preset.
+    interval: t.int().min(1000).max(60 * 60 * 1000).optional(),
     viewer: t.boolean().optional(),
   }),
   // The battery rides along with a position; on its own it comes when only the charge changed.
@@ -206,6 +209,19 @@ export function createApp({ gracefulShutdown = true } = {}) {
   const viewers = new Map();
   const authFailures = createAttemptLimiter(config.deviceAuthLimit);
   let broadcastTimer = null;
+
+  // A device without a socket stays online for two of its report periods (see statusOf).
+  // Nothing happens when that time runs out, so this looks now and then and tells everyone.
+  let lastStatuses = "";
+  const sweep = setInterval(() => {
+    const statuses = allDevices()
+      .map((d) => `${d.userId}:${d.id}:${statusOf(d)}`)
+      .join("|");
+    if (statuses === lastStatuses) return;
+    lastStatuses = statuses;
+    broadcastDevices();
+  }, config.statusSweepMs);
+  sweep.unref?.();
 
   // Everybody gets the devices of the people they share a group with, so the payload differs
   // per account. Sent to every device and dashboard, at most twice a second.
@@ -330,7 +346,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         ...link,
         primary: link.deviceId === primary,
         deviceType: live?.deviceType ?? link.deviceType,
-        status: live?.status ?? "offline",
+        status: statusOf(live),
         lastPing: live?.lastPing ?? null,
         position: live?.position ?? null,
       };
@@ -934,7 +950,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         deviceId = msg.deviceId;
         account = user.id;
         role = "device";
-        const replaced = attachSocket(account, deviceId, socket, msg.deviceType);
+        const replaced = attachSocket(account, deviceId, socket, msg.deviceType, msg.interval);
         const label = `${chalk.whiteBright(user.username)}/${chalk.whiteBright(deviceId)}`;
         if (replaced) {
           console.log(chalk.yellow(`[i] Device ${label} reconnected. Replacing the previous connection.`));
@@ -1015,6 +1031,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
     resetAuthFailures: () => authFailures.reset(),
     stop() {
       clearTimeout(broadcastTimer);
+      clearInterval(sweep);
       broadcastTimer = null;
     },
   };
