@@ -148,6 +148,22 @@ const Message = t.object({ message: t.string() });
 
 const bare = (type) => t.object({ type: t.literal(type) });
 
+// What the GPS knows about a fix besides where it is: when it was taken (ms since the
+// epoch), how exact it is (m) and how fast the phone moved (m/s, -1 when unknown).
+const FixDetails = {
+  recordedAt: t.int().min(0).optional(),
+  accuracy: t.number().min(0).max(100_000).optional(),
+  speed: t.number().min(-1).max(200).optional(),
+};
+
+// The phone's time of a fix, unless its clock is off: then the server's.
+function fixTime(recordedAt, now = Date.now()) {
+  if (!recordedAt || recordedAt > now + 60_000 || recordedAt < now - 7 * 86_400_000) return now;
+  return Math.min(recordedAt, now);
+}
+
+const fixExtras = (fix) => ({ accuracy: fix.accuracy ?? null, speed: fix.speed >= 0 ? fix.speed : null });
+
 // Everything a client may send over the socket. Anything else closes it with 1007.
 const ClientMessage = t.discriminated("type", {
   authenticate: t.object({
@@ -158,7 +174,10 @@ const ClientMessage = t.discriminated("type", {
     viewer: t.boolean().optional(),
   }),
   // The battery rides along with a position; on its own it comes when only the charge changed.
-  updatePosition: Position.extend({ type: t.literal("updatePosition"), battery: Battery.optional() }),
+  updatePosition: Position.extend({ type: t.literal("updatePosition"), battery: Battery.optional(), ...FixDetails }),
+  // Fixes the app collected while it had no connection, oldest first. At most 100 per
+  // message, so a batch stays below the socket's 16 KiB.
+  positionBatch: t.object({ type: t.literal("positionBatch"), points: t.array(Position.extend(FixDetails)).max(100) }),
   updateBattery: Battery.extend({ type: t.literal("updateBattery") }),
   locationError: t.object({ type: t.literal("locationError"), message: t.string().max(500).optional() }),
   ping: bare("ping"),
@@ -963,9 +982,16 @@ export function createApp({ gracefulShutdown = true } = {}) {
             if (role !== "device") return;
             updatePosition(account, deviceId, msg.latitude, msg.longitude);
             if (msg.battery) updateBattery(account, deviceId, msg.battery.level, msg.battery.charging);
-            recordPosition(account, deviceId, msg.latitude, msg.longitude);
+            recordPosition(account, deviceId, msg.latitude, msg.longitude, fixTime(msg.recordedAt), fixExtras(msg));
             broadcastDevices();
             break;
+          case "positionBatch": {
+            if (role !== "device") return;
+            // Only the history: these fixes are older than what the map already shows.
+            const points = [...msg.points].sort((a, b) => fixTime(a.recordedAt) - fixTime(b.recordedAt));
+            for (const p of points) recordPosition(account, deviceId, p.latitude, p.longitude, fixTime(p.recordedAt), fixExtras(p));
+            break;
+          }
           case "updateBattery":
             if (role !== "device") return;
             updateBattery(account, deviceId, msg.level, msg.charging);
