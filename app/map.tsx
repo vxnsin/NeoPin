@@ -879,7 +879,7 @@ const styles = StyleSheet.create({
   linked: { marginLeft: 22, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: "rgba(128,128,128,0.25)", marginBottom: 6 },
   linkedRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12 },
   linkedName: { fontSize: 14.5, fontWeight: "600" },
-  deviceRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, borderRadius: 14, paddingHorizontal: 6 },
+  deviceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, borderRadius: 14, paddingHorizontal: 6 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
   deviceMeta: { fontSize: 12.5 },
   // The text gives way first, so a battery next to it stays on the line.
