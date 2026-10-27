@@ -191,6 +191,24 @@ body {
   color: var(--text-muted);
 }
 
+.account-menu__about {
+  margin-top: 4px;
+  padding: 10px 10px 4px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-menu__about:empty {
+  display: none;
+}
+
+.account-menu__about a {
+  color: inherit;
+  font-family: var(--mono);
+}
+
 .hud-tools .icon-btn[aria-pressed="true"] {
   background: var(--brand-soft);
   color: var(--brand);

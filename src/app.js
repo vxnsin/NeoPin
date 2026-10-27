@@ -457,11 +457,16 @@ export function createApp({ gracefulShutdown = true } = {}) {
   app.get("/login.html", (ctx) => ctx.redirect("/login"));
   app.register(serveStatic({ dir: path.join(publicDir, "assets"), prefix: "/assets", immutable: () => false }));
 
-  // What the login screens need before anyone is signed in.
+  // What the login screens need before anyone is signed in, and which build runs, so an
+  // update can be checked from the dashboard and the app.
   app.get(
     "/api/status",
-    { response: { 200: t.object({ version: t.string() }) } },
-    () => ({ version: config.version })
+    {
+      response: {
+        200: t.object({ version: t.string(), commit: t.string().nullable(), builtAt: t.string().nullable() }),
+      },
+    },
+    () => ({ version: config.version, commit: config.commit, builtAt: config.builtAt })
   );
 
   // Everything that takes a password shares one limit per IP.

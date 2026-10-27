@@ -18,8 +18,36 @@ dotenv.config({ path: envPath, quiet: true });
 
 const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, "package.json"), "utf8"));
 
+// The commit this server runs. The Docker image gets it as NEOPIN_COMMIT at build time,
+// a checkout reads it from .git. Null when neither is there.
+function gitCommit() {
+  try {
+    let gitDir = path.join(rootDir, ".git");
+    // In a worktree .git is a file that points at the real one, branches live in its common dir.
+    if (fs.statSync(gitDir).isFile()) {
+      gitDir = path.resolve(rootDir, fs.readFileSync(gitDir, "utf8").replace(/^gitdir:\s*/, "").trim());
+    }
+    const commonFile = path.join(gitDir, "commondir");
+    const commonDir = fs.existsSync(commonFile) ? path.resolve(gitDir, fs.readFileSync(commonFile, "utf8").trim()) : gitDir;
+    const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+    if (!head.startsWith("ref: ")) return head;
+    const ref = head.slice(5);
+    for (const dir of [gitDir, commonDir]) {
+      const loose = path.join(dir, ref);
+      if (fs.existsSync(loose)) return fs.readFileSync(loose, "utf8").trim();
+    }
+    const packed = fs.readFileSync(path.join(commonDir, "packed-refs"), "utf8");
+    return packed.split("\n").find((line) => line.endsWith(` ${ref}`))?.split(" ")[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const config = {
   version: pkg.version,
+  commit: (process.env.NEOPIN_COMMIT || gitCommit() || "").slice(0, 40) || null,
+  // When the Docker image was built, an ISO date. Null outside of Docker.
+  builtAt: process.env.NEOPIN_BUILT_AT || null,
   port: Number(process.env.PORT) || DEFAULT_PORT,
   // Accounts, profile pictures and the location history live in this SQLite file.
   dbPath: path.resolve(rootDir, process.env.DATABASE_PATH || "data/neopin.db"),

@@ -12,9 +12,14 @@ COPY . .
 RUN mkdir -p /app/data && chown -R node:node /app
 USER node
 
+# Which commit the image was built from and when, shown in the dashboard.
+ARG NEOPIN_COMMIT=""
+ARG NEOPIN_BUILT_AT=""
 ENV NODE_ENV=production \
     PORT=3012 \
-    DATABASE_PATH=data/neopin.db
+    DATABASE_PATH=data/neopin.db \
+    NEOPIN_COMMIT=$NEOPIN_COMMIT \
+    NEOPIN_BUILT_AT=$NEOPIN_BUILT_AT
 
 VOLUME /app/data
 EXPOSE 3012

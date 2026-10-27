@@ -22,7 +22,7 @@ function banner() {
   console.log(chalk.red("   / | / /__  ____  ") + chalk.whiteBright("/ __ \\(_)___"));
   console.log(chalk.red("  /  |/ / _ \\/ __ \\") + chalk.whiteBright("/ /_/ / / __ \\"));
   console.log(chalk.red(" / /|  /  __/ /_/ ") + chalk.whiteBright("/ ____/ / / / /"));
-  console.log(chalk.red("/_/ |_/___/\\____/") + chalk.whiteBright(`_/    /_/_/ /_/ v${config.version}`));
+  console.log(chalk.red("/_/ |_/___/\\____/") + chalk.whiteBright(`_/    /_/_/ /_/ v${config.version}`) + (config.commit ? chalk.gray(` ${config.commit.slice(0, 7)}`) : ""));
   console.log(chalk.whiteBright(`Server running at ${chalk.red(`http://${networkIp()}:${config.port}`)}`));
   if (adminCreated) {
     console.log(chalk.yellow(`Admin account created: ${chalk.whiteBright(adminCreated.username)}`));
