@@ -372,7 +372,7 @@ async function openPicker(index) {
   picker.dataset.choices = JSON.stringify(choices);
 }
 
-// Saving names the spot of the visit. A nearby own place that did not reach this far grows to cover it.
+// Saving names the spot of the visit. Picking an own place claims the spot for it.
 async function savePlace(index, choice) {
   const segment = tl.data?.segments[index];
   const picker = tlBody.querySelector(`.place-picker[data-picker="${index}"]`);
@@ -380,7 +380,7 @@ async function savePlace(index, choice) {
   picker.querySelectorAll("button, input, select").forEach((el) => (el.disabled = true));
   try {
     if (choice.source === "own" && choice.id) {
-      await sendJson(withUser(`/api/places/${choice.id}`), "PATCH", { radiusM: Math.min(1000, Math.round(choice.distanceM + 25)) });
+      await sendJson(withUser(`/api/places/${choice.id}/claim`), "POST", { lat: segment.lat, lon: segment.lon });
     } else {
       await sendJson(withUser("/api/places"), "POST", {
         lat: segment.lat,

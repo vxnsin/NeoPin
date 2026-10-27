@@ -29,6 +29,10 @@ export const PLACE_KINDS = [
 ];
 
 const DEFAULT_RADIUS_M = 60;
+export const MIN_RADIUS_M = 15;
+export const MAX_RADIUS_M = 1000;
+// How far a claimed place reaches past the spot it was picked for.
+const CLAIM_MARGIN_M = 25;
 // OSM places further from where the person stayed than this are not offered.
 const MATCH_M = 80;
 const CELL_DEG = 0.0005;
@@ -94,6 +98,26 @@ export function updatePlace(userId, id, { name, kind, radiusM }) {
   getDb()
     .prepare("UPDATE places SET name = ?, kind = ?, radius_m = ? WHERE id = ?")
     .run(name ?? place.name, kind ?? place.kind, radiusM ?? place.radiusM, id);
+  return getPlace(userId, id);
+}
+
+// "This visit was at that own place": it grows to cover the spot (never shrinks), and own
+// places closer to the spot that covered it shrink just enough to let go of it, so the choice
+// wins from now on. One closer than MIN_RADIUS_M keeps the spot, rename that one instead.
+export function claimSpot(userId, id, lat, lon) {
+  const place = getPlace(userId, id);
+  if (!place) return null;
+  const db = getDb();
+  const d = distanceM(lat, lon, place.lat, place.lon);
+  const reach = Math.min(MAX_RADIUS_M, Math.ceil(d + CLAIM_MARGIN_M));
+  if (reach > place.radiusM) db.prepare("UPDATE places SET radius_m = ? WHERE id = ?").run(reach, id);
+  for (const other of listPlaces(userId)) {
+    if (other.id === id) continue;
+    const od = distanceM(lat, lon, other.lat, other.lon);
+    if (od <= other.radiusM && od < d) {
+      db.prepare("UPDATE places SET radius_m = ? WHERE id = ?").run(Math.max(MIN_RADIUS_M, Math.floor(od) - 1), other.id);
+    }
+  }
   return getPlace(userId, id);
 }
 

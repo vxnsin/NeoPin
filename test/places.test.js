@@ -137,6 +137,29 @@ test("a confirmed place wins the next time, also over a closer OSM place", async
   assert.deepEqual(places.map((p) => [p.id, p.name, p.osmId]), [[place.id, "Café Mohr", "node/1"]]);
 });
 
+test("claiming an own place for a spot grows it and makes closer ones let go", async () => {
+  const post = async (body) => (await api("/places", { method: "POST", body: JSON.stringify(body) })).json();
+  // Work first: a spot inside an own place would rename that place instead of adding one.
+  const work = await post({ lat: 49.7946, lon: 9.951, name: "Work", kind: "work", radiusM: 30 });
+  const home = await post({ lat: 49.794, lon: 9.951, name: "Home", kind: "home", radiusM: 200 });
+  // About 22 m from home and 44 m from work: home covers it and is closer.
+  const spot = { lat: 49.7942, lon: 9.951 };
+  stay(10 * 60, 40, spot.lat, spot.lon);
+  const claimed = await api(`/places/${work.id}/claim`, { method: "POST", body: JSON.stringify(spot) });
+  assert.equal(claimed.status, 200);
+  assert.equal((await claimed.json()).radiusM, 70);
+
+  const [visit] = (await timeline()).segments.filter((seg) => seg.type === "visit");
+  assert.equal(visit.place.name, "Work");
+  const places = Object.fromEntries((await (await api("/places")).json()).map((p) => [p.name, p.radiusM]));
+  assert.equal(places.Home, 21, "home shrank just enough");
+
+  // Claiming again never shrinks the place.
+  const again = await api(`/places/${work.id}/claim`, { method: "POST", body: JSON.stringify({ lat: 49.7946, lon: 9.951 }) });
+  assert.equal((await again.json()).radiusM, 70);
+  assert.equal((await api(`/places/${home.id + 99}/claim`, { method: "POST", body: JSON.stringify(spot) })).status, 404);
+});
+
 test("rename, radius and delete an own place", async () => {
   const place = await (await api("/places", { method: "POST", body: JSON.stringify({ lat: 49.8, lon: 9.9, name: "Home" }) })).json();
   const renamed = await api(`/places/${place.id}`, { method: "PATCH", body: JSON.stringify({ name: "Zuhause", kind: "home", radiusM: 120 }) });

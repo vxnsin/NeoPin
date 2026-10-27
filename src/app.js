@@ -58,7 +58,10 @@ import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
 import {
+  MAX_RADIUS_M,
+  MIN_RADIUS_M,
   PLACE_KINDS,
+  claimSpot,
   deletePlace,
   listPlaces,
   namePlaces,
@@ -142,7 +145,7 @@ const Place = t.object({
 });
 
 const PlaceName = t.string().min(1).max(80);
-const PlaceRadius = t.int().min(15).max(1000);
+const PlaceRadius = t.int().min(MIN_RADIUS_M).max(MAX_RADIUS_M);
 
 const Visit = t.object({
   type: t.literal("visit"),
@@ -954,6 +957,21 @@ export function createApp({ gracefulShutdown = true } = {}) {
           response: { 200: Place, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
         (ctx) => savePlaceAt(targetUserId(ctx, ctx.query.userId), { ...ctx.body, name: ctx.body.name.trim() })
+      );
+
+      // Picking an own place for a visit: the spot belongs to it from now on.
+      api.post(
+        "/places/:id/claim",
+        {
+          query: ForUser,
+          body: t.object({ lat: t.number().min(-90).max(90), lon: t.number().min(-180).max(180) }),
+          response: { 200: Place, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const place = claimSpot(targetUserId(ctx, ctx.query.userId), Number(ctx.params.id), ctx.body.lat, ctx.body.lon);
+          if (!place) throw problem(404, "unknown-place", "No such place");
+          return place;
+        }
       );
 
       api.patch(
