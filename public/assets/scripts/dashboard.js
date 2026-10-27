@@ -51,6 +51,18 @@ function typeIcon(device, extra = "") {
   return `<svg class="icon dtype${extra}" role="img" aria-label="${TYPE_LABELS[type]}"><use href="#${TYPE_ICONS[type]}" /></svg>`;
 }
 
+// The charge as a small battery with its percent. Only while the device is online:
+// the last reading of a phone that went offline would only mislead.
+function batteryHtml(device) {
+  const battery = device.battery;
+  if (!battery || device.status !== "online") return "";
+  const level = Math.max(0, Math.min(100, Math.round(battery.level)));
+  const state = battery.charging ? "charging" : level <= 20 ? "low" : "ok";
+  const label = `Battery ${level} %${battery.charging ? ", charging" : ""}`;
+  const bolt = battery.charging ? '<svg class="icon battery__bolt" aria-hidden="true"><use href="#i-bolt" /></svg>' : "";
+  return `<span class="battery battery--${state}" role="img" aria-label="${label}" title="${label}"><span class="battery__cell"><span class="battery__fill" style="width:${level}%"></span></span>${level} %${bolt}</span>`;
+}
+
 function esc(text) {
   return String(text).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -467,7 +479,7 @@ function popupHtml(device) {
         ${avatarHtml(device, "lg")}
         <div>
           <strong class="popup__name">${esc(fullName(device))}</strong>
-          <span class="popup__state">${typeIcon(device)}${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}</span>
+          <span class="popup__state">${typeIcon(device)}${esc(STATE_LABELS[state])} · ${esc(timeAgo(device.lastPing))}${batteryHtml(device)}</span>
         </div>
       </div>
       <p class="popup__coords">${coords}</p>
@@ -564,7 +576,7 @@ function subDeviceHtml(device) {
         ${typeIcon(device, " dtype--row")}
         <span class="device__text">
           <span class="device__name">${esc(device.deviceId)}</span>
-          <span class="device__meta">${esc(metaText(device))}</span>
+          <span class="device__meta"><span class="device__meta-text">${esc(metaText(device))}</span>${batteryHtml(device)}</span>
         </span>
       </button>
       ${askable ? `<button class="icon-btn subdevice__ask" type="button" data-ask="${esc(keyOf(device))}" aria-label="Ask ${esc(device.deviceId)} for a fresh position" title="Ask for a fresh position"><svg class="icon"><use href="#i-refresh" /></svg></button>` : ""}
@@ -608,7 +620,7 @@ function renderPanel() {
             ${personAvatar(group)}
             <span class="device__text">
               <span class="device__name">${esc(group.name)}${isOwn(group.primary) ? ' <span class="own">you</span>' : ""}</span>
-              <span class="device__meta">${typeIcon(group.primary)}${esc(personMeta(group))}</span>
+              <span class="device__meta">${typeIcon(group.primary)}<span class="device__meta-text">${esc(personMeta(group))}</span>${batteryHtml(group.primary)}</span>
             </span>
             <svg class="icon person__chevron" aria-hidden="true"><use href="#i-chevron" /></svg>
           </button>
