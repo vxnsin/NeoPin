@@ -52,7 +52,13 @@ export function publicUser(row) {
     isAdmin: row.is_admin === 1,
     mustChangePassword: row.must_change_password === 1,
     avatarUrl: row.avatar_b64 ? `/avatars/${row.id}?v=${row.avatar_version}` : null,
+    primaryDeviceId: row.primary_device_id ?? null,
   };
+}
+
+// The device that stands for the account in lists, or null to let the clients pick.
+export function setPrimaryDevice(userId, deviceId) {
+  getDb().prepare("UPDATE users SET primary_device_id = ? WHERE id = ?").run(deviceId, userId);
 }
 
 export function getUser(id) {
@@ -137,6 +143,8 @@ export function linkedDevices(userId) {
 
 export function unlinkDevice(userId, deviceId) {
   const result = getDb().prepare("DELETE FROM tokens WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
+  // A removed device cannot stand for anyone anymore.
+  getDb().prepare("UPDATE users SET primary_device_id = NULL WHERE id = ? AND primary_device_id = ?").run(userId, deviceId);
   return Number(result.changes) > 0;
 }
 

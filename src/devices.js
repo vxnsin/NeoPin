@@ -96,6 +96,8 @@ export function serializeDevices(viewer) {
         battery: live?.battery ?? null,
         avatarUrl: owner.avatarUrl,
         deviceType: live?.deviceType ?? link.deviceType ?? "phone",
+        // Picked by the owner to stand for them. The clients still prefer an online device.
+        primary: owner.primaryDeviceId === link.deviceId,
         groupIds: groupsOf(user.id),
       });
     }
@@ -115,6 +117,7 @@ export function serializeDevices(viewer) {
       battery: d.battery ?? null,
       avatarUrl: owner?.avatarUrl ?? null,
       deviceType: d.deviceType ?? inferDeviceType(d.id),
+      primary: owner?.primaryDeviceId === d.id,
       groupIds: groupsOf(d.userId),
     });
   }

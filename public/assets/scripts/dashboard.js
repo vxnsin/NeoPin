@@ -524,11 +524,13 @@ async function pingDevice(device, button) {
 
 const TYPE_RANK = { phone: 0, tablet: 1, desktop: 2 };
 
-// The device that stands for a person: the one online, else phone over tablet over
-// computer, else the one that reported last.
+// The device that stands for a person: the one online, among those the one its owner
+// picked, else phone over tablet over computer, else the one that reported last. A picked
+// device that is offline gives way to one that is online, and comes back with it.
 function comparePrimary(a, b) {
   return (
     (a.status === "online" ? 0 : 1) - (b.status === "online" ? 0 : 1) ||
+    (b.primary ? 1 : 0) - (a.primary ? 1 : 0) ||
     (TYPE_RANK[a.deviceType] ?? 0) - (TYPE_RANK[b.deviceType] ?? 0) ||
     (Date.parse(b.lastPing) || 0) - (Date.parse(a.lastPing) || 0) ||
     a.deviceId.localeCompare(b.deviceId)
@@ -566,7 +568,36 @@ function personMeta(group) {
   return `${device.deviceId} · ${when}${more ? ` · +${more} ${more === 1 ? "device" : "devices"}` : ""}`;
 }
 
-function subDeviceHtml(device) {
+// Your own devices, and as the admin everyone's.
+const canPickPrimary = (device) => typeof me !== "undefined" && me !== null && (device.userId === me.id || me.isAdmin);
+
+function starHtml(device) {
+  const label = device.primary ? `${device.deviceId} is the main device, click for automatic` : `Make ${device.deviceId} the main device`;
+  return `<button class="icon-btn subdevice__star${device.primary ? " is-on" : ""}" type="button" data-primary="${esc(keyOf(device))}" aria-pressed="${Boolean(device.primary)}" aria-label="${esc(label)}" title="${esc(label)}"><svg class="icon"><use href="#i-star" /></svg></button>`;
+}
+
+async function setPrimary(device, button) {
+  const own = me && device.userId === me.id;
+  const url = own ? "/api/me/primary-device" : `/api/users/${device.userId}/primary-device`;
+  button.disabled = true;
+  try {
+    const response = await fetch(url, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ deviceId: device.primary ? null : device.deviceId }),
+    });
+    if (response.status === 401) return (window.location.href = "/login");
+    // The new list arrives over the socket and redraws the panel.
+    if (!response.ok) toast("The main device could not be changed.");
+    else toast(device.primary ? "Main device: picked automatically" : `${device.deviceId} is the main device now`);
+  } catch {
+    toast("The server is not reachable.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function subDeviceHtml(device, pickable) {
   const selected = keyOf(device) === selectedId;
   const askable = device.status === "online";
   return `
@@ -579,6 +610,7 @@ function subDeviceHtml(device) {
           <span class="device__meta"><span class="device__meta-text">${esc(metaText(device))}</span>${batteryHtml(device)}</span>
         </span>
       </button>
+      ${pickable ? starHtml(device) : ""}
       ${askable ? `<button class="icon-btn subdevice__ask" type="button" data-ask="${esc(keyOf(device))}" aria-label="Ask ${esc(device.deviceId)} for a fresh position" title="Ask for a fresh position"><svg class="icon"><use href="#i-refresh" /></svg></button>` : ""}
     </li>`;
 }
@@ -612,7 +644,9 @@ function renderPanel() {
     .map((group) => {
       const open = openUsers.has(group.userId);
       const holdsSelection = group.devices.some((d) => keyOf(d) === selectedId);
-      const subs = open ? `<ul class="person__devices" role="list">${group.devices.map(subDeviceHtml).join("")}</ul>` : "";
+      const subs = open ? `<ul class="person__devices" role="list">${group.devices
+        .map((device) => subDeviceHtml(device, group.devices.length > 1 && canPickPrimary(device)))
+        .join("")}</ul>` : "";
       return `
         <li class="person${open ? " is-open" : ""}">
           <button class="device person__head${holdsSelection ? " is-selected" : ""}" type="button" data-user="${group.userId}"
@@ -656,6 +690,12 @@ function select(id, { zoomIn = true, keepPanel = false } = {}) {
 }
 
 listEl.addEventListener("click", (event) => {
+  const star = event.target.closest("[data-primary]");
+  if (star) {
+    const device = devices.find((d) => keyOf(d) === star.dataset.primary);
+    if (device) setPrimary(device, star);
+    return;
+  }
   const ask = event.target.closest("[data-ask]");
   if (ask) {
     const device = devices.find((d) => keyOf(d) === ask.dataset.ask);

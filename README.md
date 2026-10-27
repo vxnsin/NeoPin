@@ -196,6 +196,8 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/me` | ✓ | The signed-in account |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
 | `GET` | `/api/devices` | ✓ | The devices linked to the account |
+| `PUT` | `/api/me/primary-device` | ✓ | `{ "deviceId" }` picks the device that stands for you, `null` goes back to automatic |
+| `PUT` | `/api/users/:id/primary-device` | admin | The same for another account |
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"? }`, asks one or all devices and answers with the list |
 | `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. The admin may pass `userId` |
