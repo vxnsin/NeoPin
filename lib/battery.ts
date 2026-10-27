@@ -31,18 +31,27 @@ export async function readBattery(): Promise<BatteryReport | null> {
 // Servers that know about batteries list a battery (or null) with every device. Older
 // ones would close the socket on an updateBattery, so that message waits until the
 // server has shown it knows. The battery inside updatePosition is safe either way,
-// unknown fields are dropped there.
+// unknown fields are dropped there. Every device list decides anew, so after a switch
+// to another server only that server's answer counts.
 let serverKnowsBattery = false;
 
 export function noteServerDevices(devices: unknown) {
-  if (Array.isArray(devices) && devices.some((d) => d && typeof d === "object" && "battery" in d)) {
-    serverKnowsBattery = true;
-  }
+  if (!Array.isArray(devices) || devices.length === 0) return;
+  serverKnowsBattery = devices.some((d) => d && typeof d === "object" && "battery" in d);
 }
 
 export function serverTakesBattery(): boolean {
   return serverKnowsBattery;
 }
+
+// On logout, so the next server starts unknown.
+export function resetServerBattery() {
+  serverKnowsBattery = false;
+}
+
+// Android only reports the level at thresholds like "battery low", not every percent,
+// so the charge is also looked at every two minutes while reporting runs.
+const POLL_MS = 2 * 60 * 1000;
 
 // Calls back when the charge moves by a whole percent or the phone is plugged in or
 // out, so a phone lying on the charger still shows how full it is.
@@ -56,5 +65,9 @@ export function watchBattery(onChange: (report: BatteryReport) => void): () => v
     onChange(report);
   };
   const subscriptions = [Battery.addBatteryLevelListener(check), Battery.addBatteryStateListener(check)];
-  return () => subscriptions.forEach((subscription) => subscription.remove());
+  const poll = setInterval(check, POLL_MS);
+  return () => {
+    clearInterval(poll);
+    subscriptions.forEach((subscription) => subscription.remove());
+  };
 }

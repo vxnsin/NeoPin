@@ -21,6 +21,8 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
   const send = async (latitude: number, longitude: number) => {
     lastSent = Date.now();
     const battery = await readBattery();
+    // Reporting may have stopped while the battery was read, a logout for example.
+    if (cancelled) return;
     target.emit({ type: "updatePosition", latitude, longitude, ...(battery && { battery }) });
   };
 

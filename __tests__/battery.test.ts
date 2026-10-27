@@ -15,7 +15,14 @@ jest.mock("expo-battery", () => ({
   },
 }));
 
-import { noteServerDevices, readBattery, serverTakesBattery, toReport, watchBattery } from "../lib/battery";
+import {
+  noteServerDevices,
+  readBattery,
+  resetServerBattery,
+  serverTakesBattery,
+  toReport,
+  watchBattery,
+} from "../lib/battery";
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const fire = async () => {
@@ -56,6 +63,32 @@ test("updateBattery waits until the server has shown it knows batteries", () => 
   // A newer one lists it, null until the device reported.
   noteServerDevices([{ deviceId: "phone", status: "online", battery: null }]);
   expect(serverTakesBattery()).toBe(true);
+  // An empty list says nothing either way.
+  noteServerDevices([]);
+  expect(serverTakesBattery()).toBe(true);
+  // Signed in to an older server afterwards: its list decides.
+  noteServerDevices([{ deviceId: "phone", status: "online" }]);
+  expect(serverTakesBattery()).toBe(false);
+  noteServerDevices([{ deviceId: "phone", status: "online", battery: null }]);
+  resetServerBattery();
+  expect(serverTakesBattery()).toBe(false);
+});
+
+test("looks at the battery every two minutes, Android only reports thresholds", async () => {
+  jest.useFakeTimers({ doNotFake: ["setImmediate"] });
+  const seen: unknown[] = [];
+  const stop = watchBattery((report) => seen.push(report));
+  jest.advanceTimersByTime(2 * 60 * 1000);
+  await flush();
+  native.level = 0.63;
+  jest.advanceTimersByTime(2 * 60 * 1000);
+  await flush();
+  expect(seen).toEqual([
+    { level: 64, charging: false },
+    { level: 63, charging: false },
+  ]);
+  stop();
+  jest.useRealTimers();
 });
 
 test("reports a change once, not every time the system calls", async () => {
