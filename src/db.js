@@ -191,6 +191,28 @@ const SCHEMA = `
     end_ms INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
   );
+  CREATE TABLE IF NOT EXISTS invite_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL UNIQUE,
+    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER REFERENCES user_groups(id) ON DELETE SET NULL,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    used_at TEXT,
+    revoked_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS invite_codes_creator ON invite_codes(created_by);
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, id);
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.

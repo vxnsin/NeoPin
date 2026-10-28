@@ -25,13 +25,15 @@ test("a fresh database gets an admin with a generated password that must be chan
   assert.equal(me.mustChangePassword, true);
 });
 
-test("there is no self-service sign-up", async () => {
-  assert.equal((await s.post("/api/register", { username: "luis", password: PASSWORD })).status, 404);
+test("sign-up needs an invite code, see invites.test.js", async () => {
+  assert.equal((await s.post("/api/register", { username: "luis", password: PASSWORD })).status, 400);
+  assert.equal((await s.post("/api/register", { code: "AAAAA-AAAAA", username: "luis", password: PASSWORD })).status, 404);
   assert.deepEqual(await (await fetch(`${s.baseUrl}/api/status`)).json(), {
     version: config.version,
     commit: config.commit,
     builtAt: config.builtAt,
     push: false,
+    invites: true,
   });
 });
 

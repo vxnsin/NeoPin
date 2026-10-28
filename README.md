@@ -32,7 +32,7 @@ flowchart LR
     D <-- "live over WebSocket" --> S
 ```
 
-Everyone has an account: a username and a password, created by the admin in the dashboard. A phone logs in with it once, gets a token and sends its position whenever it moves. The server keeps the latest position of every device in memory and pushes each change to all phones and dashboards, at most twice a second. Hit refresh and it asks every device for a fresh fix.
+Everyone has an account: a username and a password, created by the admin in the dashboard or by signing up with an [invite code](#invite-codes). A phone logs in with it once, gets a token and sends its position whenever it moves. The server keeps the latest position of every device in memory and pushes each change to all phones and dashboards, at most twice a second. Hit refresh and it asks every device for a fresh fix.
 
 Accounts, profile pictures and the location history live in a SQLite file (`data/neopin.db`, built in `node:sqlite`, no extra database to run). The timeline in the dashboard shows the stays and trips of a device per day, built from that history. Positions older than `HISTORY_DAYS` are deleted at startup. The live map itself is memory only, so after a restart it fills up again as devices reconnect.
 
@@ -121,10 +121,26 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
 | `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
 | `PUSH_WAIT_MS` | `20000` | How long asking an offline phone for its location waits for the answer |
+| `INVITE_CODES` | on | Sign-up with invite codes, see [Invite codes](#invite-codes). `off` turns it off |
+| `INVITE_TTL_DAYS` | `7` | How long an invite code stays valid |
+| `INVITE_MAX_OPEN` | `5` | Open codes a non-admin account may hold at once, the admin has no limit |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
 
 Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device tokens and 120 profile picture requests per minute and IP.
+
+## Invite codes
+
+Without an invite there is no sign-up: the admin creates accounts. With invite codes anybody who is signed in can bring a friend along.
+
+- `POST /api/invite-codes` makes a code, optionally for one of your groups (`groupId`, the admin may pick any) with a `note` of up to 60 characters. It looks like `7K3QM-X9TV2`: 10 characters of Crockford base32 (no `I`, `L`, `O`, `U`). Typing it is forgiving: case, spaces and dashes do not matter, `O` is read as `0`, `I` and `L` as `1`.
+- A code works once and for `INVITE_TTL_DAYS` days. A non-admin holds at most `INVITE_MAX_OPEN` open codes (`429` beyond that), revoking, using or expiring one frees a slot. `GET /api/invite-codes` lists your codes with their status (`open`, `used`, `expired`, `revoked`), the admin sees all. `DELETE /api/invite-codes/:id` revokes an open one.
+- The sign-up page can ask `POST /api/invite-codes/check` (`{ "code" }`) who invited and to which group. It only says `valid: true` or `false`, never why.
+- `POST /api/register` (`{ "code", "username", "password", "displayName"? }`) creates the account in one step with the code: a normal, non-admin account that does not have to change its password. It joins the fixed groups like every new account, and the code's group on top of that, without a pending invite. Afterwards the client logs in as usual. Unknown, used, expired and revoked codes all answer the same `404`. A taken or invalid username answers `409` / `400` and the code stays unused.
+- Wrong codes count against the same per-IP limit as wrong device tokens, and both routes share the login limit.
+- When a code is used, the admin accounts and the creator get a notification (`GET /api/notifications`, `POST /api/notifications/read`), a `{ "type": "notificationsChanged" }` message on their sockets and, where [push](#push-notifications) is set up, a push `New account`.
+
+`INVITE_CODES=off` answers `404 invites-off` on create, check and register, and `GET /api/status` has `"invites": false`.
 
 ## Push notifications
 
@@ -265,7 +281,13 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/login` | | `{ "username", "password" }`, sets the cookie. `401` when wrong, `429` after 5 tries a minute |
 | `POST` | `/api/auth/login` | | `{ "username", "password", "deviceId", "deviceType"? }`, answers with the device `token` |
 | `GET` | `/logout` | | Ends the session |
-| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push" }`, used by the login screens and the Docker health check |
+| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push", "invites" }`, used by the login screens and the Docker health check |
+| `POST` | `/api/register` | | `{ "code", "username", "password", "displayName"? }` signs up with an [invite code](#invite-codes), `201` with the account. `404` for any invalid code, `409` username taken |
+| `POST` | `/api/invite-codes/check` | | `{ "code" }` answers `{ "valid", "invitedBy"?, "groupName"? }` |
+| `POST` `GET` | `/api/invite-codes` | ✓ | Create a code (`{ "groupId"?, "note"? }`, `201`) and list your own, the admin gets all |
+| `DELETE` | `/api/invite-codes/:id` | ✓ | Revokes an open code. `204`, else `404` |
+| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`) |
+| `POST` | `/api/notifications/read` | ✓ | `{ "ids"? }` marks them read, all when omitted. `204` |
 | `GET` | `/api/me` | ✓ | The signed-in account |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
 | `GET` | `/api/devices` | ✓ | The devices linked to the account |
@@ -303,6 +325,8 @@ src/
 ├─ config.js       .env, timings
 ├─ db.js           SQLite schema
 ├─ accounts.js     users, tokens, admin bootstrap
+├─ invites.js      invite codes and sign-up
+├─ notifications.js stored notifications
 ├─ history.js      stored positions
 ├─ timeline.js     stays and trips per day
 ├─ transit.js      regions, the feed catalog, downloads and imports

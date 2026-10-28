@@ -59,6 +59,8 @@ import {
   removeMember,
   renameGroup,
 } from "./groups.js";
+import { createInvite, getInviteCode, inviteSummary, inviteView, listInvites, registerWithCode, revokeInvite } from "./invites.js";
+import { markRead, notificationsFor } from "./notifications.js";
 import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
 import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
@@ -467,6 +469,14 @@ export function createApp({ gracefulShutdown = true } = {}) {
     broadcastDevices();
   }
 
+  // Tells the devices and dashboards of these accounts that their notifications changed.
+  function notifyNotifications(userIds) {
+    const ids = new Set(userIds);
+    const message = { type: "notificationsChanged" };
+    for (const device of onlineDevices()) if (ids.has(device.userId)) send(device.socket, message);
+    for (const [viewer, userId] of viewers) if (ids.has(userId)) send(viewer, message);
+  }
+
   // Asks devices for a fresh fix and resolves once they answered or the wait is over.
   // `only` narrows it to one device, `except` leaves the asking device out.
   function requestLocation({ only = null, except = null, viewer = null } = {}) {
@@ -631,15 +641,93 @@ export function createApp({ gracefulShutdown = true } = {}) {
           builtAt: t.string().nullable(),
           // Whether push notifications are set up, so clients can hide what needs them.
           push: t.boolean(),
+          // Whether people can sign up with an invite code.
+          invites: t.boolean(),
         }),
       },
     },
-    () => ({ version: config.version, commit: config.commit, builtAt: config.builtAt, push: fcmEnabled() })
+    () => ({ version: config.version, commit: config.commit, builtAt: config.builtAt, push: fcmEnabled(), invites: config.invites })
   );
 
   // Everything that takes a password shares one limit per IP.
   app.register((scope) => {
     scope.register(rateLimit({ max: config.loginRateLimit.max, window: config.loginRateLimit.windowMs }));
+
+    // Guessing codes counts against the same per-IP limit as wrong device tokens.
+    const invitesOn = () => {
+      if (!config.invites) throw problem(404, "invites-off", "Invite codes are turned off");
+    };
+    const blockGuessing = (ctx) => {
+      if (authFailures.blocked(ctx.ip)) throw problem(429, "too-many-attempts", "Too many attempts");
+    };
+
+    // Lets the sign-up page show who invited, never why a code is not valid.
+    scope.post(
+      "/api/invite-codes/check",
+      {
+        body: t.object({ code: t.string().max(64) }),
+        response: {
+          200: t.object({ valid: t.boolean(), invitedBy: t.string().optional(), groupName: t.string().nullable().optional() }),
+          404: t.problem(),
+          429: t.problem(),
+        },
+      },
+      (ctx) => {
+        invitesOn();
+        blockGuessing(ctx);
+        const summary = inviteSummary(ctx.body.code);
+        if (!summary) {
+          authFailures.fail(ctx.ip);
+          return { valid: false };
+        }
+        return { valid: true, ...summary };
+      }
+    );
+
+    // Self-service sign-up. The client logs in with the normal routes afterwards.
+    scope.post(
+      "/api/register",
+      {
+        body: t.object({
+          code: t.string().max(64),
+          username: t.string().max(64),
+          password: t.string().max(256),
+          displayName: t.string().max(64).optional(),
+        }),
+        response: { 201: User, 400: t.problem(), 404: t.problem(), 409: t.problem(), 429: t.problem() },
+      },
+      (ctx) => {
+        invitesOn();
+        blockGuessing(ctx);
+        try {
+          const { code, ...account } = ctx.body;
+          const result = registerWithCode(code, account);
+          console.log(
+            chalk.cyan(
+              `[i] Account ${chalk.whiteBright(result.user.username)} signed up with an invite code of ${chalk.whiteBright(result.inviter.username)}.`
+            )
+          );
+          notifyNotifications(result.recipients);
+          for (const id of result.recipients) {
+            pushToAccount(id, {
+              title: "New account",
+              body: `${result.user.display_name} joined with ${result.inviter.display_name}'s invite code`,
+              data: { type: "inviteUsed" },
+            });
+          }
+          if (result.group) notifyGroups(audience(result.group.id));
+          return reply(201, publicUser(result.user));
+        } catch (error) {
+          if (error.code === "invalid-code") {
+            authFailures.fail(ctx.ip);
+            throw problem(404, "invalid-code", "This invite code is not valid");
+          }
+          if (error.code === "taken") throw problem(409, "username-taken", error.message);
+          if (error.code === "invalid") throw problem(400, "invalid-account", error.message);
+          throw error;
+        }
+      }
+    );
 
     // Dashboard login: sets the session cookie.
     scope.post(
@@ -891,6 +979,86 @@ export function createApp({ gracefulShutdown = true } = {}) {
         (ctx) => applyProfile(currentUser(ctx).user.id, ctx.body)
       );
 
+
+      // Invite codes: anybody signed in can make them, the admin sees all.
+      const Person = t.object({ id: t.number(), username: t.string(), displayName: t.string(), avatarUrl: t.string().nullable() });
+      const InviteCode = t.object({
+        id: t.number(),
+        code: t.string(),
+        status: t.enum(["open", "used", "expired", "revoked"]),
+        note: t.string().nullable(),
+        groupId: t.number().nullable(),
+        groupName: t.string().nullable(),
+        createdAt: t.string(),
+        expiresAt: t.string(),
+        createdBy: Person,
+        usedBy: Person.nullable(),
+        usedAt: t.string().nullable(),
+      });
+
+      api.post(
+        "/invite-codes",
+        {
+          body: t.object({ groupId: t.int().optional(), note: t.string().max(60).optional() }).optional(),
+          response: { 201: InviteCode, 400: t.problem(), 401: t.problem(), 404: t.problem(), 429: t.problem() },
+        },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          if (!config.invites) throw problem(404, "invites-off", "Invite codes are turned off");
+          try {
+            return reply(201, inviteView(getInviteCode(createInvite(user, ctx.body ?? {}))));
+          } catch (error) {
+            if (error.code === "limit") throw problem(429, "too-many-codes", error.message);
+            if (error.code === "unknown-group") throw problem(404, "unknown-group", error.message);
+            if (error.code === "invalid") throw problem(400, "invalid-invite", error.message);
+            throw error;
+          }
+        }
+      );
+
+      api.get("/invite-codes", { response: { 200: t.array(InviteCode), 401: t.problem() } }, (ctx) =>
+        listInvites(currentUser(ctx).user)
+      );
+
+      api.delete(
+        "/invite-codes/:id",
+        { response: { 204: t.empty(), 401: t.problem(), 404: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          if (!revokeInvite(user, Number(ctx.params.id))) throw problem(404, "unknown-invite-code", "No such open invite code");
+          return reply(204);
+        }
+      );
+
+      const Notification = t.object({
+        id: t.number(),
+        type: t.literal("inviteUsed"),
+        createdAt: t.string(),
+        readAt: t.string().nullable(),
+        data: t.object({
+          user: Person,
+          invitedBy: t.object({ id: t.number(), username: t.string(), displayName: t.string() }),
+          groupName: t.string().nullable(),
+        }),
+      });
+
+      api.get("/notifications", { response: { 200: t.array(Notification), 401: t.problem() } }, (ctx) =>
+        notificationsFor(currentUser(ctx).user.id)
+      );
+
+      api.post(
+        "/notifications/read",
+        {
+          body: t.object({ ids: t.array(t.int()).max(200).optional() }).optional(),
+          response: { 204: t.empty(), 401: t.problem() },
+        },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          markRead(user.id, ctx.body?.ids);
+          notifyNotifications([user.id]);
+          return reply(204);
+        }
+      );
 
       // Groups decide who sees whom.
       const Member = User.extend({ role: t.enum(["owner", "member"]) });

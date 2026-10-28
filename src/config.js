@@ -87,6 +87,11 @@ export const config = {
   // Overrides for tests: null takes them from the service account and Google's address.
   fcmUrl: null,
   fcmTokenUrl: null,
+  // Self-service sign-up with invite codes. "off" turns it off.
+  invites: !["off", "false", "no", "0"].includes((process.env.INVITE_CODES ?? "").trim().toLowerCase()),
+  // How long a code stays valid, and how many open codes a non-admin may hold.
+  inviteTtlDays: Number(process.env.INVITE_TTL_DAYS) || 7,
+  inviteMaxOpen: Number(process.env.INVITE_MAX_OPEN) || 5,
   // How long asking an offline device for its location waits for the answer.
   pushWaitMs: Number(process.env.PUSH_WAIT_MS) || 20 * 1000,
   // Only behind a reverse proxy: take the client IP and https from X-Forwarded-*.
