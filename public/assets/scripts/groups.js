@@ -10,14 +10,21 @@ const groupsDialogOpen = () => !modal.hidden && modalTitle.textContent === "Grou
 
 // Chips on the people panel
 
+// A fixed group holds every account, so it shows exactly what All shows: no chip of its own,
+// it stays in the groups dialog. Same rule as the app.
+const chipGroups = () => groups.filter((g) => !g.fixed);
+const isChipGroup = (id) => chipGroups().some((g) => g.id === id);
+
+// Chips only when one would show something All does not: two groups, or one next to the fixed one.
 function renderChips() {
-  if (groups.length <= 1) {
+  const own = chipGroups();
+  if (!(own.length >= 2 || (own.length === 1 && own.length < groups.length))) {
     chipsEl.hidden = true;
     return;
   }
   const chip = (id, label) =>
     `<button class="chip" type="button" data-group="${id ?? ""}" aria-pressed="${groupFilter === id}">${esc(label)}</button>`;
-  chipsEl.innerHTML = chip(null, "All") + groups.map((g) => chip(g.id, g.name)).join("");
+  chipsEl.innerHTML = chip(null, "All") + own.map((g) => chip(g.id, g.name)).join("");
   chipsEl.hidden = false;
 }
 
@@ -35,7 +42,8 @@ function restoreFilter() {
     saved = null;
   }
   const id = saved && saved !== "all" ? Number(saved) : null;
-  groupFilter = id !== null && groups.some((g) => g.id === id) ? id : null;
+  // A saved pick of the fixed group is All now.
+  groupFilter = id !== null && isChipGroup(id) ? id : null;
   devices = filterDevices();
   render();
 }
@@ -57,7 +65,7 @@ async function refreshGroups({ restore = false } = {}) {
   updateDots();
   // The chosen group may be gone, then everybody is shown again.
   if (restore) restoreFilter();
-  else if (groupFilter !== null && !groups.some((g) => g.id === groupFilter)) setGroupFilter(null);
+  else if (groupFilter !== null && !isChipGroup(groupFilter)) setGroupFilter(null);
   renderChips();
   if (groupsDialogOpen()) renderGroupsDialog();
 }
