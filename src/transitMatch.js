@@ -153,19 +153,27 @@ export function matchGtfs(trip) {
     return shapeCache.get(key);
   };
 
+  // The observed departure in each agency's time zone, computed once per zone, not per row.
+  const observed = new Map();
+  const observedIn = (timeZone) => {
+    if (!observed.has(timeZone)) observed.set(timeZone, localSeconds(trip.start, timeZone));
+    return observed.get(timeZone);
+  };
+
   let best = null;
   for (const feedId of new Set(from.map((s) => s.feed_id))) {
     const fromIds = from.filter((s) => s.feed_id === feedId).map((s) => s.id);
     const toIds = to.filter((s) => s.feed_id === feedId).map((s) => s.id);
     if (!toIds.length) continue;
     const marks = (ids) => ids.map(() => "?").join(",");
-    // Every trip of the feed that calls at one of the boarding stops and later at one of the alighting stops.
+    // Every trip of the feed that calls at one of the boarding stops and later at one of the
+    // alighting stops. Not the same stop twice: a loop line does not explain a ride that came back.
     const rows = db
       .prepare(
         `SELECT t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, b.stop_id AS to_id, a.departure,
                 r.short_name, r.long_name, r.type, r.color, r.text_color, r.agency, r.timezone
          FROM transit_stop_times a
-         JOIN transit_stop_times b ON b.feed_id = a.feed_id AND b.trip_id = a.trip_id AND b.seq > a.seq
+         JOIN transit_stop_times b ON b.feed_id = a.feed_id AND b.trip_id = a.trip_id AND b.seq > a.seq AND b.stop_id <> a.stop_id
          JOIN transit_trips t ON t.feed_id = a.feed_id AND t.id = a.trip_id
          JOIN transit_routes r ON r.feed_id = t.feed_id AND r.id = t.route_id
          WHERE a.feed_id = ? AND a.stop_id IN (${marks(fromIds)}) AND b.stop_id IN (${marks(toIds)})`
@@ -173,7 +181,7 @@ export function matchGtfs(trip) {
       .all(feedId, ...fromIds, ...toIds);
     for (const row of rows) {
       if (!shapeFits(feedId, row.shape_id)) continue;
-      const gap = departureGap(row.departure, localSeconds(trip.start, row.timezone));
+      const gap = departureGap(row.departure, observedIn(row.timezone));
       if (!best || gap < best.gap) best = { row, gap, feedId };
     }
   }
@@ -320,19 +328,19 @@ export function matchOsm(trip) {
 // looked at again, the data might know the line now.
 const dataStamp = () => Number(getDb().prepare("SELECT MAX(updated_at) AS stamp FROM transit_feeds").get().stamp ?? 0);
 
-function storedResult(userId, deviceId, trip) {
+function storedResult(userId, deviceId, trip, stamp) {
   const row = getDb()
-    .prepare("SELECT end, transit, data_stamp FROM trip_transit WHERE user_id = ? AND device_id = ? AND start = ?")
+    .prepare("SELECT end_ms, transit, data_stamp FROM trip_transit WHERE user_id = ? AND device_id = ? AND start = ?")
     .get(userId, deviceId, trip.start);
-  if (!row || Number(row.end) !== trip.end) return undefined;
-  if (row.transit === null && Number(row.data_stamp) < dataStamp()) return undefined;
+  if (!row || Number(row.end_ms) !== trip.end) return undefined;
+  if (row.transit === null && Number(row.data_stamp) < stamp) return undefined;
   return row.transit === null ? null : JSON.parse(row.transit);
 }
 
-function storeResult(userId, deviceId, trip, transit) {
+function storeResult(userId, deviceId, trip, transit, stamp) {
   getDb()
-    .prepare("INSERT OR REPLACE INTO trip_transit (user_id, device_id, start, end, transit, data_stamp) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(userId, deviceId, trip.start, trip.end, transit ? JSON.stringify(transit) : null, dataStamp());
+    .prepare("INSERT OR REPLACE INTO trip_transit (user_id, device_id, start, end_ms, transit, data_stamp) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(userId, deviceId, trip.start, trip.end, transit ? JSON.stringify(transit) : null, stamp);
 }
 
 // "That was by car": remembered per account, device and trip start; "auto" forgets it.
@@ -363,21 +371,22 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
   const undecided = [];
   const pending = [];
   if (config.transit) {
+    const stamp = dataStamp();
     for (const trip of trips) {
-      const stored = storedResult(userId, deviceId, trip);
+      const stored = storedResult(userId, deviceId, trip, stamp);
       if (stored !== undefined) {
         trip.transit = stored;
         continue;
       }
       if (!looksLikeRide(rideProfile(trip.fixes))) {
         trip.transit = null;
-        storeResult(userId, deviceId, trip, null);
+        storeResult(userId, deviceId, trip, null, stamp);
         continue;
       }
       const gtfs = matchGtfs(trip);
       if (gtfs) {
         trip.transit = gtfs;
-        storeResult(userId, deviceId, trip, gtfs);
+        storeResult(userId, deviceId, trip, gtfs, stamp);
         continue;
       }
       const ends = [trip.fixes[0], trip.fixes[trip.fixes.length - 1]].map((p) => osmAround(p.lat, p.lon));
@@ -395,7 +404,7 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
       // Without an answer yet nothing is stored, the next load asks the cache again.
       if (!known) continue;
       trip.transit = matchOsm(trip);
-      storeResult(userId, deviceId, trip, trip.transit);
+      storeResult(userId, deviceId, trip, trip.transit, stamp);
     }
   }
 

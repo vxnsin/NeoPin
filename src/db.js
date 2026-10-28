@@ -145,7 +145,7 @@ const SCHEMA = `
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id TEXT NOT NULL,
     start INTEGER NOT NULL,
-    end INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
     transit TEXT,
     data_stamp INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
