@@ -1,10 +1,5 @@
 // Day view of one device's history: a list of stays and trips next to the same day on the map.
-const MODES = {
-  walking: { label: "Walking", icon: "#i-walk", color: "#16a34a" },
-  cycling: { label: "Cycling", icon: "#i-bike", color: "#2563eb" },
-  driving: { label: "Driving", icon: "#i-car", color: "#ea580c" },
-};
-const GAP_COLOR = "#94a3b8";
+// How a trip looks (modes, lines, colours) comes from trips.js.
 const TL_SOURCE = "timeline";
 const KIND_LABELS = {
   home: "Home",
@@ -26,13 +21,17 @@ const KIND_LABELS = {
   building: "Building",
   place: "Place",
 };
-// Place names that are still looked up are asked for again, a few times at most.
+// Saved with one click, the server picks the name ("Home", "Home 2", "Work").
+const QUICK_KINDS = ["home", "work"];
+// Place names that are still looked up, and paths that are still smoothed, are asked for
+// again, a few times at most.
 const PENDING_RETRY_MS = 4000;
 const PENDING_RETRIES = 5;
 
 const tlButton = document.getElementById("timelineButton");
 const tlPanel = document.getElementById("timelinePanel");
 const tlClose = document.getElementById("timelineClose");
+const tlReload = document.getElementById("timelineReload");
 const tlAccount = document.getElementById("tlAccount");
 const tlDevice = document.getElementById("tlDevice");
 const tlDate = document.getElementById("tlDate");
@@ -79,6 +78,7 @@ async function getJson(url) {
   return response.json();
 }
 
+// Corrections answer 204 without a body.
 async function sendJson(url, method, body) {
   const response = await fetch(url, {
     method,
@@ -90,7 +90,7 @@ async function sendJson(url, method, body) {
     throw new Error("signed-out");
   }
   if (!response.ok) throw new Error("failed");
-  return response.json();
+  return response.status === 204 ? null : response.json();
 }
 
 // Map
@@ -107,7 +107,7 @@ function linesData() {
             type: "Feature",
             properties: {
               index,
-              color: segment.gap ? GAP_COLOR : (MODES[segment.mode]?.color ?? "#64748b"),
+              color: tripColor(segment),
               active: index === tl.active,
               gap: !!segment.gap,
             },
@@ -166,23 +166,40 @@ function clearMarkers() {
   tl.markers = [];
 }
 
+function addMarker(el, index, lngLat) {
+  el.type = "button";
+  el.dataset.index = String(index);
+  el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    focusSegment(index, { scroll: true });
+  });
+  tl.markers.push(new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map));
+}
+
 function drawMarkers() {
   clearMarkers();
+  const segments = tl.data?.segments ?? [];
+  // Where a ride was boarded and left: a small dot in the line's colour, under the numbered stops.
+  segments.forEach((segment, index) => {
+    const transit = segment.type === "trip" ? segment.transit : null;
+    if (!transit) return;
+    for (const [stop, role] of [[transit.from, "boarded"], [transit.to, "left"]]) {
+      const el = document.createElement("button");
+      el.className = "tl-tstop";
+      el.style.setProperty("--line", tripColor(segment));
+      el.setAttribute("aria-label", `${stop.name}, where the ride was ${role}`);
+      addMarker(el, index, [stop.lon, stop.lat]);
+    }
+  });
   let number = 0;
-  (tl.data?.segments ?? []).forEach((segment, index) => {
+  segments.forEach((segment, index) => {
     if (segment.type !== "visit") return;
     number += 1;
     const el = document.createElement("button");
-    el.type = "button";
     el.className = "tl-marker";
     el.textContent = String(number);
-    el.dataset.index = String(index);
     el.setAttribute("aria-label", `${segment.place?.name ?? `Stop ${number}`}, ${formatTime(segment.start)}`);
-    el.addEventListener("click", (event) => {
-      event.stopPropagation();
-      focusSegment(index, { scroll: true });
-    });
-    tl.markers.push(new maplibregl.Marker({ element: el }).setLngLat([segment.lon, segment.lat]).addTo(map));
+    addMarker(el, index, [segment.lon, segment.lat]);
   });
 }
 
@@ -222,12 +239,13 @@ function inView(points, padding) {
   });
 }
 
-function focusSegment(index, { scroll = false } = {}) {
+// fold: on a phone the sheet folds away so the map is visible, unless a chooser just opened in it.
+function focusSegment(index, { scroll = false, fold = true } = {}) {
   const segment = tl.data?.segments[index];
   if (!segment) return;
   markActive(index);
 
-  if (phone.matches) setSheetOpen(false);
+  if (phone.matches && fold) setSheetOpen(false);
   const padding = timelinePadding();
   const points = segment.type === "visit" ? [[segment.lon, segment.lat]] : segment.path.map(([lat, lon]) => [lon, lat]);
   if (points.length && !inView(points, padding)) {
@@ -251,71 +269,101 @@ function renderSummary(summary) {
     </div>`;
 }
 
+// "10" on the line's own colours; lines without colours get a quiet badge.
+function lineBadge(transit) {
+  if (!transit.line) return "";
+  const { bg, fg } = badgeColors(transit);
+  const style = [bg && `background:${bg};border-color:${bg}`, fg && `color:${fg}`].filter(Boolean).join(";");
+  return `<span class="line-badge"${style ? ` style="${style}"` : ""}>${esc(transit.line)}</span>`;
+}
+
+function tripHtml(segment, index, times) {
+  const duration = formatDuration(segment.durationMs);
+  const transit = segment.transit;
+  let title;
+  if (segment.gap) title = `<span class="seg__title">No data · ${esc(formatDistance(segment.distanceM))}</span>`;
+  // "10" · "Bus · Sanderring → Hauptbahnhof"
+  else if (transit) {
+    title = `<span class="seg__title seg__ride">${lineBadge(transit)}<span class="seg__ride-text">${esc(rideLabel(transit))} · ${esc(transit.from.name)} → ${esc(transit.to.name)}</span></span>`;
+  } else {
+    const mode = MODES[segment.mode] ?? MODES.walking;
+    title = `<span class="seg__title">${esc(mode.label)} · ${esc(formatDistance(segment.distanceM))}</span>`;
+  }
+  return `
+    <li>
+      <button class="seg seg--trip" type="button" data-index="${index}" style="--mode:${tripColor(segment)}" aria-expanded="false">
+        <span class="seg__badge seg__badge--trip"><svg class="icon"><use href="${tripIcon(segment)}" /></svg></span>
+        <span class="seg__text">
+          ${title}
+          <span class="seg__meta">${esc(times)} · ${esc(duration)}</span>
+        </span>
+      </button>
+      <div class="mode-chooser" data-chooser="${index}" hidden></div>
+    </li>`;
+}
+
 function renderSegments(segments) {
   let number = 0;
   const items = segments.map((segment, index) => {
     const times = `${formatTime(segment.start)} – ${formatTime(segment.end)}`;
-    if (segment.type === "visit") {
-      number += 1;
-      const place = segment.place;
-      // A guess from OpenStreetMap says so until someone confirms it.
-      const about = place
-        ? `<span class="seg__meta">${esc(KIND_LABELS[place.kind] ?? "Place")}${place.source === "osm" ? " · suggested" : ""}</span>`
-        : `<span class="seg__meta seg__coords">${segment.lat.toFixed(4)}, ${segment.lon.toFixed(4)}</span>`;
-      return `
-        <li class="seg-item">
-          <button class="seg seg--visit" type="button" data-index="${index}">
-            <span class="seg__badge">${number}</span>
-            <span class="seg__text">
-              <span class="seg__title">${esc(place?.name ?? `Stop ${number}`)}</span>
-              <span class="seg__meta">${esc(times)} · ${esc(formatDuration(segment.durationMs))}</span>
-              ${about}
-            </span>
-          </button>
-          <button class="seg__edit" type="button" data-edit="${index}" aria-label="Change the place" title="Change the place">
-            <svg class="icon"><use href="#i-edit" /></svg>
-          </button>
-          <div class="place-picker" data-picker="${index}" hidden></div>
-        </li>`;
-    }
-    if (segment.gap) {
-      return `
-      <li>
-        <button class="seg seg--trip" type="button" data-index="${index}" data-mode="gap">
-          <span class="seg__badge seg__badge--trip"><svg class="icon"><use href="#i-gap" /></svg></span>
-          <span class="seg__text">
-            <span class="seg__title">No data · ${esc(formatDistance(segment.distanceM))}</span>
-            <span class="seg__meta">${esc(times)} · ${esc(formatDuration(segment.durationMs))}</span>
-          </span>
-        </button>
-      </li>`;
-    }
-    const mode = MODES[segment.mode] ?? MODES.walking;
+    if (segment.type !== "visit") return tripHtml(segment, index, times);
+    number += 1;
+    const place = segment.place;
+    // A guess from OpenStreetMap says so until someone confirms it.
+    const about = place
+      ? `<span class="seg__meta">${esc(KIND_LABELS[place.kind] ?? "Place")}${place.source === "osm" ? " · suggested" : ""}</span>`
+      : `<span class="seg__meta seg__coords">${segment.lat.toFixed(4)}, ${segment.lon.toFixed(4)}</span>`;
     return `
-      <li>
-        <button class="seg seg--trip" type="button" data-index="${index}" data-mode="${esc(segment.mode)}">
-          <span class="seg__badge seg__badge--trip"><svg class="icon"><use href="${mode.icon}" /></svg></span>
+      <li class="seg-item">
+        <button class="seg seg--visit" type="button" data-index="${index}">
+          <span class="seg__badge">${number}</span>
           <span class="seg__text">
-            <span class="seg__title">${esc(mode.label)} · ${esc(formatDistance(segment.distanceM))}</span>
+            <span class="seg__title">${esc(place?.name ?? `Stop ${number}`)}</span>
             <span class="seg__meta">${esc(times)} · ${esc(formatDuration(segment.durationMs))}</span>
+            ${about}
           </span>
         </button>
+        <button class="seg__edit" type="button" data-edit="${index}" aria-label="Change the place" title="Change the place">
+          <svg class="icon"><use href="#i-edit" /></svg>
+        </button>
+        <div class="place-picker" data-picker="${index}" hidden></div>
       </li>`;
   });
   return `<ol class="seg-list">${items.join("")}</ol>`;
 }
 
+// What was removed stays in reach: each removed stop of the day, with a way back.
+function renderRemoved(spans) {
+  if (!spans?.length) return "";
+  const rows = spans
+    .map((span, i) => {
+      const times = `${formatTime(span.start)} – ${formatTime(span.end)}`;
+      return `
+        <li class="tl-removed__row">
+          <span>${esc(times)}</span>
+          <button class="btn btn--small btn--ghost" type="button" data-restore="${i}" aria-label="${esc(`Bring back the stop from ${times}`)}">
+            <svg class="icon"><use href="#i-undo" /></svg>Bring back
+          </button>
+        </li>`;
+    })
+    .join("");
+  return `<div class="tl-removed"><strong class="tl-removed__title">Removed stops</strong><ul class="tl-removed__list">${rows}</ul></div>`;
+}
+
 function renderBody(state) {
   if (state === "loading") tlBody.innerHTML = '<div class="tl-note"><div class="spinner"></div></div>';
   else if (state === "error")
-    tlBody.innerHTML = '<div class="tl-note"><strong>Could not load this day</strong>Check the connection and pick the day again.</div>';
+    tlBody.innerHTML =
+      '<div class="tl-note"><strong>Could not load this day</strong>Check the connection and try again.<button class="btn btn--small btn--ghost" type="button" data-retry>Try again</button></div>';
   else if (state === "nodevice")
     tlBody.innerHTML =
       '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-phone" /></svg></span><strong>No devices yet</strong>Sign in with the NeoPin app and its history shows up here.</div>';
+  // The only stop of the day may have been removed: the way back stays here too.
   else if (!tl.data || tl.data.segments.length === 0)
     tlBody.innerHTML =
-      '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-place" /></svg></span><strong>Nothing recorded</strong>This device did not report any positions on this day.</div>';
-  else tlBody.innerHTML = renderSummary(tl.data.summary) + renderSegments(tl.data.segments);
+      '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-place" /></svg></span><strong>Nothing recorded</strong>This device did not report any positions on this day.</div>' +
+      renderRemoved(tl.data?.dismissed);
+  else tlBody.innerHTML = renderSummary(tl.data.summary) + renderSegments(tl.data.segments) + renderRemoved(tl.data.dismissed);
 }
 
 function updateNav() {
@@ -327,10 +375,28 @@ function updateNav() {
   tlNext.dataset.day = next ?? "";
 }
 
-// keepView reloads the same day in place (new place names), the map and the list stay where they are.
-async function loadDay({ keepView = false } = {}) {
+// An open place picker or mode chooser would be wiped by a new list.
+const editing = () => Boolean(tlBody.querySelector(".place-picker:not([hidden]), .mode-chooser:not([hidden])"));
+
+// While names or paths are pending the same day is asked for again. A picker or chooser that is
+// open holds the refresh back until it is closed, so a half typed name is not lost.
+function scheduleRetry(id) {
+  if (!stillPending(tl.data) || tl.retries >= PENDING_RETRIES) return;
+  tl.retries += 1;
+  const retry = () => {
+    if (id !== tl.loadId || !tl.on) return;
+    if (editing()) setTimeout(retry, PENDING_RETRY_MS);
+    else loadDay({ keepView: true, auto: true });
+  };
+  setTimeout(retry, PENDING_RETRY_MS);
+}
+
+// keepView reloads the same day in place (new place names, smoother paths, a correction): the
+// map and the list stay where they are. The focused segment is found again by its start, as a
+// dismissed stop or a corrected trip can shift the others. auto marks a pending refresh.
+async function loadDay({ keepView = false, auto = false } = {}) {
   const id = ++tl.loadId;
-  const active = keepView ? tl.active : null;
+  const previous = keepView && tl.active !== null ? tl.data?.segments[tl.active] : null;
   const scroll = tlBody.scrollTop;
   if (!keepView) {
     tl.data = null;
@@ -345,20 +411,28 @@ async function loadDay({ keepView = false } = {}) {
   try {
     const data = await getJson(`/api/timeline?deviceId=${encodeURIComponent(tl.deviceId)}&date=${tl.date}&${tzQuery()}`);
     if (id !== tl.loadId) return;
+    // A picker opened while the refresh was on its way: this answer waits, it does not count.
+    if (auto && editing()) {
+      tl.retries -= 1;
+      return scheduleRetry(id);
+    }
     tl.data = data;
     renderBody("ready");
     ensureLayers();
     drawMarkers();
     if (keepView) {
       tlBody.scrollTop = scroll;
-      if (active !== null) markActive(active);
+      const again = segmentIndex(data.segments, previous);
+      tl.active = null;
+      if (again >= 0) markActive(again);
+      else map.getSource(TL_SOURCE)?.setData(linesData());
     } else fitDay();
-    if ((data.placesPending || data.pathsPending) && tl.retries < PENDING_RETRIES) {
-      tl.retries += 1;
-      setTimeout(() => id === tl.loadId && tl.on && loadDay({ keepView: true }), PENDING_RETRY_MS);
-    }
+    scheduleRetry(id);
   } catch (error) {
-    if (id === tl.loadId && error.message !== "signed-out" && !keepView) renderBody("error");
+    if (id !== tl.loadId || error.message === "signed-out") return;
+    // A failed refresh still counts, the next one is scheduled all the same.
+    if (keepView) scheduleRetry(id);
+    else renderBody("error");
   }
 }
 
@@ -369,7 +443,7 @@ async function openPicker(index) {
   const picker = tlBody.querySelector(`.place-picker[data-picker="${index}"]`);
   if (!segment || !picker) return;
   const open = picker.hidden;
-  tlBody.querySelectorAll(".place-picker").forEach((el) => (el.hidden = true));
+  closeEditors();
   if (!open) return;
   picker.hidden = false;
   picker.innerHTML = '<div class="place-picker__note"><div class="spinner"></div></div>';
@@ -379,7 +453,10 @@ async function openPicker(index) {
   } catch (error) {
     if (error.message === "signed-out") return;
   }
+  if (picker.hidden || !picker.isConnected) return;
   const current = segment.place;
+  // Renaming an own place keeps what it is, Home stays Home.
+  const ownKind = current?.source === "own" ? current.kind : null;
   const confirm =
     current?.source === "osm"
       ? `<button class="place-choice place-choice--confirm" type="button" data-confirm>
@@ -395,46 +472,124 @@ async function openPicker(index) {
         </button>`
       )
       .join("") || '<div class="place-picker__note">Nothing named close by.</div>';
+  const tags = QUICK_KINDS.map(
+    (kind) => `<button class="chip chip--icon" type="button" data-tag="${kind}" aria-pressed="${ownKind === kind}" aria-label="Save as ${KIND_LABELS[kind]}">
+        <svg class="icon"><use href="#i-${kind}" /></svg>${KIND_LABELS[kind]}
+      </button>`
+  ).join("");
   picker.innerHTML = `
     ${confirm}
     <div class="place-picker__list">${list}</div>
+    <div class="place-picker__quick"><span>Save as</span>${tags}</div>
     <form class="place-picker__own">
       <input name="name" maxlength="80" placeholder="Name it yourself" required autocomplete="off" />
-      <select name="kind" aria-label="Kind of place">
-        <option value="place">Place</option>
-        <option value="home">Home</option>
-        <option value="work">Work</option>
-      </select>
       <button class="place-picker__save" type="submit">Save</button>
     </form>
+    <button class="place-picker__dismiss" type="button" data-dismiss aria-label="Not a stop, remove it from the day">
+      <svg class="icon"><use href="#i-place-off" /></svg>Not a stop
+    </button>
     <div class="place-picker__error" hidden>Could not save, try again.</div>`;
   picker.dataset.choices = JSON.stringify(choices);
+  picker.dataset.kind = ownKind ?? "place";
 }
 
-// Saving names the spot of the visit. Picking an own place claims the spot for it.
-async function savePlace(index, choice) {
+// Runs one save from an open picker or chooser: everything in it waits, a failure says so in it.
+async function saveFrom(box, action) {
+  box.querySelectorAll("button, input").forEach((el) => (el.disabled = true));
+  try {
+    await action();
+    tl.retries = 0;
+    await loadDay({ keepView: true });
+    // Saved, but the day could not be fetched again: the editor closes, Reload shows the change.
+    if (box.isConnected) box.hidden = true;
+  } catch (error) {
+    if (error.message === "signed-out" || !box.isConnected) return;
+    box.querySelectorAll("button, input").forEach((el) => (el.disabled = false));
+    box.querySelector(".place-picker__error").hidden = false;
+  }
+}
+
+// Saving names the spot of the visit. Picking an own place claims the spot for it. Home and
+// Work go without a name, the server names them.
+function savePlace(index, choice) {
   const segment = tl.data?.segments[index];
   const picker = tlBody.querySelector(`.place-picker[data-picker="${index}"]`);
   if (!segment || !picker || !choice) return;
-  picker.querySelectorAll("button, input, select").forEach((el) => (el.disabled = true));
+  saveFrom(picker, () =>
+    choice.source === "own" && choice.id
+      ? sendJson(withUser(`/api/places/${choice.id}/claim`), "POST", { lat: segment.lat, lon: segment.lon })
+      : sendJson(withUser("/api/places"), "POST", {
+          lat: segment.lat,
+          lon: segment.lon,
+          kind: choice.kind,
+          ...(choice.name && { name: choice.name }),
+          ...(choice.osmId && { osmId: choice.osmId }),
+        })
+  );
+}
+
+// "Not a stop": a red light or a jam. The server keeps the span, the day is built again around it.
+function dismissStop(index) {
+  const segment = tl.data?.segments[index];
+  const picker = tlBody.querySelector(`.place-picker[data-picker="${index}"]`);
+  if (!segment || !picker) return;
+  saveFrom(picker, () =>
+    sendJson(withUser("/api/visits/dismissed"), "PUT", { deviceId: tl.deviceId, start: segment.start, end: segment.end, dismissed: true })
+  );
+}
+
+async function restoreStop(span, button) {
+  button.disabled = true;
   try {
-    if (choice.source === "own" && choice.id) {
-      await sendJson(withUser(`/api/places/${choice.id}/claim`), "POST", { lat: segment.lat, lon: segment.lon });
-    } else {
-      await sendJson(withUser("/api/places"), "POST", {
-        lat: segment.lat,
-        lon: segment.lon,
-        name: choice.name,
-        kind: choice.kind,
-        ...(choice.osmId && { osmId: choice.osmId }),
-      });
-    }
+    await sendJson(withUser("/api/visits/dismissed"), "PUT", { deviceId: tl.deviceId, start: span.start, end: span.end, dismissed: false });
+    tl.retries = 0;
     await loadDay({ keepView: true });
+    if (button.isConnected) button.disabled = false;
   } catch (error) {
     if (error.message === "signed-out") return;
-    picker.querySelectorAll("button, input, select").forEach((el) => (el.disabled = false));
-    picker.querySelector(".place-picker__error").hidden = false;
+    if (button.isConnected) button.disabled = false;
+    toast("Could not save, try again.");
   }
+}
+
+// Trips
+
+function closeEditors() {
+  tlBody.querySelectorAll(".place-picker, .mode-chooser").forEach((el) => (el.hidden = true));
+  tlBody.querySelectorAll(".seg--trip").forEach((el) => el.setAttribute("aria-expanded", "false"));
+}
+
+// A click on a trip opens its "This was:" chooser along with the focus on the map. True when it opened.
+function toggleChooser(index) {
+  const segment = tl.data?.segments[index];
+  const chooser = tlBody.querySelector(`.mode-chooser[data-chooser="${index}"]`);
+  if (!segment || !chooser) return false;
+  const open = chooser.hidden;
+  closeEditors();
+  if (!open) return false;
+  const chips = MODE_CHOICES.map((choice) => {
+    const current = choice !== "auto" && choice === segment.mode;
+    const label = choice === "auto" ? "Automatic" : MODES[choice].label;
+    const icon = choice === "auto" ? "#i-refresh" : MODES[choice].icon;
+    return `<button class="chip chip--icon" type="button" data-mode-choice="${choice}" aria-pressed="${current}" aria-label="This was ${label.toLowerCase()}">
+        <svg class="icon"><use href="${icon}" /></svg>${label}
+      </button>`;
+  }).join("");
+  chooser.innerHTML = `
+    <span class="mode-chooser__label">This was:</span>
+    <div class="mode-chooser__chips">${chips}</div>
+    <div class="place-picker__error" hidden>Could not save, try again.</div>`;
+  chooser.hidden = false;
+  tlBody.querySelector(`.seg[data-index="${index}"]`)?.setAttribute("aria-expanded", "true");
+  return true;
+}
+
+// "This was: Transit": the server keeps the correction, "auto" goes back to its own guess.
+function correctTrip(index, mode) {
+  const segment = tl.data?.segments[index];
+  const chooser = tlBody.querySelector(`.mode-chooser[data-chooser="${index}"]`);
+  if (!segment || !chooser) return;
+  saveFrom(chooser, () => sendJson(withUser("/api/trips/mode"), "PUT", { deviceId: tl.deviceId, start: segment.start, mode }));
 }
 
 function setDay(day) {
@@ -537,6 +692,8 @@ function setTimelineMode(on) {
 
 tlButton.addEventListener("click", () => setTimelineMode(!tl.on));
 tlClose.addEventListener("click", () => setTimelineMode(false));
+// The days may have grown too, so both are fetched again.
+tlReload.addEventListener("click", () => loadDays());
 
 tlAccount.addEventListener("change", async () => {
   tl.userId = Number(tlAccount.value);
@@ -555,13 +712,29 @@ tlPrev.addEventListener("click", () => tlPrev.dataset.day && setDay(tlPrev.datas
 tlNext.addEventListener("click", () => tlNext.dataset.day && setDay(tlNext.dataset.day));
 
 tlBody.addEventListener("click", (event) => {
+  if (event.target.closest("[data-retry]")) return loadDay();
+  const restore = event.target.closest("[data-restore]");
+  if (restore) {
+    const span = tl.data?.dismissed?.[Number(restore.dataset.restore)];
+    if (span) restoreStop(span, restore);
+    return;
+  }
   const edit = event.target.closest(".seg__edit");
   if (edit) return openPicker(Number(edit.dataset.edit));
+  const chooser = event.target.closest(".mode-chooser");
+  if (chooser) {
+    const choice = event.target.closest("[data-mode-choice]");
+    if (choice) correctTrip(Number(chooser.dataset.chooser), choice.dataset.modeChoice);
+    return;
+  }
   const picker = event.target.closest(".place-picker");
   if (picker) {
     const index = Number(picker.dataset.picker);
     const pick = event.target.closest("[data-choice]");
     if (pick) savePlace(index, JSON.parse(picker.dataset.choices ?? "[]")[Number(pick.dataset.choice)]);
+    const tag = event.target.closest("[data-tag]");
+    if (tag) savePlace(index, { kind: tag.dataset.tag, source: "tag" });
+    if (event.target.closest("[data-dismiss]")) dismissStop(index);
     if (event.target.closest("[data-confirm]")) {
       const { name, kind, osmId } = tl.data.segments[index].place;
       savePlace(index, { name, kind, osmId, source: "osm" });
@@ -569,7 +742,10 @@ tlBody.addEventListener("click", (event) => {
     return;
   }
   const seg = event.target.closest(".seg");
-  if (seg) focusSegment(Number(seg.dataset.index));
+  if (!seg) return;
+  const index = Number(seg.dataset.index);
+  if (seg.classList.contains("seg--trip")) focusSegment(index, { fold: !toggleChooser(index) });
+  else focusSegment(index);
 });
 
 tlBody.addEventListener("submit", (event) => {
@@ -578,7 +754,8 @@ tlBody.addEventListener("submit", (event) => {
   event.preventDefault();
   const name = form.elements.name.value.trim();
   if (!name) return;
-  savePlace(Number(form.closest(".place-picker").dataset.picker), { name, kind: form.elements.kind.value, source: "typed" });
+  const picker = form.closest(".place-picker");
+  savePlace(Number(picker.dataset.picker), { name, kind: picker.dataset.kind || "place", source: "typed" });
 });
 
 // On a phone a tap on the head folds the sheet or brings the list back.

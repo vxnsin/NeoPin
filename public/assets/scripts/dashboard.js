@@ -139,9 +139,12 @@ function setStatus(state) {
 function updateSummary() {
   const state = statusEl.dataset.state;
   const online = devices.filter((d) => d.status === "online").length;
+  const people = new Set(devices.map((d) => d.userId)).size;
+  // "2 people · 3 of 4 devices online", the same line the app shows.
+  const count = `${people} ${people === 1 ? "person" : "people"} · ${online} of ${devices.length} ${devices.length === 1 ? "device" : "devices"} online`;
   if (state === "connecting") summaryEl.textContent = "Connecting…";
   else if (state === "offline") summaryEl.textContent = "Reconnecting…";
-  else summaryEl.textContent = devices.length === 0 ? "Connected · no devices yet" : `${online} of ${devices.length} connected`;
+  else summaryEl.textContent = devices.length === 0 ? "Connected · nobody yet" : count;
 }
 
 function toast(text) {

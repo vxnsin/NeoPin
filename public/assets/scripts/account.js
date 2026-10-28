@@ -28,6 +28,9 @@ function renderAccount() {
   accountButton.setAttribute("aria-label", `Account: ${name}`);
   avatarRemove.hidden = !me.avatarUrl;
   document.getElementById("openAccounts").hidden = !me.isAdmin;
+  // Older servers cannot hide anyone and send no hiddenUntil, the entry stays away there.
+  document.getElementById("openHide").hidden = me.hiddenUntil === undefined;
+  document.getElementById("hideState").hidden = !(me.hiddenUntil != null && me.hiddenUntil > Date.now());
   document.getElementById("pwBanner").hidden = !me.mustChangePassword;
   accountWrap.hidden = false;
 }
@@ -54,7 +57,11 @@ async function renderAbout() {
 
 function setMenu(open) {
   accountMenu.hidden = !open;
-  if (open) renderAbout();
+  // A short hiding ends on its own, so the menu checks it again whenever it opens.
+  if (open) {
+    renderAccount();
+    renderAbout();
+  }
   accountButton.setAttribute("aria-expanded", String(open));
 }
 
