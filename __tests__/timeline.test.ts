@@ -10,8 +10,10 @@ import {
   formatClock,
   formatDistance,
   formatDuration,
+  routeChange,
   routeSegments,
   shiftDay,
+  stillPending,
   transitRow,
   tripColor,
   tripIcon,
@@ -66,6 +68,29 @@ const trip = (path: [number, number][]): Segment => ({
   distanceM: 5,
   mode: "cycling",
   path,
+});
+
+test("the day is asked for again while place names or smoother paths are still coming", () => {
+  expect(stillPending({ placesPending: true })).toBe(true);
+  expect(stillPending({ pathsPending: true })).toBe(true);
+  expect(stillPending({ placesPending: false, pathsPending: false })).toBe(false);
+  expect(stillPending({})).toBe(false);
+  expect(stillPending(null)).toBe(false);
+});
+
+test("a refresh that only smoothed the lines swaps them in place, anything else redraws the day", () => {
+  const before = routeSegments([visit(1), trip([[1, 2], [1.5, 2.5], [3, 4]]), visit(3)]);
+  expect(routeChange(before, routeSegments([visit(1), trip([[1, 2], [1.5, 2.5], [3, 4]]), visit(3)]))).toBe("none");
+  // Same stops, a smoother line between them.
+  const smoothed = routeSegments([visit(1), trip([[1, 2], [1.2, 2.1], [1.6, 2.7], [3, 4]]), visit(3)]);
+  expect(routeChange(before, smoothed)).toBe("paths");
+  // A stop moved, or a segment came or went: the day is drawn anew.
+  expect(routeChange(before, routeSegments([visit(1), trip([[1, 2], [3, 4]]), visit(5)]))).toBe("full");
+  // Same stops, but the trip is now another mode in another colour: the stop dots follow only on a redraw.
+  const recoloured = before.map((s) => (s.type === "trip" ? { ...s, mode: "driving" as const, color: "#123456" } : s));
+  expect(routeChange(before, recoloured)).toBe("full");
+  expect(routeChange(before, routeSegments([visit(1)]))).toBe("full");
+  expect(routeChange([], before)).toBe("full");
 });
 
 test("stops are numbered in order and trips keep their index", () => {

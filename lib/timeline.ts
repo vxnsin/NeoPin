@@ -1,4 +1,4 @@
-import type { PlaceKind, Segment, TransitKind, Trip, TripMode, TripModeChoice, Visit } from "@/lib/api";
+import type { PlaceKind, Segment, Timeline, TransitKind, Trip, TripMode, TripModeChoice, Visit } from "@/lib/api";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -215,6 +215,25 @@ export type RouteSegment =
 
 // A stretch without fixes is drawn thin, dashed and grey.
 export const GAP_COLOR = "#94a3b8";
+
+// The server is still filling in place names or smoothing paths: asking again shortly has them.
+export function stillPending(timeline: Pick<Timeline, "placesPending" | "pathsPending"> | null | undefined): boolean {
+  return Boolean(timeline?.placesPending || timeline?.pathsPending);
+}
+
+// What a fresh copy of the same day changes on the map. "paths" when only the lines moved (the
+// server smoothed them): those are swapped in place, the stops, the selection and the view stay.
+// "full" when anything else changed, then the day is drawn anew. A new mode or colour counts as
+// more than the line: the transit stop dots carry the colour and are only drawn with the day.
+export function routeChange(before: RouteSegment[], after: RouteSegment[]): "none" | "paths" | "full" {
+  if (JSON.stringify(before) === JSON.stringify(after)) return "none";
+  if (before.length !== after.length) return "full";
+  const frame = (s: RouteSegment) =>
+    s.type === "visit"
+      ? JSON.stringify(s)
+      : JSON.stringify({ type: s.type, index: s.index, mode: s.mode, color: s.color, stops: s.stops ?? null, gap: s.gap ?? false });
+  return before.every((s, i) => frame(s) === frame(after[i])) ? "paths" : "full";
+}
 
 export function routeSegments(segments: Segment[]): RouteSegment[] {
   const numbers = visitNumbers(segments);

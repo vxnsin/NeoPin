@@ -17,6 +17,7 @@ const BAR_HEIGHT = 96;
 // { type: "devices", devices }, { type: "self", latitude, longitude, center },
 // { type: "focus", key } and { type: "theme", dark }. The timeline adds
 // { type: "route", segments, bottom } to draw a day (trip lines, numbered stops, transit stops),
+// { type: "routePaths", segments } to swap in smoother lines for the same day without moving the map,
 // { type: "routeBottom", bottom } when the panel over the map changes its height,
 // { type: "routeFocus", index } to zoom to one segment (null for the whole day)
 // and { type: "routeClear" } to go back to the live pins. The map answers a tap on
@@ -558,6 +559,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
           if (d && d.position) focusDevice(d);
         }
         else if (data.type === "route") showRoute(data.segments, data.bottom);
+        // Same stops and selection, only the lines changed: no new markers, no new view.
+        else if (data.type === "routePaths" && route) { route.segments = data.segments || route.segments; drawLines(); }
         else if (data.type === "routeFocus" && route) {
           setActive(data.index === null ? null : data.index);
           fitRoute(data.index);
