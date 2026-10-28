@@ -34,6 +34,7 @@ import HideSection from "@/components/HideSection";
 import FindSheet from "@/components/FindSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
 import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby";
+import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
@@ -271,6 +272,24 @@ export default function MapScreen() {
     };
   }, [findActive, emit]);
 
+  // The lock screen shows the search too. On Android that is an ongoing notification with the
+  // arrow, the metres and a Stop button, which ends the search like the one on the sheet.
+  const live = useRef(new LiveUpdater((content) => void showLive(content)));
+  const stopFindRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (!findActive || !liveAvailable()) return;
+    const off = onLiveStop(() => stopFindRef.current());
+    return () => {
+      off();
+      hideLive();
+      live.current.reset();
+    };
+  }, [findActive]);
+  useEffect(() => {
+    if (find?.phase !== "active" || !liveAvailable()) return;
+    live.current.update(liveContent(find, myFix, heading, nearby, Date.now()));
+  }, [find, myFix, heading, nearby]);
+
   // Swiping the sheet away is a no to a question, or a stop.
   useEffect(() => {
     if (sheet !== null || !find || find.phase === "ended") return;
@@ -304,6 +323,7 @@ export default function MapScreen() {
     setMyFix(null);
     closeSheet();
   };
+  stopFindRef.current = stopFind;
 
   const answerFind = (accept: boolean) => {
     if (find?.phase !== "asked") return;

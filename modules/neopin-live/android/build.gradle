@@ -1,0 +1,15 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'de.vensin.neopin'
+version = '1.0.0'
+
+android {
+  namespace "de.vensin.neopin.live"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
