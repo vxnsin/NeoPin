@@ -61,6 +61,8 @@ import {
 } from "./groups.js";
 import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { createFinder } from "./find.js";
+import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
+import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToken } from "./push.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
@@ -329,6 +331,53 @@ export function createApp({ gracefulShutdown = true } = {}) {
 
   const sendTo = (userId, deviceId, payload) => send(getDevice(userId, deviceId)?.socket, payload);
 
+  // Who waits for a device to report a position, by "userId:deviceId".
+  const positionWaiters = new Map();
+  const reported = (userId, deviceId) => {
+    const key = `${userId}:${deviceId}`;
+    for (const resolve of positionWaiters.get(key) ?? []) resolve(true);
+    positionWaiters.delete(key);
+  };
+  // `done` resolves true when the device reports within the time, false when the time runs out
+  // or `cancel` is called. Register before waking the device, so a fast answer is not missed.
+  function waitForPosition(userId, deviceId, ms) {
+    const key = `${userId}:${deviceId}`;
+    let finish;
+    const done = new Promise((resolve) => {
+      const waiters = positionWaiters.get(key) ?? new Set();
+      positionWaiters.set(key, waiters);
+      finish = (value) => {
+        clearTimeout(timer);
+        waiters.delete(finish);
+        if (waiters.size === 0 && positionWaiters.get(key) === waiters) positionWaiters.delete(key);
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(false), ms);
+      waiters.add(finish);
+    });
+    return { done, cancel: () => finish(false) };
+  }
+
+  // The device a viewer may ask, that has no open socket, a push token, and is not hidden.
+  function wakeTarget(viewer, deviceId, userId) {
+    if (!fcmEnabled()) return null;
+    const candidates = userId !== undefined ? [userId] : [viewer.id, ...listUsers().map((u) => u.id)];
+    for (const id of candidates) {
+      const owner = getUser(id);
+      if (!owner || !canSee(viewer, id) || (id !== viewer.id && isHidden(owner))) continue;
+      if (!linkedDevices(id).some((d) => d.deviceId === deviceId)) continue;
+      const token = pushTokenOf(id, deviceId);
+      if (token) return token;
+    }
+    return null;
+  }
+
+  // Tells every device of an account that has a push token, never throws.
+  function pushToAccount(userId, message) {
+    if (!fcmEnabled()) return;
+    for (const target of pushTokensOf(userId)) sendNotification(target, message).catch(() => {});
+  }
+
   // Whoever is still in a find session hears how it ended. While it was pending, every device
   // of the asked account had the question open.
   const finder = createFinder({
@@ -540,10 +589,16 @@ export function createApp({ gracefulShutdown = true } = {}) {
     "/api/status",
     {
       response: {
-        200: t.object({ version: t.string(), commit: t.string().nullable(), builtAt: t.string().nullable() }),
+        200: t.object({
+          version: t.string(),
+          commit: t.string().nullable(),
+          builtAt: t.string().nullable(),
+          // Whether push notifications are set up, so clients can hide what needs them.
+          push: t.boolean(),
+        }),
       },
     },
-    () => ({ version: config.version, commit: config.commit, builtAt: config.builtAt })
+    () => ({ version: config.version, commit: config.commit, builtAt: config.builtAt, push: fcmEnabled() })
   );
 
   // Everything that takes a password shares one limit per IP.
@@ -657,6 +712,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         (ctx) => {
           const { user } = currentUser(ctx);
           if (!unlinkDevice(user.id, ctx.params.deviceId)) throw problem(404, "unknown-device", "No such linked device");
+          deletePushToken(user.id, ctx.params.deviceId);
           getDevice(user.id, ctx.params.deviceId)?.socket?.close(CLOSE_POLICY, "Device removed");
           removeDevice(user.id, ctx.params.deviceId);
           broadcastDevices();
@@ -890,6 +946,11 @@ export function createApp({ gracefulShutdown = true } = {}) {
           try {
             const target = invite(group.id, user.id, ctx.body.username);
             notifyGroups([user.id, group.owner_id, target.id]);
+            pushToAccount(target.id, {
+              title: "Group invitation",
+              body: `${user.display_name} invited you to ${group.name}`,
+              data: { type: "groupInvite", groupId: group.id },
+            });
             return reply(201, { message: target.display_name + " was invited" });
           } catch (error) {
             if (error.code === "notfound") throw problem(404, "unknown-user", error.message);
@@ -960,6 +1021,26 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
+      // The FCM registration token of the app, so the server can wake the phone and notify it.
+      api.put(
+        "/push-token",
+        {
+          body: t.object({ token: t.string().min(1).max(4096), platform: t.enum(PUSH_PLATFORMS) }),
+          response: { 204: t.empty(), 401: t.problem(), 429: t.problem() },
+        },
+        (ctx) => {
+          const { user, deviceId } = deviceAuth(ctx);
+          setPushToken(user.id, deviceId, ctx.body.token, ctx.body.platform);
+          return reply(204);
+        }
+      );
+
+      api.delete("/push-token", { response: { 204: t.empty(), 401: t.problem(), 429: t.problem() } }, (ctx) => {
+        const { user, deviceId } = deviceAuth(ctx);
+        deletePushToken(user.id, deviceId);
+        return reply(204);
+      });
+
       api.get("/getData", { response: { 200: t.array(Device), 401: t.problem() } }, (ctx) =>
         serializeDevices(currentUser(ctx).user)
       );
@@ -973,14 +1054,31 @@ export function createApp({ gracefulShutdown = true } = {}) {
             202: Message,
             401: t.problem(),
             404: t.problem(),
+            502: t.problem(),
           },
         },
         async (ctx) => {
           const { user } = currentUser(ctx);
           const { deviceId, userId } = ctx.body ?? {};
           const reachable = onlineDevices().filter((d) => canSee(user, d.userId));
-          if (reachable.length === 0) return reply(202, { message: "No devices connected" });
           const only = deviceId ? { deviceId, userId } : null;
+          const connected = only && reachable.some((d) => d.id === deviceId && (userId === undefined || d.userId === userId));
+          // No socket: wake the phone with a push and wait for its background task to report.
+          const wake = only && !connected ? wakeTarget(user, deviceId, userId) : null;
+          if (wake) {
+            const answer = waitForPosition(wake.userId, deviceId, config.pushWaitMs);
+            const outcome = await sendWakeUp(wake, { from: user.display_name });
+            if (outcome === "failed") {
+              answer.cancel();
+              throw problem(502, "push-failed", `Device ${deviceId} could not be woken, the push service refused the request`);
+            }
+            if (await answer.done) {
+              broadcastDevices();
+              return { message: `Location request sent to ${deviceId}`, devices: serializeDevices(user) };
+            }
+            return reply(202, { message: "Location requested, the device has not answered yet" });
+          }
+          if (reachable.length === 0) return reply(202, { message: "No devices connected" });
           if (only && !reachable.some((d) => d.id === deviceId && (userId === undefined || d.userId === userId))) {
             throw problem(404, "device-not-connected", `Device ${deviceId} is not connected`);
           }
@@ -1320,6 +1418,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           case "updatePosition":
             if (role !== "device") return;
             updatePosition(account, deviceId, msg.latitude, msg.longitude);
+            reported(account, deviceId);
             if (msg.battery) updateBattery(account, deviceId, msg.battery.level, msg.battery.charging);
             recordPosition(account, deviceId, msg.latitude, msg.longitude, fixTime(msg.recordedAt), fixExtras(msg));
             broadcastDevices();
