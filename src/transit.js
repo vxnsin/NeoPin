@@ -5,7 +5,7 @@ import { pipeline } from "node:stream/promises";
 import chalk from "chalk";
 import { config } from "./config.js";
 import { getDb } from "./db.js";
-import { gtfsSeconds, parseCsvLine, readTable, zipEntries } from "./gtfs.js";
+import { csvRecords, gtfsSeconds, parseCsvLine, readTable, zipEntries } from "./gtfs.js";
 
 // Bus, tram and train lines for the timeline come from GTFS timetables. Nobody keeps the
 // timetables of the whole world: the server holds the Mobility Database catalog (which
@@ -111,7 +111,7 @@ const hex = (value) => (/^[0-9a-f]{6}$/i.test(value ?? "") ? `#${value.toLowerCa
 
 // The catalog rows that can be used: GTFS schedules, free to download, with a sane rectangle.
 export function parseCatalog(csv) {
-  const lines = csv.split(/\r?\n/).filter((line) => line.trim() !== "");
+  const lines = csvRecords(csv).filter((line) => line.trim() !== "");
   if (lines.length === 0) return [];
   const header = parseCsvLine(lines[0]).map((h) => h.trim());
   const col = (name) => header.indexOf(name);
@@ -298,11 +298,12 @@ export async function readSlice(file, bounds) {
   };
 }
 
-// Writes a slice under its feed row, in batches so recording positions never waits long.
-// Readers may see a feed half filled for a moment, which costs at most one missed match.
-function storeSlice(feedId, slice) {
+// Writes a slice under its feed row in batches, giving the event loop a turn between them,
+// so recording positions and the sockets never wait long. Readers may see a feed half
+// filled for a moment, which costs at most one missed match.
+async function storeSlice(feedId, slice) {
   const db = getDb();
-  const batches = (statement, rows, bind) => {
+  const batches = async (statement, rows, bind) => {
     for (let i = 0; i < rows.length; i += BATCH) {
       db.exec("BEGIN");
       try {
@@ -312,32 +313,33 @@ function storeSlice(feedId, slice) {
         db.exec("ROLLBACK");
         throw error;
       }
+      await new Promise((resolve) => setImmediate(resolve));
     }
   };
   for (const table of ["transit_stop_times", "transit_shapes", "transit_trips", "transit_routes", "transit_stops"]) {
     db.prepare(`DELETE FROM ${table} WHERE feed_id = ?`).run(feedId);
   }
-  batches(db.prepare("INSERT INTO transit_stops (feed_id, id, name, lat, lon) VALUES (?, ?, ?, ?, ?)"), slice.stops, (s) => [feedId, s.id, s.name, s.lat, s.lon]);
-  batches(
+  await batches(db.prepare("INSERT INTO transit_stops (feed_id, id, name, lat, lon) VALUES (?, ?, ?, ?, ?)"), slice.stops, (s) => [feedId, s.id, s.name, s.lat, s.lon]);
+  await batches(
     db.prepare(
       "INSERT INTO transit_routes (feed_id, id, short_name, long_name, type, color, text_color, agency, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     ),
     slice.routes,
     (r) => [feedId, r.id, r.shortName, r.longName, r.type, r.color, r.textColor, r.agency, r.timezone]
   );
-  batches(db.prepare("INSERT INTO transit_trips (feed_id, id, route_id, headsign, shape_id) VALUES (?, ?, ?, ?, ?)"), slice.trips, (t) => [
+  await batches(db.prepare("INSERT INTO transit_trips (feed_id, id, route_id, headsign, shape_id) VALUES (?, ?, ?, ?, ?)"), slice.trips, (t) => [
     feedId,
     t.id,
     t.routeId,
     t.headsign,
     t.shapeId,
   ]);
-  batches(
+  await batches(
     db.prepare("INSERT OR REPLACE INTO transit_stop_times (feed_id, trip_id, stop_id, seq, departure) VALUES (?, ?, ?, ?, ?)"),
     slice.stopTimes,
     (st) => [feedId, ...st]
   );
-  batches(db.prepare("INSERT OR REPLACE INTO transit_shapes (feed_id, id, seq, lat, lon) VALUES (?, ?, ?, ?, ?)"), slice.shapes, (s) => [feedId, ...s]);
+  await batches(db.prepare("INSERT OR REPLACE INTO transit_shapes (feed_id, id, seq, lat, lon) VALUES (?, ?, ?, ?, ?)"), slice.shapes, (s) => [feedId, ...s]);
 }
 
 // ---- refresh ----
@@ -395,7 +397,7 @@ async function runRefresh({ now = Date.now(), force = false, preferred = PREFERR
         const file = await ensureFeedFile(feed, force && !downloaded.has(feed.source));
         downloaded.add(feed.source);
         const slice = await readSlice(file, cellBounds(cell, MARGIN_KM));
-        storeSlice(row.id, slice);
+        await storeSlice(row.id, slice);
         db.prepare("UPDATE transit_feeds SET updated_at = ?, stops = ?, routes = ?, trips = ? WHERE id = ?").run(
           now,
           slice.stops.length,

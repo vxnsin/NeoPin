@@ -96,6 +96,8 @@ test("the catalog is reduced to free GTFS feeds with a sane rectangle", () => {
       "5,gtfs,Moved,Redirected,https://x/moved.zip,0,,,DE,49.6,49.9,9.8,10.1,,1",
       "6,gtfs,World,Everything,https://x/world.zip,0,,,DE,-89.9,69.5,-170,179.9,,",
       "7,gtfs,Only copy,,,0,https://latest/7.zip,,FR,48.5,49.1,2,2.6,active,",
+      // The real catalog has a provider list that spans two lines inside its quotes.
+      '8,gtfs,"Bus A,\nBus B",Two lines,https://x/two.zip,0,,,TW,24,25,120,122,,',
     ].join("\n")
   );
   assert.deepEqual(
@@ -103,6 +105,7 @@ test("the catalog is reduced to free GTFS feeds with a sane rectangle", () => {
     [
       ["mdb:1", "Würzburg", "https://x/wvv.zip", "https://latest/1.zip", "CC BY 4.0", "DE"],
       ["mdb:7", "Only copy", "https://latest/7.zip", null, null, "FR"],
+      ["mdb:8", "Two lines", "https://x/two.zip", null, null, "TW"],
     ]
   );
 });

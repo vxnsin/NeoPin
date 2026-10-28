@@ -156,6 +156,23 @@ export function parseCsvLine(line) {
   return fields;
 }
 
+// Splits CSV text into records: a line break inside quotes stays part of the field.
+export function csvRecords(text) {
+  const records = [];
+  let at = 0;
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') quoted = !quoted;
+    else if (ch === "\n" && !quoted) {
+      records.push(text.slice(at, i).replace(/\r$/, ""));
+      at = i + 1;
+    }
+  }
+  if (at < text.length) records.push(text.slice(at).replace(/\r$/, ""));
+  return records;
+}
+
 // Streams one table of the feed. `setup` gets a column lookup (name to index, -1 when the
 // table lacks it) and returns the row handler, which gets the fields of every row. Resolves
 // to false when the feed has no such table (shapes.txt is optional, for example).
