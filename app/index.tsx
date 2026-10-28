@@ -1,15 +1,16 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import useThemeManager from "@/hooks/useThemeManager";
 import { useWebSocketContext } from "@/context/WebSocket";
-import Intro from "@/components/Intro";
-import PulseLogo from "@/components/PulseLogo";
+import StartScreen from "@/components/StartScreen";
 import usePermissions from "@/hooks/usePermission";
 import { readCredentials, socket } from "@/lib/socket";
 
 const INTRO_KEY = "introSeen";
+// The first start lingers on the name and the tagline before it goes on.
+const INTRO_MS = 2200;
 
 export default function Index() {
   const theme = useThemeManager();
@@ -17,6 +18,7 @@ export default function Index() {
   const { connect } = useWebSocketContext();
   // null while we look up whether this is the first start.
   const [showIntro, setShowIntro] = useState<boolean | null>(null);
+  const [introDone, setIntroDone] = useState(false);
 
   usePermissions();
 
@@ -25,6 +27,12 @@ export default function Index() {
       .then((seen) => setShowIntro(!seen))
       .catch(() => setShowIntro(false));
   }, []);
+
+  useEffect(() => {
+    if (!showIntro) return;
+    const timer = setTimeout(() => setIntroDone(true), INTRO_MS);
+    return () => clearTimeout(timer);
+  }, [showIntro]);
 
   const finishIntro = useCallback(() => {
     AsyncStorage.setItem(INTRO_KEY, "1").catch(() => {});
@@ -63,17 +71,20 @@ export default function Index() {
     };
   }, [showIntro, connect, router]);
 
-  if (showIntro) return <Intro onDone={finishIntro} />;
-
+  // The same start screen in every case: the splash hands over to it without a jump. On the
+  // first start it carries the tagline and fades out towards the login; otherwise it stays
+  // until the map screen takes over with the logo at rest.
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
-      <PulseLogo size={84} />
-      <Text style={[styles.text, { color: theme.colors.muted }]}>Connecting to your server…</Text>
+      {showIntro ? (
+        <StartScreen ready={introDone} leave="fade" tagline="Your devices. Your server." onHidden={finishIntro} />
+      ) : (
+        <StartScreen ready={false} />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20 },
-  text: { marginTop: -24, fontSize: 15, fontWeight: "500" },
+  container: { flex: 1 },
 });

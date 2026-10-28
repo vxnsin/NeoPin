@@ -26,7 +26,7 @@ import useThemeManager from "@/hooks/useThemeManager";
 import { useAvatars } from "@/hooks/useAvatars";
 import { useWebSocketContext } from "@/context/WebSocket";
 import Avatar from "@/components/Avatar";
-import PulseLogo from "@/components/PulseLogo";
+import StartScreen from "@/components/StartScreen";
 import TimelinePanel from "@/components/TimelinePanel";
 import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
@@ -465,11 +465,10 @@ export default function MapScreen() {
     }
   }, [webViewLoaded, isConnected, emit]);
 
+  // The start screen covers the map until it is drawn, then docks its logo into it and leaves.
   const showLoader = !webViewLoaded || !minLoadingTimeFinished;
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: showLoader ? 1 : 0, duration: 500, useNativeDriver: true }).start();
-  }, [showLoader, fadeAnim]);
+  const [startGone, setStartGone] = useState(false);
+  const hideStart = useCallback(() => setStartGone(true), []);
 
   const refresh = () => emit({ type: "pingDevices" });
 
@@ -699,9 +698,7 @@ export default function MapScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: c.surface }]}>
-      <Animated.View style={[styles.loader, { backgroundColor: c.surface, opacity: fadeAnim }]} pointerEvents={showLoader ? "auto" : "none"}>
-        <PulseLogo size={72} />
-      </Animated.View>
+      {startGone ? null : <StartScreen ready={!showLoader} onHidden={hideStart} />}
 
       <WebView
         ref={webviewRef}
@@ -1019,14 +1016,6 @@ const shadow = {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loader: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
   webview: { flex: 1 },
   bar: {
     position: "absolute",

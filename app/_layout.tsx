@@ -75,14 +75,12 @@ export default function RootLayout() {
   const theme = useThemeManager();
   const pathname = usePathname();
 
+  // The start screen hides the splash the moment it is drawn, with the logo in the same place.
+  // The timer is only a safety net for a screen that never gets there.
   useEffect(() => {
-    async function prepare() {
-      await SplashScreen.preventAutoHideAsync();
-      setTimeout(() => {
-        SplashScreen.hideAsync();
-      }, 2000);
-    }
-    prepare();
+    SplashScreen.preventAutoHideAsync().catch(() => {});
+    const timer = setTimeout(() => SplashScreen.hideAsync().catch(() => {}), 5000);
+    return () => clearTimeout(timer);
   }, []);
 
   return (
