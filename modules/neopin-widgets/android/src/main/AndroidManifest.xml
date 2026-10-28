@@ -1,0 +1,37 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- People: everybody from the app, nearest first. -->
+    <receiver android:name="de.vensin.neopin.widgets.GroupWidget" android:exported="true" android:label="People">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_group_info" />
+    </receiver>
+
+    <!-- Me: sharing or invisible, with the button to switch. -->
+    <receiver android:name="de.vensin.neopin.widgets.MeWidget" android:exported="true" android:label="Me">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_me_info" />
+    </receiver>
+
+    <!-- One person, picked when the widget is added, with the Find button. -->
+    <receiver android:name="de.vensin.neopin.widgets.PersonWidget" android:exported="true" android:label="Person">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_person_info" />
+    </receiver>
+
+    <activity
+      android:name="de.vensin.neopin.widgets.PersonConfigActivity"
+      android:exported="true"
+      android:label="Pick a person"
+      android:theme="@android:style/Theme.DeviceDefault.DayNight">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

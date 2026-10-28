@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="12dp"
+    android:paddingBottom="10dp">
+
+  <TextView
+      android:id="@+id/title"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:textSize="11sp"
+      android:textStyle="bold"
+      android:textAllCaps="true"
+      android:letterSpacing="0.04"
+      android:textColor="#98A2B3" />
+
+  <LinearLayout
+      android:id="@+id/rows"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical"
+      android:layout_marginTop="2dp" />
+
+  <TextView
+      android:id="@+id/nobody"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="10dp"
+      android:text="Nobody yet. Invite people in the app."
+      android:textSize="13sp"
+      android:textColor="#98A2B3"
+      android:visibility="gone" />
+</LinearLayout>

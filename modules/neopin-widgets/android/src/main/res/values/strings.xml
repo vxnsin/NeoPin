@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="widget_group_description">Everybody you share with, nearest first.</string>
+  <string name="widget_me_description">Whether you are sharing, and a button to go invisible for an hour.</string>
+  <string name="widget_person_description">One person, how far away, and a button to find them.</string>
+</resources>

@@ -12,6 +12,12 @@ export default {
     newArchEnabled: true,
     ios: {
       bundleIdentifier: "de.vensin.neopin",
+      // The widgets read the app's snapshot from this app group. The team id is needed to sign
+      // the widget extension; Xcode shows it under Signing & Capabilities.
+      appleTeamId: process.env.APPLE_TEAM_ID,
+      entitlements: {
+        "com.apple.security.application-groups": ["group.de.vensin.neopin"],
+      },
       supportsTablet: true,
       infoPlist: {
         NSAppTransportSecurity: {
@@ -55,6 +61,7 @@ export default {
     },
     plugins: [
       "expo-router",
+      "@bacons/apple-targets",
       "expo-font",
       "expo-status-bar",
       [
