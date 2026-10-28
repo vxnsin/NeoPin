@@ -11,15 +11,18 @@ import {
   fetchTimelineDays,
   fetchUserDevices,
   fetchUsers,
+  setTripMode,
   type AccountSummary,
   type Timeline,
+  type Trip,
+  type TripModeChoice,
 } from "@/lib/api";
 import type { StoredCredentials } from "@/lib/credentials";
 import { DEVICE_ICONS, freshness, typeOf, type Device } from "@/lib/devices";
+import { getReportingPreset, onSettingsChange } from "@/lib/settings";
 import { clampDrag, restAfterDrag, type Snaps } from "@/lib/sheetSnap";
 import {
-  GAP_COLOR,
-  MODE_COLORS,
+  MODE_CHOICES,
   MODE_ICONS,
   MODE_LABELS,
   PLACE_ICONS,
@@ -32,6 +35,10 @@ import {
   routeSegments,
   shiftDay,
   shortDayLabel,
+  transitRow,
+  tripColor,
+  tripIcon,
+  tripTitle,
   visitKind,
   visitNumbers,
   visitTitle,
@@ -92,6 +99,12 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const [reloads, setReloads] = useState(0);
   // The visit whose place is being picked.
   const [picking, setPicking] = useState<number | null>(null);
+  // The trip whose mode is being corrected, and the choice on its way to the server.
+  const [correcting, setCorrecting] = useState<number | null>(null);
+  const [modeSaving, setModeSaving] = useState<TripModeChoice | null>(null);
+  const [modeError, setModeError] = useState("");
+  // Lines are only matched with enough fixes on the way, which the battery preset does not send.
+  const [preset, setPreset] = useState(getReportingPreset());
   const run = useRef(0);
   const pendingTries = useRef(0);
   // Only the newest place refresh may land, an older one would undo a saved place.
@@ -141,6 +154,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
       .catch(() => setUsers([]));
   }, [creds, admin]);
 
+  useEffect(() => onSettingsChange((s) => setPreset(s.reporting)), []);
+
   const pickAccount = (user: AccountSummary) => {
     setDaysOpen(false);
     if (user.id === creds.user.id) {
@@ -185,6 +200,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     setError("");
     setSelected(null);
     setPicking(null);
+    setCorrecting(null);
+    setModeError("");
     pendingTries.current = 0;
     fetchTimeline(creds, deviceId, day, queryUser)
       .then((result) => {
@@ -235,6 +252,19 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     [post]
   );
 
+  // "This was: Transit": the server keeps the correction, the day is fetched again so the row and the map follow.
+  const correct = (trip: Trip, mode: TripModeChoice) => {
+    setModeSaving(mode);
+    setModeError("");
+    setTripMode(creds, deviceId, trip.start, mode)
+      .then(() => {
+        setCorrecting(null);
+        setReloads((n) => n + 1);
+      })
+      .catch((e: any) => setModeError(e?.message || "Could not save, try again."))
+      .finally(() => setModeSaving(null));
+  };
+
   useEffect(() => {
     if (!mapTap || !timeline) return;
     setSelected(mapTap.index);
@@ -278,6 +308,10 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           </View>
         </View>
       </GestureDetector>
+
+      {preset === "battery" && deviceId === creds.deviceId && (
+        <Text style={[styles.hint, { color: c.muted }]}>Bus and train lines need Balanced or Precise position updates.</Text>
+      )}
 
       {admin && users.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
@@ -416,18 +450,23 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
             const last = index === segments.length - 1;
             const time = `${formatClock(segment.start)} – ${formatClock(segment.end)}`;
             const kind = segment.type === "visit" ? visitKind(segment) : null;
+            const ride = segment.type === "trip" ? transitRow(segment) : null;
             return (
               <React.Fragment key={`${segment.type}-${segment.start}`}>
                 <Pressable
                   onLayout={(event) => {
                     rows.current[index] = event.nativeEvent.layout.y;
                   }}
-                  onPress={() => select(active ? null : index)}
+                  onPress={() => {
+                    select(active ? null : index);
+                    // A trip opens its "This was:" chooser along with the focus on the map.
+                    if (segment.type === "trip") setCorrecting(active ? null : index);
+                  }}
                   style={styles.row}
                   accessibilityLabel={
                     segment.type === "visit"
                       ? `${visitTitle(segment, numbers.get(index))}, ${time}, ${formatDuration(segment.durationMs)}`
-                      : `${segment.gap ? "No data" : MODE_LABELS[segment.mode]}, ${formatDistance(segment.distanceM)}, ${time}`
+                      : `${tripTitle(segment)}, ${formatDistance(segment.distanceM)}, ${time}`
                   }
                 >
                   <View style={styles.rail}>
@@ -437,12 +476,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                         <Text style={[styles.stopNumber, { color: active ? c.raised : c.onSecondary }]}>{numbers.get(index)}</Text>
                       </View>
                     ) : (
-                      <View style={[styles.modeDot, { backgroundColor: c.raised, borderColor: segment.gap ? GAP_COLOR : MODE_COLORS[segment.mode] }]}>
-                        <MaterialIcons
-                          name={segment.gap ? "more-horiz" : MODE_ICONS[segment.mode]}
-                          size={14}
-                          color={segment.gap ? GAP_COLOR : MODE_COLORS[segment.mode]}
-                        />
+                      <View style={[styles.modeDot, { backgroundColor: c.raised, borderColor: tripColor(segment) }]}>
+                        <MaterialIcons name={segment.gap ? "more-horiz" : tripIcon(segment)} size={14} color={tripColor(segment)} />
                       </View>
                     )}
                   </View>
@@ -476,10 +511,34 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                         </Pressable>
                       )}
                     </View>
+                  ) : ride ? (
+                    <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
+                      <View style={styles.rideLine}>
+                        {!!ride.badge && (
+                          <View
+                            style={[
+                              styles.badge,
+                              // Lines without colours of their own get a quiet badge on the panel's surface.
+                              { backgroundColor: ride.color ?? c.raised, borderColor: ride.color ?? c.subtle },
+                            ]}
+                          >
+                            <Text style={[styles.badgeText, { color: ride.textColor ?? c.primary }]} numberOfLines={1}>
+                              {ride.badge}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={[styles.tripTitle, styles.rideTitle, { color: c.primary }]} numberOfLines={1}>
+                          {ride.label} · {ride.stops}
+                        </Text>
+                      </View>
+                      <Text style={[styles.cardMeta, { color: c.muted }]}>
+                        {formatDuration(segment.durationMs)} · {time}
+                      </Text>
+                    </View>
                   ) : (
                     <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
                       <Text style={[styles.tripTitle, { color: c.primary }]}>
-                        {segment.gap ? "No data" : MODE_LABELS[segment.mode]} · {formatDistance(segment.distanceM)}
+                        {tripTitle(segment)} · {formatDistance(segment.distanceM)}
                       </Text>
                       <Text style={[styles.cardMeta, { color: c.muted }]}>
                         {formatDuration(segment.durationMs)} · {time}
@@ -487,6 +546,40 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                     </View>
                   )}
                 </Pressable>
+                {/* The correction is stored for the caller's own account, so only own devices get it. */}
+                {correcting === index && segment.type === "trip" && !viewingOther && (
+                  <View style={[styles.chooser, { backgroundColor: c.subtle }]}>
+                    <Text style={[styles.chooserLabel, { color: c.muted }]}>This was:</Text>
+                    <View style={styles.chooserChips}>
+                      {MODE_CHOICES.map((choice) => {
+                        const current = choice !== "auto" && choice === segment.mode;
+                        const label = choice === "auto" ? "Automatic" : MODE_LABELS[choice];
+                        return (
+                          <Pressable
+                            key={choice}
+                            style={[styles.modeChip, { backgroundColor: current ? c.primary : c.raised }]}
+                            disabled={modeSaving !== null}
+                            onPress={() => correct(segment, choice)}
+                            accessibilityLabel={`This was ${label.toLowerCase()}`}
+                            accessibilityState={{ selected: current }}
+                          >
+                            {modeSaving === choice ? (
+                              <ActivityIndicator size="small" color={current ? c.raised : c.primary} />
+                            ) : (
+                              <MaterialIcons
+                                name={choice === "auto" ? "autorenew" : MODE_ICONS[choice]}
+                                size={16}
+                                color={current ? c.raised : c.muted}
+                              />
+                            )}
+                            <Text style={[styles.modeChipText, { color: current ? c.raised : c.primary }]}>{label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    {!!modeError && <Text style={[styles.note, { color: c.secondary }]}>{modeError}</Text>}
+                  </View>
+                )}
                 {picking === index && segment.type === "visit" && (
                   <PlacePicker
                     creds={creds}
@@ -576,4 +669,14 @@ const styles = StyleSheet.create({
   cardMeta: { fontSize: 12.5, marginTop: 2 },
   tripRow: { flex: 1, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
   tripTitle: { fontSize: 14, fontWeight: "600" },
+  rideLine: { flexDirection: "row", alignItems: "center", gap: 8 },
+  rideTitle: { flex: 1 },
+  badge: { minWidth: 30, height: 22, paddingHorizontal: 7, borderRadius: 7, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  badgeText: { fontSize: 12.5, fontWeight: "800" },
+  hint: { fontSize: 12.5, marginTop: -4, marginBottom: 10 },
+  chooser: { marginLeft: 40, marginBottom: 8, padding: 10, borderRadius: 16, gap: 8 },
+  chooserLabel: { fontSize: 12.5, fontWeight: "600" },
+  chooserChips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  modeChip: { flexDirection: "row", alignItems: "center", gap: 6, height: 34, paddingHorizontal: 12, borderRadius: 17 },
+  modeChipText: { fontSize: 13, fontWeight: "600" },
 });

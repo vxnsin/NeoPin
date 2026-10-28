@@ -10,6 +10,12 @@ test("the inline map script is valid JavaScript in both themes", () => {
   }
 });
 
+test("a ride's stops are drawn as dots in the line's colour", () => {
+  const html = buildMapHtml(false, 0);
+  expect(html).toContain('dot.className = "tstop"');
+  expect(html).toContain("dot.style.background = s.color");
+});
+
 test("the online ring only animates opacity, which never repaints the map", () => {
   const html = buildMapHtml(true, 0);
   expect(html).toContain("@keyframes breathe { 0%, 100% { opacity: 0; } 45% { opacity: .85; } }");

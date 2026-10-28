@@ -1,4 +1,13 @@
-import { ApiError, deviceHeaders, fetchTimeline, fetchTimelineDays, loginRequest, normalizeServerUrl, pingDeviceRequest } from "../lib/api";
+import {
+  ApiError,
+  deviceHeaders,
+  fetchTimeline,
+  fetchTimelineDays,
+  loginRequest,
+  normalizeServerUrl,
+  pingDeviceRequest,
+  setTripMode,
+} from "../lib/api";
 
 const auth = { serverIp: "ws://10.0.0.2:3012", deviceId: "Luis’ iPhone", token: "t/k+1" };
 
@@ -90,6 +99,19 @@ test("asking a device for a position posts its id and tells whether it was reach
   expect(url).toBe("http://10.0.0.2:3012/api/sendPing");
   expect(init.method).toBe("POST");
   expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", userId: 7 });
+});
+
+test("correcting a trip puts the device, the start and the mode and expects no content", async () => {
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 204, json: async () => { throw new Error("no body"); } });
+  (global as any).fetch = fetchMock;
+  await expect(setTripMode(auth, "Pixel", 1_750_000_000_000, "transit")).resolves.toBeUndefined();
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://10.0.0.2:3012/api/trips/mode");
+  expect(init.method).toBe("PUT");
+  expect(init.headers.Authorization).toBe("Bearer t%2Fk%2B1");
+  expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", start: 1_750_000_000_000, mode: "transit" });
+  (global as any).fetch = respond(404, { title: "trip-not-found", detail: "No trip starts then" });
+  await expect(setTripMode(auth, "Pixel", 1, "auto")).rejects.toThrow("No trip starts then");
 });
 
 test("a 202 means no device was reachable, a 404 names the device", async () => {

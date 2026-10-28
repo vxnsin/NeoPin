@@ -236,7 +236,25 @@ export type Visit = {
   place?: VisitPlace | null;
 };
 
-export type TripMode = "walking" | "cycling" | "driving";
+export type TripMode = "walking" | "cycling" | "driving" | "transit";
+
+export type TransitKind = "bus" | "tram" | "subway" | "train" | "ferry";
+
+export type TransitStop = { name: string; lat: number; lon: number };
+
+// A ride the server matched to a line: from timetable data (gtfs) or OpenStreetMap routes (osm).
+export type TransitInfo = {
+  kind: TransitKind;
+  line: string;
+  headsign: string | null;
+  // The line's own colours, null when the feed has none.
+  color: string | null;
+  textColor: string | null;
+  agency: string | null;
+  from: TransitStop;
+  to: TransitStop;
+  source: "gtfs" | "osm";
+};
 
 export type Trip = {
   type: "trip";
@@ -248,7 +266,12 @@ export type Trip = {
   path: [number, number][];
   // No fixes on the way, only where it started and ended is known.
   gap?: boolean;
+  // Only with mode "transit", and even then missing when no line could be matched.
+  transit?: TransitInfo | null;
 };
+
+// What a trip is corrected to; "auto" drops the correction and the server guesses again.
+export type TripModeChoice = TripMode | "auto";
 
 export type Segment = Visit | Trip;
 
@@ -326,6 +349,17 @@ export async function claimPlace(auth: DeviceAuth, id: number, lat: number, lon:
       method: "POST",
       headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
       body: JSON.stringify({ lat, lon }),
+    })
+  );
+}
+
+// "This was: Transit". The server keeps the correction per account, device and start time of the trip.
+export async function setTripMode(auth: DeviceAuth, deviceId: string, start: number, mode: TripModeChoice): Promise<void> {
+  await noContent(
+    await request(`${httpBase(auth.serverIp)}/api/trips/mode`, {
+      method: "PUT",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId, start, mode }),
     })
   );
 }
