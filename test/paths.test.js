@@ -144,7 +144,8 @@ test("a drive is snapped to the roads and cached", async () => {
   );
   assert.equal(osrm.calls.length, 1);
   assert.equal(osrm.calls[0].profile, "car");
-  assert.match(osrm.calls[0].radiuses, /^25;10;10;/, "the visit's centre has no accuracy, the fixes are clamped to 10 m");
+  assert.match(osrm.calls[0].radiuses, /^10;10;/, "radii from the accuracy, clamped to 10 m");
+  assert.equal(osrm.calls[0].count, trip.path.length - 2, "the visit centres at both ends are not sent");
   const seconds = osrm.calls[0].timestamps.split(";").map(Number);
   assert.equal(seconds[0], 0, "times are relative to the start, OSRM never learns when the trip was");
   assert.ok(seconds.every((t, i) => i === 0 || t > seconds[i - 1]), "and only go up");
@@ -161,7 +162,7 @@ test("a long drive is matched in pieces of at most 100 points", async () => {
   assert.equal(trip.pathSource, "road");
   assert.equal(osrm.calls.length, 3);
   assert.ok(osrm.calls.every((c) => c.count <= 100));
-  assert.ok(trip.path.length >= 230);
+  assert.ok(trip.path.length >= 220, `${trip.path.length} points`);
 });
 
 test("a walk goes to the foot profile", async () => {

@@ -114,9 +114,11 @@ async function askOsrm(profile, points) {
   return body;
 }
 
-// The trip snapped to the roads, or null when OSRM found nothing that fits the fixes.
+// The trip snapped to the roads, or null when OSRM found nothing that fits the fixes. The
+// first and last point of a trip are the centres of the visits around it (home, often): they
+// are not sent, the path is joined to them here.
 export async function snapToRoads(fixes, profile) {
-  const points = tracePoints(fixes);
+  const points = tracePoints(fixes.length > 3 ? fixes.slice(1, -1) : fixes);
   if (points.length < 2) return null;
   const path = [];
   for (const piece of chunks(points)) {
