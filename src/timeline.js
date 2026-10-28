@@ -57,7 +57,7 @@ function tripSegment(points) {
   const distance = pathLength(points);
   const start = points[0].ts;
   const end = points[points.length - 1].ts;
-  return {
+  const trip = {
     type: "trip",
     start,
     end,
@@ -66,6 +66,9 @@ function tripSegment(points) {
     mode: modeFor(distance, end - start),
     path: points.map((p) => [p.lat, p.lon]),
   };
+  // The fixes with their times, for telling a bus ride from a drive. Not part of the JSON.
+  Object.defineProperty(trip, "fixes", { value: points, enumerable: false });
+  return trip;
 }
 
 // Where the phone went without a fix for a long time, only start and end are known. The

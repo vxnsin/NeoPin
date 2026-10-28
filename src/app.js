@@ -65,6 +65,7 @@ import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
 import { transitStatus } from "./transit.js";
+import { TRANSIT_KINDS, TRIP_MODES, matchTransit, setTripMode } from "./transitMatch.js";
 import {
   MAX_RADIUS_M,
   MIN_RADIUS_M,
@@ -170,16 +171,35 @@ const Visit = t.object({
   place: VisitPlace.nullable(),
 });
 
+const TransitStop = t.object({ name: t.string(), lat: t.number(), lon: t.number() });
+
+// Which line a trip was: from the timetables (gtfs), or from OpenStreetMap (osm) with fewer details.
+const Transit = t.object({
+  kind: t.enum(TRANSIT_KINDS),
+  line: t.string(),
+  headsign: t.string().nullable(),
+  color: t.string().nullable(),
+  textColor: t.string().nullable(),
+  agency: t.string().nullable(),
+  from: TransitStop,
+  to: TransitStop,
+  source: t.enum(["gtfs", "osm"]),
+});
+
 const Trip = t.object({
   type: t.literal("trip"),
   start: t.number(),
   end: t.number(),
   durationMs: t.number(),
   distanceM: t.number(),
-  mode: t.enum(["walking", "cycling", "driving"]),
+  mode: t.enum(TRIP_MODES),
   path: t.array(t.array(t.number())),
   // No fixes on the way: only where it started and ended is known.
   gap: t.boolean().optional(),
+  // On a transit trip: the line, or null when the person said "transit" and no line is known.
+  transit: Transit.nullable().optional(),
+  // The person corrected the mode (PUT /api/trips/mode).
+  corrected: t.boolean().optional(),
 });
 
 const Timeline = t.object({
@@ -964,6 +984,9 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
+      // Whose data: the signed-in account, or for the admin any account (see targetUserId).
+      const ForUser = t.object({ userId: t.number().optional() });
+
       // The day view: stays and trips, built from the stored fixes of one device.
       api.get(
         "/timeline",
@@ -982,8 +1005,29 @@ export function createApp({ gracefulShutdown = true } = {}) {
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
           const timeline = buildTimeline(points);
-          const { pending } = await namePlaces(userId, timeline.segments, { tzOffsetMin: ctx.query.tz ?? 0 });
+          const [{ pending }] = await Promise.all([
+            namePlaces(userId, timeline.segments, { tzOffsetMin: ctx.query.tz ?? 0 }),
+            matchTransit(userId, ctx.query.deviceId, timeline.segments),
+          ]);
           return { date: ctx.query.date, deviceId: ctx.query.deviceId, ...timeline, placesPending: pending };
+        }
+      );
+
+      // "That was by car": the person's word on how a trip was made beats what the server made
+      // of it. `auto` goes back to the server's guess. The trip is named by its device and start.
+      api.put(
+        "/trips/mode",
+        {
+          query: ForUser,
+          body: t.object({ deviceId: t.string().min(1).max(64), start: t.int().min(0), mode: t.enum([...TRIP_MODES, "auto"]) }),
+          response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const { deviceId, start, mode } = ctx.body;
+          if (!setTripMode(targetUserId(ctx, ctx.query.userId), deviceId, start, mode)) {
+            throw problem(404, "unknown-trip", "No trip of that device starts there");
+          }
+          return reply(204);
         }
       );
 
@@ -1020,8 +1064,6 @@ export function createApp({ gracefulShutdown = true } = {}) {
       // Own places: home, work, and every place someone confirmed for a visit. They win
       // over OpenStreetMap the next time someone stays there. The admin may label the
       // places of any account, the way it opens their timeline.
-      const ForUser = t.object({ userId: t.number().optional() });
-
       api.get(
         "/places",
         { query: ForUser, response: { 200: t.array(Place), 401: t.problem(), 403: t.problem(), 404: t.problem() } },

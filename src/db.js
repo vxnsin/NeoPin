@@ -136,6 +136,27 @@ const SCHEMA = `
     lon REAL NOT NULL,
     PRIMARY KEY (feed_id, id, seq)
   );
+  CREATE TABLE IF NOT EXISTS transit_osm_cache (
+    cell TEXT PRIMARY KEY,
+    fetched_at INTEGER NOT NULL,
+    data TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS trip_transit (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end INTEGER NOT NULL,
+    transit TEXT,
+    data_stamp INTEGER NOT NULL,
+    PRIMARY KEY (user_id, device_id, start)
+  );
+  CREATE TABLE IF NOT EXISTS trip_modes (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    mode TEXT NOT NULL,
+    PRIMARY KEY (user_id, device_id, start)
+  );
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.

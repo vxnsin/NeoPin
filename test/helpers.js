@@ -7,6 +7,7 @@ import { initDb, closeDb, getDb } from "../src/db.js";
 import { resetDevices } from "../src/devices.js";
 import { resetHistoryState } from "../src/history.js";
 import { resetPlaceLookups } from "../src/places.js";
+import { resetTransitMatches } from "../src/transitMatch.js";
 
 config.locationWaitMs = 100;
 // Tests never ask the real Overpass, test/places.test.js brings its own.
@@ -23,6 +24,7 @@ export async function startServer() {
   resetDevices();
   resetHistoryState();
   resetPlaceLookups();
+  resetTransitMatches();
   const server = createApp({ gracefulShutdown: false });
   const http = await server.app.listen(0, "127.0.0.1");
   const { port } = http.address();
