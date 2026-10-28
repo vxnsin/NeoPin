@@ -6,6 +6,7 @@ import {
   loginRequest,
   normalizeServerUrl,
   pingDeviceRequest,
+  dismissVisit,
   savePlaceAt,
   setTripMode,
 } from "../lib/api";
@@ -100,6 +101,21 @@ test("asking a device for a position posts its id and tells whether it was reach
   expect(url).toBe("http://10.0.0.2:3012/api/sendPing");
   expect(init.method).toBe("POST");
   expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", userId: 7 });
+});
+
+test("dismissing a stop puts its span, bringing it back says so, an admin names the account", async () => {
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 204, json: async () => { throw new Error("no body"); } });
+  (global as any).fetch = fetchMock;
+  const span = { start: 1_750_000_000_000, end: 1_750_000_420_000 };
+  await expect(dismissVisit(auth, "Pixel", span, true)).resolves.toBeUndefined();
+  let [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://10.0.0.2:3012/api/visits/dismissed");
+  expect(init.method).toBe("PUT");
+  expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", start: span.start, end: span.end, dismissed: true });
+  await dismissVisit(auth, "Pixel", span, false, 7);
+  [url, init] = fetchMock.mock.calls[1];
+  expect(url).toBe("http://10.0.0.2:3012/api/visits/dismissed?userId=7");
+  expect(JSON.parse(init.body).dismissed).toBe(false);
 });
 
 test("correcting a trip puts the device, the start and the mode and expects no content", async () => {

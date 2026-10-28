@@ -13,6 +13,7 @@ import {
   fetchTimelineDays,
   fetchUserDevices,
   fetchUsers,
+  dismissVisit,
   setTripMode,
   type AccountSummary,
   type Timeline,
@@ -292,6 +293,21 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     [post]
   );
 
+  // "Not a stop" and "Bring back": the server keeps the span, the day is built again around it.
+  const [stopSaving, setStopSaving] = useState<number | null>(null);
+  const [stopError, setStopError] = useState("");
+  const changeStop = (span: { start: number; end: number }, dismissed: boolean) => {
+    setStopSaving(span.start);
+    setStopError("");
+    dismissVisit(creds, deviceId, span, dismissed, queryUser)
+      .then(() => {
+        setPicking(null);
+        setReloads((n) => n + 1);
+      })
+      .catch((e: any) => setStopError(e?.message || "Could not save, try again."))
+      .finally(() => setStopSaving(null));
+  };
+
   // "This was: Transit": the server keeps the correction, the day is fetched again so the row and the map follow.
   const correct = (trip: Trip, mode: TripModeChoice) => {
     setModeSaving(mode);
@@ -317,6 +333,36 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const segments = timeline?.segments ?? [];
   const numbers = useMemo(() => visitNumbers(segments), [segments]);
   const summary = timeline?.summary;
+
+  // What was removed stays in reach: each removed stop of the day, with a way back.
+  const dismissedSpans = timeline?.dismissed ?? [];
+  const removedStops =
+    dismissedSpans.length > 0 ? (
+      <View style={styles.removed}>
+        <Text style={[styles.removedTitle, { color: c.muted }]}>Removed stops</Text>
+        {dismissedSpans.map((span) => (
+          <View key={span.start} style={styles.removedRow}>
+            <Text style={[styles.cardMeta, styles.removedTime, { color: c.muted }]}>
+              {formatClock(span.start)} – {formatClock(span.end)}
+            </Text>
+            <Pressable
+              style={[styles.restoreButton, { backgroundColor: c.subtle }]}
+              disabled={stopSaving !== null}
+              onPress={() => changeStop(span, false)}
+              accessibilityLabel={`Bring back the stop from ${formatClock(span.start)} to ${formatClock(span.end)}`}
+            >
+              {stopSaving === span.start ? (
+                <ActivityIndicator size="small" color={c.primary} />
+              ) : (
+                <MaterialIcons name="undo" size={15} color={c.primary} />
+              )}
+              <Text style={[styles.restoreText, { color: c.primary }]}>Bring back</Text>
+            </Pressable>
+          </View>
+        ))}
+        {!!stopError && picking === null && <Text style={[styles.note, { color: c.secondary }]}>{stopError}</Text>}
+      </View>
+    ) : null;
 
   const chip = (active: boolean) => ({ backgroundColor: active ? c.secondary : c.subtle });
   const chipText = (active: boolean) => ({ color: active ? c.onSecondary : c.primary });
@@ -481,6 +527,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           <Text style={[styles.note, { color: c.muted, textAlign: "center" }]}>
             {choices.length === 0 ? "This account has no devices." : `This device has no location data for ${dayLabel(day).toLowerCase()}.`}
           </Text>
+          {/* The only stop of the day may have been removed: the way back stays here too. */}
+          {removedStops}
         </View>
       ) : (
         <ScrollView ref={scroll} style={styles.list} showsVerticalScrollIndicator={false}>
@@ -621,20 +669,38 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                   </View>
                 )}
                 {picking === index && segment.type === "visit" && (
-                  <PlacePicker
-                    creds={creds}
-                    visit={segment}
-                    userId={queryUser}
-                    onSaved={() => {
-                      setPicking(null);
-                      pendingTries.current = 0;
-                      refreshPlaces();
-                    }}
-                  />
+                  <>
+                    <PlacePicker
+                      creds={creds}
+                      visit={segment}
+                      userId={queryUser}
+                      onSaved={() => {
+                        setPicking(null);
+                        pendingTries.current = 0;
+                        refreshPlaces();
+                      }}
+                    />
+                    {/* A red light or a jam can last long enough to pass for a stop. */}
+                    <Pressable
+                      style={[styles.stopAction, { backgroundColor: c.subtle }]}
+                      disabled={stopSaving !== null}
+                      onPress={() => changeStop(segment, true)}
+                      accessibilityLabel="Not a stop, remove it from the day"
+                    >
+                      {stopSaving === segment.start ? (
+                        <ActivityIndicator size="small" color={c.secondary} />
+                      ) : (
+                        <MaterialIcons name="location-off" size={16} color={c.secondary} />
+                      )}
+                      <Text style={[styles.stopActionText, { color: c.secondary }]}>Not a stop</Text>
+                    </Pressable>
+                    {!!stopError && <Text style={[styles.note, styles.stopNote, { color: c.secondary }]}>{stopError}</Text>}
+                  </>
                 )}
               </React.Fragment>
             );
           })}
+          {removedStops}
         </ScrollView>
       )}
     </Animated.View>
@@ -705,6 +771,15 @@ const styles = StyleSheet.create({
   kindRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
   kindText: { marginTop: 0 },
   editButton: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  stopAction: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", height: 36, paddingHorizontal: 14, borderRadius: 18, marginLeft: 40, marginBottom: 10 },
+  stopActionText: { fontSize: 13.5, fontWeight: "700" },
+  stopNote: { marginLeft: 40 },
+  removed: { marginTop: 14, marginLeft: 40, gap: 6 },
+  removedTitle: { fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.6 },
+  removedRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  removedTime: { marginTop: 0 },
+  restoreButton: { flexDirection: "row", alignItems: "center", gap: 5, height: 32, paddingHorizontal: 12, borderRadius: 16 },
+  restoreText: { fontSize: 13, fontWeight: "600" },
   cardTitle: { fontSize: 15, fontWeight: "700" },
   cardMeta: { fontSize: 12.5, marginTop: 2 },
   tripRow: { flex: 1, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14 },
