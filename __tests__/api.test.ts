@@ -6,6 +6,7 @@ import {
   loginRequest,
   normalizeServerUrl,
   pingDeviceRequest,
+  dismissVisit,
   savePlaceAt,
   setTripMode,
 } from "../lib/api";
