@@ -68,6 +68,7 @@ import {
   MAX_RADIUS_M,
   MIN_RADIUS_M,
   PLACE_KINDS,
+  TAG_KINDS,
   claimSpot,
   deletePlace,
   listPlaces,
@@ -1023,6 +1024,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
       );
 
       // "I was here": names the spot. An own place that already covers it is corrected.
+      // Tagged as home or work it needs no name and becomes "Home", "Home 2", ...
       api.post(
         "/places",
         {
@@ -1030,14 +1032,20 @@ export function createApp({ gracefulShutdown = true } = {}) {
           body: t.object({
             lat: t.number().min(-90).max(90),
             lon: t.number().min(-180).max(180),
-            name: PlaceName,
+            name: PlaceName.optional(),
             kind: t.enum(PLACE_KINDS).optional(),
             radiusM: PlaceRadius.optional(),
             osmId: t.string().max(40).optional(),
           }),
           response: { 200: Place, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
-        (ctx) => savePlaceAt(targetUserId(ctx, ctx.query.userId), { ...ctx.body, name: ctx.body.name.trim() })
+        (ctx) => {
+          const { name, kind } = ctx.body;
+          if (name === undefined && !TAG_KINDS.includes(kind)) {
+            throw problem(400, "name-required", "Give the place a name, or tag it as Home or Work");
+          }
+          return savePlaceAt(targetUserId(ctx, ctx.query.userId), { ...ctx.body, name: name?.trim() });
+        }
       );
 
       // Picking an own place for a visit: the spot belongs to it from now on.
