@@ -64,6 +64,7 @@ import { createFinder } from "./find.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
+import { transitStatus } from "./transit.js";
 import {
   MAX_RADIUS_M,
   MIN_RADIUS_M,
@@ -996,6 +997,26 @@ export function createApp({ gracefulShutdown = true } = {}) {
         },
         (ctx) => daysWithData(targetUserId(ctx, ctx.query.userId), ctx.query.deviceId, ctx.query.tz ?? 0)
       );
+
+      // Which regions have timetable data for the lines in the timeline, and how fresh it is.
+      const TransitFeed = t.object({
+        name: t.string(),
+        provider: t.string().nullable(),
+        license: t.string().nullable(),
+        stops: t.number(),
+        routes: t.number(),
+        trips: t.number(),
+        updatedAt: t.string().nullable(),
+      });
+      const TransitStatus = t.object({
+        enabled: t.boolean(),
+        regions: t.array(t.object({ cell: t.string(), feeds: t.array(TransitFeed), updatedAt: t.string().nullable() })),
+      });
+
+      api.get("/transit", { response: { 200: TransitStatus, 401: t.problem() } }, (ctx) => {
+        currentUser(ctx);
+        return transitStatus();
+      });
 
       // Own places: home, work, and every place someone confirmed for a visit. They win
       // over OpenStreetMap the next time someone stays there. The admin may label the

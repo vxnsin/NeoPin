@@ -6,6 +6,7 @@ import { ensureAdmin } from "./src/accounts.js";
 import { pruneHistory } from "./src/history.js";
 import { createApp } from "./src/app.js";
 import { startConsole } from "./src/console.js";
+import { startTransit } from "./src/transit.js";
 
 function networkIp() {
   for (const interfaces of Object.values(os.networkInterfaces())) {
@@ -40,4 +41,5 @@ pruneHistory();
 const server = createApp();
 await server.app.listen(config.port);
 banner();
+startTransit();
 startConsole(server);

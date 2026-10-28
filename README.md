@@ -113,10 +113,22 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `HISTORY_DAYS` | `365` | Location history older than this is deleted at startup |
 | `PLACE_LOOKUP_URL` | `https://overpass-api.de/api/interpreter` | Overpass API that names the places in the timeline. It sees the coordinates of the stays it is asked about, each spot once, the answers are cached. Point it at your own Overpass or set `off` |
 | `PLACE_FALLBACK_URL` | `https://photon.komoot.io/reverse` | Photon, asked when Overpass is busy or down. Same privacy as above, `off` turns it off |
+| `TRANSIT` | on | Timetable data for bus, tram and train lines in the timeline, see [Transit data](#transit-data). `off` turns it off |
+| `TRANSIT_CATALOG_URL` | the [Mobility Database](https://mobilitydatabase.org) catalog CSV | Which GTFS feeds exist and what each covers |
+| `TRANSIT_DIR` | `data/transit` | Where the catalog and the downloaded feeds are kept, next to the database |
+| `TRANSIT_REGION_KM` | `30` | Size of the regions that get timetable data, around wherever the accounts have been |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
 
 Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device tokens and 120 profile picture requests per minute and IP.
+
+## Transit data
+
+Rides by bus, tram or train need timetables, and nobody keeps the timetables of the whole world. The server holds only the [Mobility Database](https://mobilitydatabase.org) catalog, a CSV with every known [GTFS](https://gtfs.org) feed, its provider, license and the rectangle on the map it covers. From the stored positions of all accounts it knows its **regions**: cells of about `TRANSIT_REGION_KM` that had positions in the last 90 days. For every region it downloads the feeds that cover it and imports only the slice inside the region (stops, lines, trips, departures, shapes) into SQLite. That happens in the background, shortly after the start and then once a week; the start never waits for it. A region nobody has been in for 90 days loses its data again. `GET /api/transit` shows the regions, their feeds and when they were last imported.
+
+Germany is covered by the nationwide feed from [gtfs.de](https://gtfs.de) (data by DELFI e.V., includes DB Regio and long-distance trains) instead of the catalog's pieces, because it covers everything. It is about 300 MB, so the first import takes a few minutes. The server sends its name and version as user agent to the catalog and the feed hosts, nothing about the accounts.
+
+**Licenses.** The catalog is published by MobilityData under [Apache 2.0](https://github.com/MobilityData/mobility-database-catalogs/blob/main/LICENSE). Every feed comes under its own license, listed in the catalog and shown in `GET /api/transit`. Many feeds, the gtfs.de one included, are **CC BY 4.0**: if you show the lines to others (a public dashboard, screenshots), name the source, e.g. "Timetable data: gtfs.de / DELFI e.V., CC BY 4.0". Some feeds in the catalog need a login or an API key; those are skipped.
 
 ## Console
 
@@ -211,6 +223,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"? }`, asks one or all devices and answers with the list |
 | `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. The admin may pass `userId` |
+| `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
 | `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |
 | `PUT` | `/api/avatar` | ✓ | Sets the account's profile picture: JPEG, PNG or WebP, at most 16 KB |
 | `DELETE` | `/api/avatar` | ✓ | Removes it again |
@@ -238,6 +251,8 @@ src/
 ├─ accounts.js     users, tokens, admin bootstrap
 ├─ history.js      stored positions
 ├─ timeline.js     stays and trips per day
+├─ transit.js      regions, the feed catalog, downloads and imports
+├─ gtfs.js         reads GTFS tables out of a feed ZIP
 ├─ devices.js      in-memory device registry
 ├─ sessions.js     dashboard sessions
 ├─ rateLimit.js    counter for wrong device tokens

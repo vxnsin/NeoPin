@@ -62,6 +62,14 @@ export const config = {
   // Asked when Overpass fails, a Photon reverse endpoint. "off" turns it off.
   placeFallbackUrl:
     process.env.PLACE_FALLBACK_URL === "off" ? null : process.env.PLACE_FALLBACK_URL || "https://photon.komoot.io/reverse",
+  // Bus, tram and train lines in the timeline, from GTFS timetables. "off" turns it off.
+  transit: !["off", "false", "no", "0"].includes((process.env.TRANSIT ?? "").trim().toLowerCase()),
+  // The Mobility Database catalog: which feeds exist, what each covers, where to get it.
+  transitCatalogUrl: process.env.TRANSIT_CATALOG_URL || "https://storage.googleapis.com/storage/v1/b/mdb-csv/o/sources.csv?alt=media",
+  // Downloaded feeds, next to the database unless told otherwise.
+  transitDir: path.resolve(rootDir, process.env.TRANSIT_DIR || path.join(path.dirname(process.env.DATABASE_PATH || "data/neopin.db"), "transit")),
+  // The regions that get timetables are cells of about this size around where the users have been.
+  transitRegionKm: Number(process.env.TRANSIT_REGION_KM) || 30,
   // Only behind a reverse proxy: take the client IP and https from X-Forwarded-*.
   trustProxy: process.env.TRUST_PROXY === "true",
   // Send the dashboard cookie over HTTPS only. Turn on once the server sits behind TLS.
