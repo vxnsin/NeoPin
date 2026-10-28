@@ -67,6 +67,14 @@ const SCHEMA = `
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS places_user ON places(user_id);
+  CREATE TABLE IF NOT EXISTS device_battery (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    level REAL NOT NULL,
+    charging INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, device_id)
+  );
   CREATE TABLE IF NOT EXISTS place_cache (
     cell TEXT PRIMARY KEY,
     fetched_at INTEGER NOT NULL,

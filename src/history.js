@@ -56,6 +56,28 @@ export function lastPosition(userId, deviceId) {
   );
 }
 
+// The last charge a device reported, so it is still there after the device went offline
+// or the server restarted. One row per device, overwritten each time.
+export function recordBattery(userId, deviceId, level, charging, updatedAt = new Date().toISOString()) {
+  getDb()
+    .prepare(
+      `INSERT INTO device_battery (user_id, device_id, level, charging, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, device_id) DO UPDATE SET level = excluded.level, charging = excluded.charging, updated_at = excluded.updated_at`
+    )
+    .run(userId, deviceId, level, charging ? 1 : 0, updatedAt);
+}
+
+export function lastBattery(userId, deviceId) {
+  const row = getDb()
+    .prepare("SELECT level, charging, updated_at FROM device_battery WHERE user_id = ? AND device_id = ?")
+    .get(userId, deviceId);
+  return row ? { level: row.level, charging: row.charging === 1, updatedAt: row.updated_at } : null;
+}
+
+export function forgetBattery(userId, deviceId) {
+  getDb().prepare("DELETE FROM device_battery WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
+}
+
 // Local calendar days that have any data, newest first.
 export function daysWithData(userId, deviceId, tzOffsetMin, limit = 120) {
   const shiftSeconds = Math.round((-tzOffsetMin * 60_000) / 1000);

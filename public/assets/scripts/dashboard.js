@@ -51,12 +51,28 @@ function typeIcon(device, extra = "") {
   return `<svg class="icon dtype${extra}" role="img" aria-label="${TYPE_LABELS[type]}"><use href="#${TYPE_ICONS[type]}" /></svg>`;
 }
 
-// The charge as a small battery with its percent. Only while the device is online:
-// the last reading of a phone that went offline would only mislead.
+// "23:14" today, "Mon 23:14" this week, else "27.10. 23:14": when an old reading was taken.
+function clockTime(timestamp) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const age = Date.now() - date.getTime();
+  if (age < 86_400_000 && date.getDate() === new Date().getDate()) return time;
+  if (age < 6 * 86_400_000) return `${date.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  return `${date.toLocaleDateString([], { day: "2-digit", month: "2-digit" })} ${time}`;
+}
+
+// The charge as a small battery with its percent. An offline device shows its last
+// reading faded, with the time it was taken: that says whether the phone may be flat.
 function batteryHtml(device) {
   const battery = device.battery;
-  if (!battery || device.status !== "online") return "";
+  if (!battery) return "";
   const level = Math.max(0, Math.min(100, Math.round(battery.level)));
+  if (device.status !== "online") {
+    const when = battery.updatedAt ? clockTime(battery.updatedAt) : "";
+    const label = `Battery ${level} % when last heard from${when ? `, ${when}` : ""}`;
+    return `<span class="battery battery--stale" role="img" aria-label="${esc(label)}" title="${esc(label)}"><span class="battery__cell"><span class="battery__fill" style="width:${level}%"></span></span>${level} %${when ? `<span class="battery__when">${esc(when)}</span>` : ""}</span>`;
+  }
   const state = battery.charging ? "charging" : level <= 20 ? "low" : "ok";
   const label = `Battery ${level} %${battery.charging ? ", charging" : ""}`;
   const bolt = battery.charging ? '<svg class="icon battery__bolt" aria-hidden="true"><use href="#i-bolt" /></svg>' : "";
