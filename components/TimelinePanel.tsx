@@ -111,9 +111,9 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const dragFrom = useRef(height);
   const callbacks = useRef({ onClose, onHeightChange });
   callbacks.current = { onClose, onHeightChange };
-  const { low, mid, high } = snaps;
+  const { peek, low, mid, high } = snaps;
   const dragGesture = useMemo(() => {
-    const rests = { low, mid, high };
+    const rests = { peek, low, mid, high };
     return Gesture.Pan()
       .runOnJS(true)
       // A tap on the buttons in the header stays a tap.
@@ -122,13 +122,10 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         dragFrom.current = heightRef.current;
       })
       .onUpdate((e) => setDrag(clampDrag(dragFrom.current - e.translationY, rests)))
-      .onEnd((e) => {
-        const rest = restAfterDrag(dragFrom.current - e.translationY, e.velocityY, rests);
-        if (rest === null) callbacks.current.onClose();
-        else callbacks.current.onHeightChange(rest);
-      })
+      // Dragging down ends at the header strip, never closed: the map gets the room, the day stays on it.
+      .onEnd((e) => callbacks.current.onHeightChange(restAfterDrag(dragFrom.current - e.translationY, e.velocityY, rests)))
       .onFinalize(() => setDrag(null));
-  }, [low, mid, high]);
+  }, [peek, low, mid, high]);
 
   useEffect(() => {
     if (hasRoute.current) post({ type: "routeBottom", bottom: bottomPadding });
@@ -254,7 +251,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   return (
     <View style={[styles.panel, { height: shownHeight, backgroundColor: c.raised, paddingBottom: insets.bottom + 8 }]}>
       <GestureDetector gesture={dragGesture}>
-        <View collapsable={false} accessibilityHint="Drag up or down to resize, drag down to close">
+        <View collapsable={false} accessibilityHint="Drag up or down to resize">
           <View style={[styles.grabber, { backgroundColor: c.muted }]} />
 
           <View style={styles.header}>
