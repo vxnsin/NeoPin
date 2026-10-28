@@ -74,10 +74,31 @@ export function ownPlaceAt(userId, lat, lon, places = listPlaces(userId)) {
   return best?.place ?? null;
 }
 
+// Kinds that need no typed name: tagging a visit as home or work is enough.
+export const TAG_KINDS = ["home", "work"];
+const TAG_NAMES = { home: "Home", work: "Work" };
+
+// "Home" for the first home, then "Home 2", "Home 3", compared without case against the
+// person's other place names. The place being retagged does not block its own name.
+export function defaultPlaceName(userId, kind, exceptId = null) {
+  const base = TAG_NAMES[kind] ?? kind;
+  const taken = new Set(
+    listPlaces(userId)
+      .filter((p) => p.id !== exceptId)
+      .map((p) => p.name.toLocaleLowerCase())
+  );
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? base : `${base} ${n}`;
+    if (!taken.has(name.toLocaleLowerCase())) return name;
+  }
+}
+
 // "I was here: Café Mohr". When an own place already covers the spot it is corrected,
-// otherwise a new one starts there.
+// otherwise a new one starts there. Without a name (a tag) the covering place keeps its
+// name when it already is that kind, otherwise the next free default name is used.
 export function savePlaceAt(userId, { lat, lon, name, kind = "place", radiusM, osmId = null }) {
   const existing = ownPlaceAt(userId, lat, lon);
+  if (name == null) name = existing?.kind === kind ? existing.name : defaultPlaceName(userId, kind, existing?.id ?? null);
   if (existing) {
     getDb()
       .prepare("UPDATE places SET name = ?, kind = ?, osm_id = ?, radius_m = ? WHERE id = ?")

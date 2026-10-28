@@ -160,6 +160,21 @@ test("claiming an own place for a spot grows it and makes closer ones let go", a
   assert.equal((await api(`/places/${home.id + 99}/claim`, { method: "POST", body: JSON.stringify(spot) })).status, 404);
 });
 
+test("tagging a spot as home or work needs no name", async () => {
+  const post = async (body) => {
+    const res = await api("/places", { method: "POST", body: JSON.stringify(body) });
+    return { status: res.status, ...(await res.json()) };
+  };
+  assert.equal((await post({ lat: 49.794, lon: 9.951, kind: "home" })).name, "Home");
+  assert.equal((await post({ lat: 49.8, lon: 9.9, kind: "home" })).name, "Home 2", "a second home elsewhere");
+  assert.equal((await post({ lat: 49.81, lon: 9.9, kind: "work" })).name, "Work");
+  assert.equal((await post({ lat: 49.794, lon: 9.951, kind: "home" })).name, "Home", "the same spot again keeps its name");
+  assert.equal((await post({ lat: 49.794, lon: 9.951, kind: "work" })).name, "Work 2", "retagged, and Work is taken");
+  const shop = await post({ lat: 49.82, lon: 9.9, kind: "shop" });
+  assert.equal(shop.status, 400);
+  assert.equal(shop.type, "name-required");
+});
+
 test("rename, radius and delete an own place", async () => {
   const place = await (await api("/places", { method: "POST", body: JSON.stringify({ lat: 49.8, lon: 9.9, name: "Home" }) })).json();
   const renamed = await api(`/places/${place.id}`, { method: "PATCH", body: JSON.stringify({ name: "Zuhause", kind: "home", radiusM: 120 }) });
