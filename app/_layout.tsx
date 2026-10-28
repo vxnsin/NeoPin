@@ -68,7 +68,9 @@ function ConnectionLifecycle() {
     const key = `${lastResponse.notification.request.identifier}:${lastResponse.notification.date}`;
     if (handledResponse.current === key) return;
     handledResponse.current = key;
-    if (openFromNotification(lastResponse)) router.navigate("/map");
+    const target = openFromNotification(lastResponse);
+    if (target === "map") router.navigate("/map");
+    else if (target === "connect") router.navigate("/");
   }, [lastResponse, router]);
 
   useEffect(() => {

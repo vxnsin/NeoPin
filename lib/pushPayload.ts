@@ -2,7 +2,8 @@
 
 export type PushAction =
   | { type: "requestLocation"; from: string; id: string | null }
-  | { type: "groupInvite" };
+  | { type: "groupInvite" }
+  | { type: "findRequest"; session: string; from: string };
 
 function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -38,6 +39,10 @@ export function parsePushAction(input: unknown): PushAction | null {
   const data = dataOf(input);
   if (!data) return null;
   if (data.type === "groupInvite") return { type: "groupInvite" };
+  if (data.type === "findRequest") {
+    const session = typeof data.session === "string" ? data.session : "";
+    return { type: "findRequest", session, from: typeof data.from === "string" ? data.from : "" };
+  }
   if (data.type === "requestLocation") {
     const from = typeof data.from === "string" && data.from ? data.from : "";
     return { type: "requestLocation", from, id: typeof data.id === "string" && data.id ? data.id : null };

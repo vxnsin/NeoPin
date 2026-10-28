@@ -72,3 +72,13 @@ test("a wake-up id is only let through once", () => {
   fresh("c");
   expect(fresh("a")).toBe(true);
 });
+
+test("a find request push is parsed in every payload shape", () => {
+  const data = { type: "findRequest", session: "s1", from: "Anna" };
+  const expected = { type: "findRequest", session: "s1", from: "Anna" };
+  expect(parsePushAction({ data, notification: null })).toEqual(expected);
+  expect(parsePushAction({ data: { dataString: JSON.stringify(data) } })).toEqual(expected);
+  expect(parsePushAction({ notification: { request: { content: { data } } }, actionIdentifier: "x" })).toEqual(expected);
+  expect(parsePushAction({ request: { content: { data } } })).toEqual(expected);
+  expect(parsePushAction({ data: { type: "findRequest" } })).toEqual({ type: "findRequest", session: "", from: "" });
+});

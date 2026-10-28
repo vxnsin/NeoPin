@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 import { fetchServerStatus, registerPushToken, removePushToken, type DeviceAuth } from "@/lib/api";
 import { needsRegistration, parsePushAction, type StoredPush } from "@/lib/pushPayload";
 import { requestSheet } from "@/lib/sheetRequest";
+import { socket } from "@/lib/socket";
 import { handlePush } from "@/tasks/PushTask";
 
 const STORED_KEY = "neopin.pushRegistration";
@@ -12,6 +13,10 @@ const CHANNEL_ID = "default";
 // Messages with a title are shown, also in front. A silent wake-up never is.
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
+    // With the socket up the request already arrives as a dialog, a banner would say it twice.
+    if (parsePushAction(notification)?.type === "findRequest" && socket.connected) {
+      return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
+    }
     const show = !!notification.request.content.title || !!notification.request.content.body;
     return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: false, shouldSetBadge: false };
   },
@@ -86,9 +91,17 @@ export async function stopPush(auth: DeviceAuth | null) {
   await removePushToken(auth).catch(() => {});
 }
 
-// A tap on a notification: the invitation goes to the groups sheet. True when it was handled.
-export function openFromNotification(response: Notifications.NotificationResponse): boolean {
-  if (parsePushAction(response)?.type !== "groupInvite") return false;
-  requestSheet("groups");
-  return true;
+// What a tap on a notification should open, or null when it is not one of ours.
+export type NotificationTarget = "map" | "connect";
+
+// An invitation goes to the groups sheet. A find request goes to the map, where the dialog shows once the
+// socket replays the request; without a connection the start screen has to connect first.
+export function openFromNotification(response: Notifications.NotificationResponse): NotificationTarget | null {
+  const action = parsePushAction(response);
+  if (action?.type === "groupInvite") {
+    requestSheet("groups");
+    return "map";
+  }
+  if (action?.type === "findRequest") return socket.connected ? "map" : "connect";
+  return null;
 }
