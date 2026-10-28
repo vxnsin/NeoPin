@@ -15,12 +15,19 @@ import {
   type FindFix,
   type FindState,
 } from "@/lib/find";
+import { LOST_MS, nearbyHint, nearbyText, type NearbyReading, type NearbyState, type SignalBand } from "@/lib/nearby";
+
+// Bars from faint to right here.
+const BANDS: SignalBand[] = ["around", "close", "very-close", "here"];
 
 type Props = {
   state: FindState;
   // My own latest fix and where my phone points, both null until known.
   mine: FindFix | null;
   heading: number | null;
+  // Bluetooth: the other phone's signal while it is in reach, and whether Bluetooth can help.
+  nearby: NearbyReading | null;
+  nearbyState: NearbyState;
   avatarFor: (url?: string | null) => string | null;
   onAccept: () => void;
   onDecline: () => void;
@@ -40,7 +47,7 @@ async function openMaps(lat: number, lon: number) {
   }
 }
 
-export default function FindSheet({ state, mine, heading, avatarFor, onAccept, onDecline, onStop, onClose }: Props) {
+export default function FindSheet({ state, mine, heading, nearby, nearbyState, avatarFor, onAccept, onDecline, onStop, onClose }: Props) {
   const { colors: c } = useThemeManager();
   const [, setTick] = useState(0);
 
@@ -120,6 +127,9 @@ export default function FindSheet({ state, mine, heading, avatarFor, onAccept, o
   const angle = bearing !== null && heading !== null ? arrowAngle(bearing, heading) : null;
   const ageS = theirs ? Math.max(0, Math.round((Date.now() - theirs.at) / 1000)) : null;
   const left = Math.max(0, Math.round((state.expiresAt - Date.now()) / 60_000));
+  // A Bluetooth reading counts while it is fresh, after that the other phone is out of reach.
+  const signal = nearby && Date.now() - nearby.at <= LOST_MS ? nearby : null;
+  const radioHint = nearbyHint(nearbyState);
 
   return (
     <View style={styles.box}>
@@ -132,6 +142,15 @@ export default function FindSheet({ state, mine, heading, avatarFor, onAccept, o
         )}
       </View>
       <Text style={[styles.distance, { color: c.primary }]}>{distance === null ? "…" : formatMeters(distance)}</Text>
+      {signal && (
+        <View style={styles.signal} accessibilityLabel={`Bluetooth: ${nearbyText(signal.band)}`}>
+          {BANDS.map((band, i) => (
+            <View key={band} style={[styles.bar, { height: 6 + i * 4, backgroundColor: i <= BANDS.indexOf(signal.band) ? c.secondary : c.subtle }]} />
+          ))}
+          <Text style={[styles.signalText, { color: c.primary }]}>{nearbyText(signal.band)}</Text>
+        </View>
+      )}
+      {!signal && radioHint && band === "close" && <Text style={[styles.hint, { color: c.muted }]}>{radioHint}</Text>}
       <Text style={[styles.hint, { color: c.muted }]}>
         {band ? hintFor(band, heading !== null) : theirs ? "Waiting for your own position…" : `Waiting for ${peer?.displayName}'s position…`}
       </Text>
@@ -167,6 +186,9 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, textAlign: "center" },
   dial: { width: 180, height: 180, borderRadius: 90, alignItems: "center", justifyContent: "center", marginTop: 4 },
   distance: { fontSize: 40, fontWeight: "800", letterSpacing: -1, fontVariant: ["tabular-nums"] },
+  signal: { flexDirection: "row", alignItems: "flex-end", gap: 3, marginTop: -2 },
+  bar: { width: 6, borderRadius: 2 },
+  signalText: { fontSize: 13, fontWeight: "600", marginLeft: 8, alignSelf: "center" },
   row: { flexDirection: "row", gap: 10, marginTop: 6 },
   button: { flexDirection: "row", alignItems: "center", gap: 6, height: 46, paddingHorizontal: 20, borderRadius: 14 },
   wide: { marginTop: 6, minWidth: 160, justifyContent: "center" },

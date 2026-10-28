@@ -17,6 +17,7 @@ export default {
         NSAppTransportSecurity: {
           NSAllowsArbitraryLoads: true,
         },
+        NSBluetoothAlwaysUsageDescription: "NeoPin uses Bluetooth to tell how close a person you are finding is.",
         NSLocationWhenInUseUsageDescription:
           "This app needs your location to display the map correctly.",
         NSLocationAlwaysUsageDescription:
@@ -41,6 +42,9 @@ export default {
         "FOREGROUND_SERVICE_LOCATION",
         "POST_NOTIFICATIONS",
         "WAKE_LOCK",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_ADVERTISE",
+        "BLUETOOTH_CONNECT",
       ],
       softwareKeyboardLayoutMode: "pan",
     },
