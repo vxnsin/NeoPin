@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:padding="14dp">
+
+  <FrameLayout
+      android:layout_width="44dp"
+      android:layout_height="44dp">
+    <ImageView
+        android:id="@+id/ring"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:src="@drawable/widget_ring"
+        android:contentDescription="@null" />
+    <ImageView
+        android:id="@+id/avatar"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_gravity="center"
+        android:src="@drawable/widget_circle"
+        android:contentDescription="@null" />
+    <TextView
+        android:id="@+id/initials"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:textColor="#FFFFFF" />
+  </FrameLayout>
+
+  <TextView
+      android:id="@+id/name"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="8dp"
+      android:textSize="15sp"
+      android:textStyle="bold"
+      android:textColor="#FFFFFF"
+      android:maxLines="1"
+      android:ellipsize="end" />
+
+  <TextView
+      android:id="@+id/meta"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:textSize="12sp"
+      android:textColor="#98A2B3"
+      android:maxLines="1"
+      android:ellipsize="end" />
+
+  <TextView
+      android:id="@+id/big"
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1"
+      android:gravity="bottom"
+      android:layout_marginTop="4dp"
+      android:textSize="24sp"
+      android:textStyle="bold"
+      android:textColor="#FFFFFF" />
+
+  <TextView
+      android:id="@+id/button"
+      android:layout_width="match_parent"
+      android:layout_height="32dp"
+      android:layout_marginTop="8dp"
+      android:gravity="center"
+      android:background="@drawable/widget_button_red"
+      android:text="Find"
+      android:textSize="12sp"
+      android:textStyle="bold"
+      android:textColor="#FFFFFF" />
+</LinearLayout>

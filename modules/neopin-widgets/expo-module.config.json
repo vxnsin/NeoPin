@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["WidgetsModule"]
+  },
+  "android": {
+    "modules": ["de.vensin.neopin.widgets.WidgetsModule"]
+  }
+}

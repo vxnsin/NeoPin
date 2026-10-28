@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Show me again" while invisible: a faint green. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <solid android:color="#2E22C55E" />
+  <corners android:radius="10dp" />
+</shape>

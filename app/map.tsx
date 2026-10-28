@@ -18,7 +18,7 @@ import {
 } from "react-native";
 import { WebView as NativeWebView, type WebViewMessageEvent } from "react-native-webview";
 import { MaterialIcons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { checkAndPrompt, updateLabel } from "@/lib/updates";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
@@ -35,6 +35,8 @@ import FindSheet from "@/components/FindSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
 import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby";
 import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
+import { buildSnapshot, parseWidgetAction, pushWidgets, widgetsAvailable } from "@/lib/widgets";
+import { setHidden as apiSetHidden, showMe as apiShowMe } from "@/lib/api";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
@@ -289,6 +291,39 @@ export default function MapScreen() {
     if (find?.phase !== "active" || !liveAvailable()) return;
     live.current.update(liveContent(find, myFix, heading, nearby, Date.now()));
   }, [find, myFix, heading, nearby]);
+
+  // The home screen widgets get a fresh snapshot whenever what they show changes.
+  useEffect(() => {
+    if (!widgetsAvailable()) return;
+    pushWidgets(buildSnapshot(groupPeople(devices, user?.id), groups, user, isConnected));
+  }, [devices, groups, user, isConnected]);
+
+  // A tap on a widget opens the app with a link that says what to do: go invisible, show me
+  // again, find somebody or look at somebody. Each link is acted on once.
+  const widgetParams = useLocalSearchParams<{ hide?: string; find?: string; person?: string }>();
+  const handledLink = useRef("");
+  useEffect(() => {
+    const action = parseWidgetAction(widgetParams);
+    if (!action) return;
+    const key = JSON.stringify([widgetParams.hide, widgetParams.find, widgetParams.person]);
+    if (handledLink.current === key) return;
+    if (action.kind === "hide" || action.kind === "show") {
+      if (!creds) return;
+      handledLink.current = key;
+      (action.kind === "hide" ? apiSetHidden(creds, action.minutes) : apiShowMe(creds)).then(changeUser).catch(() => {});
+      return;
+    }
+    const people = groupPeople(devices, user?.id);
+    const person = action.kind === "find" ? people.find((p) => p.userId === action.userId) : people.find((p) => p.key === action.id);
+    if (!person || (action.kind === "find" && !serverFinds)) return;
+    handledLink.current = key;
+    if (action.kind === "find") startFind(person);
+    else {
+      setSheet("devices");
+      togglePerson(person);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [widgetParams, creds, devices, user, serverFinds]);
 
   // Swiping the sheet away is a no to a question, or a stop.
   useEffect(() => {
