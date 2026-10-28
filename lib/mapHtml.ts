@@ -63,6 +63,16 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       box-shadow: 0 0 0 2px var(--surface), 0 0 0 4.5px var(--ring); }
     .dtype { position: absolute; right: -3px; bottom: -1px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
     .dtype svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    /* A second device of a person: a small chip with the device icon in the person's colour, and the
+       person as a mini avatar on its lower right, where the avatar pin carries its device badge. */
+    .chipwrap { position: relative; padding: 4px; }
+    .chipwrap::after { content: ""; position: absolute; left: 50%; bottom: -3px; z-index: -1; width: 9px; height: 9px; border-radius: 2px; background: var(--surface); transform: translateX(-50%) rotate(45deg); }
+    .chip { position: relative; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #fff; box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--ring), var(--shadow); }
+    .chip > svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    .mini { position: absolute; right: -6px; bottom: -6px; display: grid; place-items: center; width: 15px; height: 15px; overflow: hidden; border-radius: 50%; color: #fff; font: 700 8px system-ui, sans-serif; box-shadow: 0 0 0 1.5px var(--surface); }
+    .mini img { width: 100%; height: 100%; object-fit: cover; }
+    /* A device the map hides, while it is picked from the list: dashed, at its last position. */
+    .chip.ghost { box-sizing: border-box; width: 26px; height: 26px; border: 2px dashed ${STATE_COLORS.offline}; background: color-mix(in srgb, var(--surface) 80%, transparent); color: var(--muted); box-shadow: var(--shadow); }
     .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
     .online { --ring: ${STATE_COLORS.online}; }
     .stale { --ring: ${STATE_COLORS.stale}; }
@@ -228,9 +238,27 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       tablet: '<rect width="20" height="16" x="2" y="4" rx="2.5"/><path d="M18 12h.01"/>',
       desktop: '<rect width="16" height="11" x="4" y="5" rx="2"/><path d="M2 20h20"/>'
     };
-    function typeBadge(d) {
-      var paths = TYPE_PATHS[d.deviceType] || TYPE_PATHS.phone;
-      return '<span class="dtype"><svg viewBox="0 0 24 24">' + paths + "</svg></span>";
+    function typeSvg(d) {
+      return '<svg viewBox="0 0 24 24">' + (TYPE_PATHS[d.deviceType] || TYPE_PATHS.phone) + "</svg>";
+    }
+    function typeBadge(d) { return '<span class="dtype">' + typeSvg(d) + "</span>"; }
+    // One avatar per person: the app marks each device avatar, chip (a second device that is online)
+    // or hidden (a second device that is offline). A hidden one is drawn as a ghost while it is the
+    // selected device, picked from the list.
+    function drawn(d) { return !!d.position && (d.pin !== "hidden" || keyOf(d) === selectedId); }
+    function kindOf(d) { return d.pin === "hidden" ? "ghost" : d.pin === "chip" ? "chip" : "avatar"; }
+    function miniHtml(d) {
+      if (d.avatar) return '<span class="mini"><img src="' + esc(d.avatar) + '" alt=""></span>';
+      return '<span class="mini" style="background:' + colour(ownerName(d)) + '">' + esc(initials(ownerName(d))) + "</span>";
+    }
+    function pinHtml(d, kind) {
+      if (kind === "chip") {
+        return '<span class="pin-body ' + state(d) + '"><span class="chipwrap"><span class="chip" style="background:' + colour(ownerName(d)) + '">' + typeSvg(d) + miniHtml(d) + '</span></span><span class="label">' + esc(fullName(d)) + "</span></span>";
+      }
+      if (kind === "ghost") {
+        return '<span class="pin-body offline"><span class="chipwrap"><span class="chip ghost">' + typeSvg(d) + '</span></span><span class="label">' + esc(d.deviceId + " · " + ago(d.lastPing)) + "</span></span>";
+      }
+      return '<span class="pin-body ' + state(d) + '"><span class="bubble">' + avatarHtml(d) + typeBadge(d) + '</span><span class="label">' + esc(fullName(d)) + "</span></span>";
     }
     function avatarHtml(d) {
       var inner = d.avatar ? '<img src="' + esc(d.avatar) + '" alt="">' : "<span>" + esc(initials(ownerName(d))) + "</span>";
@@ -257,11 +285,12 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     function sync() {
       var seen = {};
       devices.forEach(function (d) {
-        if (!d.position) return;
+        if (!drawn(d)) return;
         var id = keyOf(d);
         seen[id] = true;
         var lngLat = [d.position.longitude, d.position.latitude];
-        var key = state(d) + "|" + (d.deviceType || "") + "|" + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : "");
+        var kind = kindOf(d);
+        var key = kind + "|" + state(d) + "|" + (d.deviceType || "") + "|" + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : "") + (kind === "ghost" ? "|" + d.lastPing : "");
         var entry = markers[id];
         if (!entry) {
           var el = document.createElement("button");
@@ -271,7 +300,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
         }
         entry.marker.setLngLat(lngLat);
         if (entry.key !== key) {
-          entry.el.innerHTML = '<span class="pin-body ' + state(d) + '"><span class="bubble">' + avatarHtml(d) + typeBadge(d) + '</span><span class="label">' + esc(fullName(d)) + "</span></span>";
+          entry.el.innerHTML = pinHtml(d, kind);
           entry.key = key;
         }
         entry.el.classList.toggle("selected", id === selectedId);
@@ -336,7 +365,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       var byKey = {};
       var pins = [];
       devices.forEach(function (d) {
-        if (!d.position) return;
+        if (!drawn(d)) return;
         var p = map.project([d.position.longitude, d.position.latitude]);
         byKey[keyOf(d)] = d;
         pins.push({ key: keyOf(d), x: p.x, y: p.y, owner: ownerOf(d), fixed: keyOf(d) === selectedId });

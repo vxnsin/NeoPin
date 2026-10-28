@@ -42,6 +42,7 @@ import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
+import { pinKinds } from "@/lib/mapPins";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
 import type { CropRect } from "@/lib/crop";
 import {
@@ -449,9 +450,11 @@ export default function MapScreen() {
   // The map gets each device with its picture as a data URI, it cannot send the login headers itself.
   // This phone is the "you are here" dot already, so its own device gets no second pin.
   const visibleDevices = filterByGroup(devices, groupFilter, user?.id);
+  // One avatar per person on the map; the rest of their devices are chips or stay off it.
+  const pins = pinKinds(visibleDevices);
   const mapDevices = visibleDevices
     .filter((device) => !isOwnDevice(device, user?.id, creds?.deviceId))
-    .map((device) => ({ ...device, key: deviceKey(device), avatar: avatarFor(device.avatarUrl) }));
+    .map((device) => ({ ...device, key: deviceKey(device), avatar: avatarFor(device.avatarUrl), pin: pins.get(deviceKey(device)) ?? "avatar" }));
   const mapDevicesKey = JSON.stringify(mapDevices);
   useEffect(() => {
     if (webViewLoaded) post({ type: "devices", devices: JSON.parse(mapDevicesKey) });
