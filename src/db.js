@@ -176,6 +176,13 @@ const SCHEMA = `
     mode TEXT NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
   );
+  CREATE TABLE IF NOT EXISTS dismissed_visits (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    PRIMARY KEY (user_id, device_id, start)
+  );
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.

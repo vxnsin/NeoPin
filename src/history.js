@@ -90,14 +90,39 @@ export function daysWithData(userId, deviceId, tzOffsetMin, limit = 120) {
     .map((r) => r.day);
 }
 
+// "That was no stop" (a red light, a jam): the fixes of that stretch count as on the way, so the
+// trips before and after it become one. Kept by its time span, which outlives a rebuilt timeline.
+// False when the device has no fix at `start`, where every stop begins.
+export function dismissVisit(userId, deviceId, start, end) {
+  const db = getDb();
+  if (!db.prepare("SELECT 1 FROM positions WHERE user_id = ? AND device_id = ? AND ts = ?").get(userId, deviceId, start)) return false;
+  db.prepare("INSERT OR REPLACE INTO dismissed_visits (user_id, device_id, start, end_ms) VALUES (?, ?, ?, ?)").run(userId, deviceId, start, end);
+  return true;
+}
+
+// Undo: the stop counts again. False when none was dismissed at `start`.
+export function restoreVisit(userId, deviceId, start) {
+  const result = getDb().prepare("DELETE FROM dismissed_visits WHERE user_id = ? AND device_id = ? AND start = ?").run(userId, deviceId, start);
+  return Number(result.changes) > 0;
+}
+
+// The dismissed stops that touch a time range, oldest first.
+export function dismissedVisits(userId, deviceId, from, to) {
+  return getDb()
+    .prepare("SELECT start, end_ms FROM dismissed_visits WHERE user_id = ? AND device_id = ? AND start < ? AND end_ms >= ? ORDER BY start")
+    .all(userId, deviceId, to, from)
+    .map((r) => ({ start: Number(r.start), end: Number(r.end_ms) }));
+}
+
 // Old fixes go, and with them what was made of their trips: recognised lines, corrections,
-// and the OpenStreetMap transit answers nobody asked for in a month.
+// dismissed stops, and the OpenStreetMap transit answers nobody asked for in a month.
 export function pruneHistory(now = Date.now()) {
   const cutoff = now - config.historyDays * 86_400_000;
   const db = getDb();
   const removed = Number(db.prepare("DELETE FROM positions WHERE ts < ?").run(cutoff).changes);
   db.prepare("DELETE FROM trip_transit WHERE start < ?").run(cutoff);
   db.prepare("DELETE FROM trip_modes WHERE start < ?").run(cutoff);
+  db.prepare("DELETE FROM dismissed_visits WHERE end_ms < ?").run(cutoff);
   db.prepare("DELETE FROM trip_paths WHERE start < ?").run(cutoff);
   db.prepare("DELETE FROM transit_osm_cache WHERE fetched_at < ?").run(now - 30 * 86_400_000);
   return removed;

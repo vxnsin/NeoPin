@@ -104,7 +104,12 @@ function tripsAlong(path) {
   return out;
 }
 
-export function buildTimeline(rawPoints) {
+// Whether a stretch of time overlaps a stop the person dismissed.
+const touchesDismissed = (from, to, dismissed) => dismissed.some((d) => from <= d.end && to >= d.start);
+
+// `dismissed` are the time spans of stops the person said were none, a red light or a jam:
+// fixes there are on the way, so the trips on both sides become one.
+export function buildTimeline(rawPoints, { dismissed = [] } = {}) {
   const points = dropJumps([...rawPoints].sort((a, b) => a.ts - b.ts));
   const parts = [];
   let moving = [];
@@ -123,7 +128,7 @@ export function buildTimeline(rawPoints) {
       group.push(points[j]);
       c = centroid(group);
     }
-    if (points[j].ts - points[i].ts >= MIN_VISIT_MS) {
+    if (points[j].ts - points[i].ts >= MIN_VISIT_MS && !touchesDismissed(points[i].ts, points[j].ts, dismissed)) {
       flushMoving();
       parts.push({ kind: "visit", points: group });
       i = j + 1;
