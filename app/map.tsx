@@ -33,6 +33,7 @@ import HideSection from "@/components/HideSection";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
+import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
@@ -343,10 +344,13 @@ export default function MapScreen() {
       .catch(() => {});
   };
 
-  // Pick a photo, then cut the square in the crop view. The settings sheet closes meanwhile,
-  // two modals do not stack reliably on iOS.
+  // The camera badge asks first (system menu), then picks a photo and cuts the square in the crop
+  // view. The settings sheet closes meanwhile, two modals do not stack reliably on iOS.
   const changePhoto = async () => {
     if (!creds || photoBusy) return;
+    const choice = await askPhotoChoice(Boolean(profileAvatar));
+    if (choice === "remove") return deletePhoto();
+    if (choice !== "pick") return;
     setPhotoError("");
     setPhotoBusy(true);
     try {
@@ -714,7 +718,8 @@ export default function MapScreen() {
                   <Text style={[styles.deviceMeta, { color: c.muted }]} numberOfLines={1}>
                     @{creds.user.username} · {creds.deviceId}
                   </Text>
-                  {/* Real buttons with a height of their own: bare text links took no taps on Android. */}
+                  {/* A real button with a height of its own: a bare text link took no taps on Android.
+                      The photo itself is changed or removed through the camera badge. */}
                   <View style={styles.profileActions}>
                     <Pressable
                       style={({ pressed }) => [styles.profileButton, { backgroundColor: c.raised, opacity: pressed ? 0.7 : 1 }]}
@@ -724,17 +729,6 @@ export default function MapScreen() {
                       <MaterialIcons name={editingProfile ? "expand-less" : "edit"} size={15} color={c.primary} />
                       <Text style={[styles.profileButtonText, { color: c.primary }]}>Edit profile</Text>
                     </Pressable>
-                    {profileAvatar ? (
-                      <Pressable
-                        style={({ pressed }) => [styles.profileButton, { backgroundColor: c.raised, opacity: pressed || photoBusy ? 0.7 : 1 }]}
-                        onPress={deletePhoto}
-                        disabled={photoBusy}
-                        accessibilityRole="button"
-                      >
-                        <MaterialIcons name="delete-outline" size={15} color={c.muted} />
-                        <Text style={[styles.profileButtonText, { color: c.muted }]}>Remove photo</Text>
-                      </Pressable>
-                    ) : null}
                   </View>
                   {photoError ? <Text style={[styles.error, { color: c.secondary }]}>{photoError}</Text> : null}
                 </View>
