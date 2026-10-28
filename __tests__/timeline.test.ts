@@ -86,6 +86,9 @@ test("a refresh that only smoothed the lines swaps them in place, anything else 
   expect(routeChange(before, smoothed)).toBe("paths");
   // A stop moved, or a segment came or went: the day is drawn anew.
   expect(routeChange(before, routeSegments([visit(1), trip([[1, 2], [3, 4]]), visit(5)]))).toBe("full");
+  // Same stops, but the trip is now another mode in another colour: the stop dots follow only on a redraw.
+  const recoloured = before.map((s) => (s.type === "trip" ? { ...s, mode: "driving" as const, color: "#123456" } : s));
+  expect(routeChange(before, recoloured)).toBe("full");
   expect(routeChange(before, routeSegments([visit(1)]))).toBe("full");
   expect(routeChange([], before)).toBe("full");
 });

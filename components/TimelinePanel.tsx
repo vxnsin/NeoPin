@@ -273,14 +273,16 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
       .catch(() => fresh() && setRefreshFailures((n) => n + 1));
   }, [creds, deviceId, day, queryUser, post]);
 
+  // Only once the day itself has loaded: a retry that ran beside the first load could land
+  // before it, and the older first answer would then overwrite the newer one.
   useEffect(() => {
-    if (!stillPending(timeline) || pendingTries.current >= PENDING_RETRIES) return;
+    if (loading || !stillPending(timeline) || pendingTries.current >= PENDING_RETRIES) return;
     const timer = setTimeout(() => {
       pendingTries.current += 1;
       refreshPlaces();
     }, PENDING_RETRY_MS);
     return () => clearTimeout(timer);
-  }, [timeline, refreshFailures, refreshPlaces]);
+  }, [loading, timeline, refreshFailures, refreshPlaces]);
 
   const select = useCallback(
     (index: number | null) => {

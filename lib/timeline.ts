@@ -223,14 +223,15 @@ export function stillPending(timeline: Pick<Timeline, "placesPending" | "pathsPe
 
 // What a fresh copy of the same day changes on the map. "paths" when only the lines moved (the
 // server smoothed them): those are swapped in place, the stops, the selection and the view stay.
-// "full" when anything else changed, then the day is drawn anew.
+// "full" when anything else changed, then the day is drawn anew. A new mode or colour counts as
+// more than the line: the transit stop dots carry the colour and are only drawn with the day.
 export function routeChange(before: RouteSegment[], after: RouteSegment[]): "none" | "paths" | "full" {
   if (JSON.stringify(before) === JSON.stringify(after)) return "none";
   if (before.length !== after.length) return "full";
   const frame = (s: RouteSegment) =>
     s.type === "visit"
       ? JSON.stringify(s)
-      : JSON.stringify({ type: s.type, index: s.index, stops: s.stops ?? null, gap: s.gap ?? false });
+      : JSON.stringify({ type: s.type, index: s.index, mode: s.mode, color: s.color, stops: s.stops ?? null, gap: s.gap ?? false });
   return before.every((s, i) => frame(s) === frame(after[i])) ? "paths" : "full";
 }
 
