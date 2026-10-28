@@ -3,6 +3,7 @@
 export type PushAction =
   | { type: "requestLocation"; from: string; id: string | null }
   | { type: "groupInvite" }
+  | { type: "inviteUsed" }
   | { type: "findRequest"; session: string; from: string };
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -39,6 +40,7 @@ export function parsePushAction(input: unknown): PushAction | null {
   const data = dataOf(input);
   if (!data) return null;
   if (data.type === "groupInvite") return { type: "groupInvite" };
+  if (data.type === "inviteUsed") return { type: "inviteUsed" };
   if (data.type === "findRequest") {
     const session = typeof data.session === "string" ? data.session : "";
     return { type: "findRequest", session, from: typeof data.from === "string" ? data.from : "" };

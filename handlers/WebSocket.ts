@@ -44,6 +44,7 @@ export function registerHandlers(ws: Socket) {
         break;
 
       case "groupsChanged":
+      case "notificationsChanged":
         break;
 
       default:

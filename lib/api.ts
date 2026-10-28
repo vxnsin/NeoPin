@@ -192,7 +192,7 @@ export async function showMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me/hidden`, { method: "DELETE", headers: deviceHeaders(auth) }));
 }
 
-export type ServerStatus = { version: string; commit?: string | null; builtAt?: string | null; push?: boolean };
+export type ServerStatus = { version: string; commit?: string | null; builtAt?: string | null; push?: boolean; invites?: boolean };
 
 // Which server build runs. Older servers only know their version.
 export async function fetchServerStatus(serverIp: string): Promise<ServerStatus> {
@@ -486,4 +486,82 @@ export async function removePushToken(auth: DeviceAuth): Promise<void> {
     4_000
   );
   if (!response.ok) throw new ApiError(await problemText(response, defaultProblem(response.status)), response.status);
+}
+
+export type InviteCodeStatus = "open" | "used" | "expired" | "revoked";
+
+export type InviteCodeUser = { id: number; username: string; displayName: string; avatarUrl: string | null };
+
+export type InviteCode = {
+  id: number;
+  code: string;
+  status: InviteCodeStatus;
+  note: string | null;
+  groupId: number | null;
+  groupName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  createdBy: InviteCodeUser;
+  usedBy: InviteCodeUser | null;
+  usedAt: string | null;
+};
+
+export async function createInviteCode(auth: DeviceAuth, input: { groupId?: number; note?: string }): Promise<InviteCode> {
+  return json(await request(api(auth, "/invite-codes"), jsonInit(auth, "POST", input)));
+}
+
+// Your own codes, an admin gets everybody's.
+export async function fetchInviteCodes(auth: DeviceAuth): Promise<InviteCode[]> {
+  return json(await request(api(auth, "/invite-codes"), jsonInit(auth, "GET")));
+}
+
+export async function revokeInviteCode(auth: DeviceAuth, id: number): Promise<void> {
+  await noContent(await request(api(auth, `/invite-codes/${id}`), jsonInit(auth, "DELETE")));
+}
+
+export type CodeCheck = { valid: boolean; invitedBy?: string; groupName?: string | null };
+
+// Public: asked before there is an account.
+export async function checkInviteCode(serverUrl: string, code: string): Promise<CodeCheck> {
+  return json(
+    await request(`${httpBase(serverUrl)}/api/invite-codes/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    })
+  );
+}
+
+export async function registerRequest(
+  serverUrl: string,
+  body: { code: string; username: string; password: string; displayName?: string }
+): Promise<User> {
+  return json(
+    await request(`${httpBase(serverUrl)}/api/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+  );
+}
+
+export type AppNotification = {
+  id: number;
+  type: "inviteUsed";
+  createdAt: string;
+  readAt: string | null;
+  data: {
+    user: { id: number; username: string; displayName: string; avatarUrl: string | null };
+    invitedBy: { id: number; username: string; displayName: string };
+    groupName: string | null;
+  };
+};
+
+export async function fetchNotifications(auth: DeviceAuth): Promise<AppNotification[]> {
+  return json(await request(api(auth, "/notifications"), jsonInit(auth, "GET")));
+}
+
+// Without ids everything is marked.
+export async function markNotificationsRead(auth: DeviceAuth, ids?: number[]): Promise<void> {
+  await noContent(await request(api(auth, "/notifications/read"), jsonInit(auth, "POST", ids ? { ids } : {})));
 }
