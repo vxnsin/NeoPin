@@ -16,7 +16,7 @@ const BAR_HEIGHT = 96;
 // The map page inside the WebView. React Native talks to it with postMessage:
 // { type: "devices", devices }, { type: "self", latitude, longitude, center },
 // { type: "focus", key } and { type: "theme", dark }. The timeline adds
-// { type: "route", segments, bottom } to draw a day (trip lines and numbered stops),
+// { type: "route", segments, bottom } to draw a day (trip lines, numbered stops, transit stops),
 // { type: "routeBottom", bottom } when the panel over the map changes its height,
 // { type: "routeFocus", index } to zoom to one segment (null for the whole day)
 // and { type: "routeClear" } to go back to the live pins. The map answers a tap on
@@ -102,6 +102,10 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       box-shadow: var(--shadow); font: 700 13px system-ui, sans-serif; transition: box-shadow .15s; }
     .stop.active { z-index: 6; background: #0f172a; box-shadow: 0 0 0 4px rgba(15,23,42,.25), var(--shadow); }
     .dark .stop.active { background: #fff; color: #0f172a; border-color: #0f172a; }
+    /* Where a ride was boarded and left: a small dot in the line's colour, set inline. */
+    .tstop { width: 13px; height: 13px; padding: 0; border: 2.5px solid #fff; border-radius: 50%; box-shadow: var(--shadow); transition: box-shadow .15s; }
+    .tstop.active { z-index: 6; box-shadow: 0 0 0 4px rgba(15,23,42,.25), var(--shadow); }
+    .dark .tstop { border-color: #0a0c10; }
 
     @keyframes breathe { 0%, 100% { opacity: 0; } 45% { opacity: .85; } }
     @keyframes ripple { 0% { transform: scale(1); opacity: .75; } 25%, 100% { transform: scale(1.4); opacity: 0; } }
@@ -496,7 +500,17 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       sync();
       clearStops();
       route.segments.forEach(function (s) {
-        if (s.type !== "visit") return;
+        if (s.type === "trip") {
+          // The two transit stops of a ride, drawn as dots in the line's colour.
+          (s.stops || []).forEach(function (p) {
+            var dot = document.createElement("button");
+            dot.className = "tstop";
+            dot.style.background = s.color;
+            dot.addEventListener("click", function (e) { e.stopPropagation(); tellSegment(s.index); });
+            stops.push({ index: s.index, el: dot, marker: new maplibregl.Marker({ element: dot }).setLngLat([p.lon, p.lat]).addTo(map) });
+          });
+          return;
+        }
         var el = document.createElement("button");
         el.className = "stop";
         el.textContent = String(s.number);

@@ -1,4 +1,4 @@
-import type { PlaceKind, Segment, Trip, TripMode, Visit } from "@/lib/api";
+import type { PlaceKind, Segment, TransitKind, Trip, TripMode, TripModeChoice, Visit } from "@/lib/api";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -125,19 +125,78 @@ export const MODE_LABELS: Record<TripMode, string> = {
   walking: "Walking",
   cycling: "Cycling",
   driving: "Driving",
+  transit: "Transit",
 };
 
-export const MODE_ICONS: Record<TripMode, "directions-walk" | "directions-bike" | "directions-car"> = {
+export const MODE_ICONS = {
   walking: "directions-walk",
   cycling: "directions-bike",
   driving: "directions-car",
-};
+  transit: "directions-transit",
+} as const satisfies Record<TripMode, string>;
 
 export const MODE_COLORS: Record<TripMode, string> = {
   walking: "#0284c7",
   cycling: "#16a34a",
   driving: "#d3171e",
+  transit: "#7c3aed",
 };
+
+// The order of the "This was:" chooser under a trip, with the way back to the server's guess last.
+export const MODE_CHOICES: readonly TripModeChoice[] = ["walking", "cycling", "driving", "transit", "auto"];
+
+export const TRANSIT_LABELS: Record<TransitKind, string> = {
+  bus: "Bus",
+  tram: "Tram",
+  subway: "Subway",
+  train: "Train",
+  ferry: "Ferry",
+};
+
+export const TRANSIT_ICONS = {
+  bus: "directions-bus",
+  tram: "tram",
+  subway: "subway",
+  train: "train",
+  ferry: "directions-boat",
+} as const satisfies Record<TransitKind, string>;
+
+export type TripIcon = (typeof MODE_ICONS)[TripMode] | (typeof TRANSIT_ICONS)[TransitKind];
+
+// The icon for a trip: the vehicle when a line was matched, otherwise the mode.
+export function tripIcon(trip: Trip): TripIcon {
+  return trip.transit ? TRANSIT_ICONS[trip.transit.kind] : MODE_ICONS[trip.mode];
+}
+
+// A matched line draws in its own colour, everything else in the mode's.
+export function tripColor(trip: Trip): string {
+  if (trip.gap) return GAP_COLOR;
+  return trip.transit?.color || MODE_COLORS[trip.mode];
+}
+
+// What the timeline row of a ride shows: the line badge, the vehicle and the stops.
+export type TransitRow = { badge: string; label: string; stops: string; color: string | null; textColor: string | null };
+
+// "10" on a red badge, "Bus", "Sanderring → Hauptbahnhof"; null for a trip without a matched line.
+export function transitRow(trip: Trip): TransitRow | null {
+  const t = trip.transit;
+  if (!t) return null;
+  return {
+    badge: t.line,
+    label: TRANSIT_LABELS[t.kind] ?? MODE_LABELS.transit,
+    stops: `${t.from.name} → ${t.to.name}`,
+    color: t.color,
+    textColor: t.textColor,
+  };
+}
+
+// "Bus 10, Sanderring → Hauptbahnhof" for the screen reader, or the mode for other trips.
+export function tripTitle(trip: Trip): string {
+  if (trip.gap) return "No data";
+  const row = transitRow(trip);
+  if (!row) return MODE_LABELS[trip.mode];
+  return `${row.label}${row.badge ? ` ${row.badge}` : ""}, ${row.stops}`;
+}
 
 // Visit markers on the map are numbered in the order of the day.
 export function visitNumbers(segments: Segment[]): Map<number, number> {
@@ -149,10 +208,10 @@ export function visitNumbers(segments: Segment[]): Map<number, number> {
   return numbers;
 }
 
-// What the map page needs to draw a day: trip lines and numbered stops.
+// What the map page needs to draw a day: trip lines, numbered stops and, for a ride, where it was boarded and left.
 export type RouteSegment =
   | { type: "visit"; index: number; number: number; lat: number; lon: number }
-  | { type: "trip"; index: number; mode: TripMode; color: string; path: [number, number][]; gap?: boolean };
+  | { type: "trip"; index: number; mode: TripMode; color: string; path: [number, number][]; gap?: boolean; stops?: { lat: number; lon: number }[] };
 
 // A stretch without fixes is drawn thin, dashed and grey.
 export const GAP_COLOR = "#94a3b8";
@@ -165,13 +224,15 @@ export function routeSegments(segments: Segment[]): RouteSegment[] {
       out.push({ type: "visit", index, number: numbers.get(index) ?? 0, lat: segment.lat, lon: segment.lon });
     } else if ((segment as Trip).path?.length >= 2) {
       const trip = segment as Trip;
+      const t = trip.transit;
       out.push({
         type: "trip",
         index,
         mode: trip.mode,
-        color: trip.gap ? GAP_COLOR : MODE_COLORS[trip.mode],
+        color: tripColor(trip),
         path: trip.path,
         ...(trip.gap && { gap: true }),
+        ...(t && { stops: [t.from, t.to].map((s) => ({ lat: s.lat, lon: s.lon })) }),
       });
     }
   });

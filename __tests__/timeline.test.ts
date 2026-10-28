@@ -1,4 +1,10 @@
 import {
+  MODE_CHOICES,
+  MODE_COLORS,
+  MODE_ICONS,
+  MODE_LABELS,
+  TRANSIT_ICONS,
+  TRANSIT_LABELS,
   dayKey,
   dayLabel,
   formatClock,
@@ -6,11 +12,15 @@ import {
   formatDuration,
   routeSegments,
   shiftDay,
+  transitRow,
+  tripColor,
+  tripIcon,
+  tripTitle,
   visitKind,
   visitNumbers,
   visitTitle,
 } from "../lib/timeline";
-import type { Segment } from "../lib/api";
+import type { Segment, TransitKind, Trip, TripMode } from "../lib/api";
 
 test("durations read like a clock face", () => {
   expect(formatDuration(20_000)).toBe("< 1 min");
@@ -69,6 +79,67 @@ test("stops are numbered in order and trips keep their index", () => {
 
 test("a trip without a line is not drawn", () => {
   expect(routeSegments([trip([[1, 2]])])).toEqual([]);
+});
+
+// A bus ride as the server sends it: the line, where it was boarded and left, the line's colours.
+const ride: Trip = {
+  type: "trip",
+  start: new Date(2025, 5, 10, 8, 12).getTime(),
+  end: new Date(2025, 5, 10, 8, 31).getTime(),
+  durationMs: 19 * 60_000,
+  distanceM: 4100,
+  mode: "transit",
+  path: [[49.79, 9.95], [49.795, 9.94], [49.8, 9.93]],
+  transit: {
+    kind: "bus",
+    line: "10",
+    headsign: "Hauptbahnhof",
+    color: "#e30613",
+    textColor: "#ffffff",
+    agency: "WVV",
+    from: { name: "Sanderring", lat: 49.79, lon: 9.95 },
+    to: { name: "Hauptbahnhof", lat: 49.8, lon: 9.93 },
+    source: "gtfs",
+  },
+};
+
+test("a ride shows its line badge, the vehicle and the stops", () => {
+  expect(transitRow(ride)).toEqual({ badge: "10", label: "Bus", stops: "Sanderring → Hauptbahnhof", color: "#e30613", textColor: "#ffffff" });
+  expect(tripTitle(ride)).toBe("Bus 10, Sanderring → Hauptbahnhof");
+  expect(tripIcon(ride)).toBe("directions-bus");
+  expect(tripColor(ride)).toBe("#e30613");
+});
+
+test("a ride without a matched line falls back to the transit mode", () => {
+  const plain: Trip = { ...ride, transit: null };
+  expect(transitRow(plain)).toBeNull();
+  expect(tripTitle(plain)).toBe("Transit");
+  expect(tripIcon(plain)).toBe("directions-transit");
+  expect(tripColor(plain)).toBe(MODE_COLORS.transit);
+  // A line without colours of its own takes the mode's.
+  expect(tripColor({ ...ride, transit: { ...ride.transit!, color: null } })).toBe(MODE_COLORS.transit);
+});
+
+test("on the map a ride is drawn in its line colour with its two stops", () => {
+  const [route] = routeSegments([ride]);
+  expect(route).toMatchObject({ type: "trip", color: "#e30613", stops: [{ lat: 49.79, lon: 9.95 }, { lat: 49.8, lon: 9.93 }] });
+  expect(routeSegments([trip([[1, 2], [3, 4]])])[0]).not.toHaveProperty("stops");
+});
+
+test("every trip mode and transit kind has a label, an icon and a colour", () => {
+  const modes: TripMode[] = ["walking", "cycling", "driving", "transit"];
+  for (const mode of modes) {
+    expect(MODE_LABELS[mode]).toBeTruthy();
+    expect(MODE_ICONS[mode]).toBeTruthy();
+    expect(MODE_COLORS[mode]).toMatch(/^#/);
+  }
+  expect(Object.keys(MODE_LABELS).sort()).toEqual([...modes].sort());
+  expect(MODE_CHOICES).toEqual([...modes, "auto"]);
+  const kinds: TransitKind[] = ["bus", "tram", "subway", "train", "ferry"];
+  for (const kind of kinds) {
+    expect(TRANSIT_LABELS[kind]).toBeTruthy();
+    expect(TRANSIT_ICONS[kind]).toBeTruthy();
+  }
 });
 
 test("a password change is checked before it is sent", () => {
