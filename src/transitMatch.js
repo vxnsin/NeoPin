@@ -462,10 +462,14 @@ function corrections(userId, deviceId, from, to) {
 // the next load. A correction wins over everything.
 export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 } = {}) {
   if (config.transit) {
-    // Rides that began or ended on foot are cut at the stops first, in place.
+    // Rides that began or ended on foot are cut at the stops first, in place. A corrected trip
+    // stays as the person saw it when they corrected it: cut later, the correction would stay
+    // with the walk that keeps the trip's start, and the ride would ignore it.
+    const tripsBefore = segments.filter((s) => s.type === "trip");
+    const pinned = tripsBefore.length ? corrections(userId, deviceId, tripsBefore[0].start, tripsBefore[tripsBefore.length - 1].start) : new Map();
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
-      if (segment.type !== "trip" || segment.gap || !segment.fixes) continue;
+      if (segment.type !== "trip" || segment.gap || !segment.fixes || pinned.has(segment.start)) continue;
       const parts = splitAtStops(segment);
       if (parts.length !== 1 || parts[0] !== segment) segments.splice(i, 1, ...parts);
       i += parts.length - 1;
