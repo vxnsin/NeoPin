@@ -128,6 +128,8 @@ Rides by bus, tram or train need timetables, and nobody keeps the timetables of 
 
 Germany is covered by the nationwide feed from [gtfs.de](https://gtfs.de) (data by DELFI e.V., includes DB Regio and long-distance trains) instead of the catalog's pieces, because it covers everything. It is about 300 MB, so the first import takes a few minutes. The server sends its name and version as user agent to the catalog and the feed hosts, nothing about the accounts.
 
+With the data in place, a trip in the timeline that starts and ends at a stop, moves faster than a bike and halts every few hundred metres the way a bus does is matched against the lines serving both stops in that order: the line's shape has to follow the fixes, and of several lines the one with a departure closest to the observed one wins. Such a trip comes back with `mode: "transit"` and a `transit` object (kind, line, headsign, colours, agency, the stops boarded and left, `source: "gtfs"`). Where no timetable covers the ride but OpenStreetMap has route relations at both stops (asked through `PLACE_LOOKUP_URL`, cached like the place names), at least the line number comes back with `source: "osm"`. Results are stored per account, device and trip, and a correction sent with `PUT /api/trips/mode` wins over all of it. The battery profile of the app sends too few fixes for any of this.
+
 **Licenses.** The catalog is published by MobilityData under [Apache 2.0](https://github.com/MobilityData/mobility-database-catalogs/blob/main/LICENSE). Every feed comes under its own license, listed in the catalog and shown in `GET /api/transit`. Many feeds, the gtfs.de one included, are **CC BY 4.0**: if you show the lines to others (a public dashboard, screenshots), name the source, e.g. "Timetable data: gtfs.de / DELFI e.V., CC BY 4.0". Some feeds in the catalog need a login or an API key; those are skipped.
 
 ## Console
@@ -224,6 +226,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"? }`, asks one or all devices and answers with the list |
 | `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. The admin may pass `userId` |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
+| `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
 | `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |
 | `PUT` | `/api/avatar` | ✓ | Sets the account's profile picture: JPEG, PNG or WebP, at most 16 KB |
 | `DELETE` | `/api/avatar` | ✓ | Removes it again |
@@ -253,6 +256,8 @@ src/
 ├─ timeline.js     stays and trips per day
 ├─ transit.js      regions, the feed catalog, downloads and imports
 ├─ gtfs.js         reads GTFS tables out of a feed ZIP
+├─ transitMatch.js which line a trip was, corrections
+├─ overpass.js     one queue for every Overpass query
 ├─ devices.js      in-memory device registry
 ├─ sessions.js     dashboard sessions
 ├─ rateLimit.js    counter for wrong device tokens

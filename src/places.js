@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { getDb } from "./db.js";
 import { distanceM } from "./history.js";
+import { LOOKUP_TIMEOUT_MS, askOverpass, resetOverpass, userAgent } from "./overpass.js";
 
 // Names for the visits of a timeline. A place the person named or confirmed wins.
 // Otherwise the nearest fitting place from OpenStreetMap, asked through Overpass.
@@ -41,7 +42,6 @@ const CACHE_VERSION = 1;
 const QUERY_RADIUS_M = 120;
 const CACHE_MS = 30 * 86_400_000;
 const RETRY_MS = 10 * 60_000;
-const LOOKUP_TIMEOUT_MS = 8_000;
 
 // ---- own places ----
 
@@ -240,8 +240,6 @@ function cachedCell(key, now = Date.now()) {
 
 const inFlight = new Map();
 const failedAt = new Map();
-// Public Overpass servers want one request at a time from each client.
-let queue = Promise.resolve();
 
 export const lookupEnabled = () => Boolean(config.placeLookupUrl || config.placeFallbackUrl);
 
@@ -252,18 +250,7 @@ nwr(${around})[name][~"^(amenity|shop|tourism|leisure|office|craft|railway|publi
 out tags center 80;`;
 }
 
-const userAgent = () => `NeoPin/${config.version} (self-hosted location sharing)`;
-
-async function askOverpass(cell) {
-  const res = await fetch(config.placeLookupUrl, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": userAgent() },
-    body: new URLSearchParams({ data: overpassQuery(cell.lat, cell.lon) }),
-    signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`Overpass answered ${res.status}`);
-  return toCandidates((await res.json()).elements);
-}
+const askOverpassFor = async (cell) => toCandidates(await askOverpass(overpassQuery(cell.lat, cell.lon)));
 
 const PHOTON_TYPES = { N: "node", W: "way", R: "relation" };
 
@@ -294,7 +281,7 @@ async function askPhoton(cell) {
 async function fetchCell(cell) {
   let candidates = null;
   let failure = null;
-  for (const ask of [config.placeLookupUrl && askOverpass, config.placeFallbackUrl && askPhoton].filter(Boolean)) {
+  for (const ask of [config.placeLookupUrl && askOverpassFor, config.placeFallbackUrl && askPhoton].filter(Boolean)) {
     try {
       candidates = await ask(cell);
       break;
@@ -317,11 +304,9 @@ export function nearbyCandidates(lat, lon) {
   if (cached) return Promise.resolve(cached);
   if (!lookupEnabled() || Date.now() - (failedAt.get(cell.key) ?? 0) < RETRY_MS) return Promise.resolve(null);
   if (!inFlight.has(cell.key)) {
-    const run = queue.then(() => fetchCell(cell));
-    queue = run.catch(() => {});
     inFlight.set(
       cell.key,
-      run
+      fetchCell(cell)
         .catch((error) => {
           failedAt.set(cell.key, Date.now());
           console.warn("Place lookup failed:", error.message);
@@ -471,5 +456,5 @@ export async function placeChoices(userId, lat, lon) {
 export function resetPlaceLookups() {
   inFlight.clear();
   failedAt.clear();
-  queue = Promise.resolve();
+  resetOverpass();
 }

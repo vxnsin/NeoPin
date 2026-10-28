@@ -90,9 +90,16 @@ export function daysWithData(userId, deviceId, tzOffsetMin, limit = 120) {
     .map((r) => r.day);
 }
 
+// Old fixes go, and with them what was made of their trips: recognised lines, corrections,
+// and the OpenStreetMap transit answers nobody asked for in a month.
 export function pruneHistory(now = Date.now()) {
   const cutoff = now - config.historyDays * 86_400_000;
-  return Number(getDb().prepare("DELETE FROM positions WHERE ts < ?").run(cutoff).changes);
+  const db = getDb();
+  const removed = Number(db.prepare("DELETE FROM positions WHERE ts < ?").run(cutoff).changes);
+  db.prepare("DELETE FROM trip_transit WHERE start < ?").run(cutoff);
+  db.prepare("DELETE FROM trip_modes WHERE start < ?").run(cutoff);
+  db.prepare("DELETE FROM transit_osm_cache WHERE fetched_at < ?").run(now - 30 * 86_400_000);
+  return removed;
 }
 
 export function resetHistoryState() {
