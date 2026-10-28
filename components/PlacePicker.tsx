@@ -14,18 +14,19 @@ type Props = {
   onSaved: () => void;
 };
 
-const OWN_KINDS: PlaceKind[] = ["place", "home", "work"];
+// Saved with one tap, the server picks the name ("Home", "Home 2", "Work").
+const QUICK_KINDS = ["home", "work"] as const;
 
-// Under a visit: confirm the suggestion, pick another place close by, or name it.
+// Under a visit: confirm the suggestion, pick another place close by, tag it as Home or Work, or name it.
 export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
   const { colors: c } = useThemeManager();
   const [choices, setChoices] = useState<PlaceChoice[] | null>(null);
   const [name, setName] = useState("");
   // Renaming an own place keeps what it is, Home stays Home.
   const ownKind = visit.place?.source === "own" ? visit.place.kind : null;
-  const [kind, setKind] = useState<PlaceKind>(ownKind ?? "place");
-  const kinds = ownKind && !OWN_KINDS.includes(ownKind) ? [ownKind, ...OWN_KINDS] : OWN_KINDS;
   const [saving, setSaving] = useState(false);
+  // The quick button that is saving right now, so only it shows the spinner.
+  const [tagging, setTagging] = useState<PlaceKind | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -47,7 +48,13 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
     } catch (e: any) {
       setError(e?.message || "Could not save, try again.");
       setSaving(false);
+      setTagging(null);
     }
+  };
+
+  const tag = (kind: PlaceKind) => {
+    setTagging(kind);
+    save(() => savePlaceAt(creds, { lat: visit.lat, lon: visit.lon, kind }, userId));
   };
 
   const pick = (choice: PlaceChoice) =>
@@ -59,7 +66,8 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
 
   const current = visit.place;
   const typed = name.trim();
-  const saveTyped = () => typed && save(() => savePlaceAt(creds, { lat: visit.lat, lon: visit.lon, name: typed, kind }, userId));
+  const saveTyped = () =>
+    typed && save(() => savePlaceAt(creds, { lat: visit.lat, lon: visit.lon, name: typed, kind: ownKind ?? "place" }, userId));
 
   return (
     <View style={[styles.box, { backgroundColor: c.subtle }]}>
@@ -108,6 +116,31 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
         ))
       )}
 
+      <View style={styles.quick}>
+        <Text style={[styles.quickLabel, { color: c.muted }]}>Save as</Text>
+        {QUICK_KINDS.map((k) => {
+          const selected = ownKind === k;
+          const busy = saving && tagging === k;
+          return (
+            <Pressable
+              key={k}
+              style={[styles.tag, { backgroundColor: selected ? c.primary : c.raised }]}
+              disabled={saving}
+              onPress={() => tag(k)}
+              accessibilityLabel={`Save as ${PLACE_LABELS[k]}`}
+              accessibilityState={{ selected }}
+            >
+              {busy ? (
+                <ActivityIndicator size="small" color={selected ? c.raised : c.primary} />
+              ) : (
+                <MaterialIcons name={PLACE_ICONS[k]} size={16} color={selected ? c.raised : c.muted} />
+              )}
+              <Text style={[styles.tagText, { color: selected ? c.raised : c.primary }]}>{PLACE_LABELS[k]}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <View style={styles.own}>
         <TextInput
           value={name}
@@ -125,28 +158,12 @@ export default function PlacePicker({ creds, visit, userId, onSaved }: Props) {
           onPress={saveTyped}
           accessibilityLabel="Save the name"
         >
-          {saving ? (
+          {saving && tagging === null ? (
             <ActivityIndicator size="small" color={c.onSecondary} />
           ) : (
             <Text style={[styles.saveText, { color: typed ? c.onSecondary : c.muted }]}>Save</Text>
           )}
         </Pressable>
-      </View>
-      <View style={styles.kinds}>
-        {kinds.map((k) => {
-          const active = k === kind;
-          return (
-            <Pressable
-              key={k}
-              onPress={() => setKind(k)}
-              style={[styles.kind, { backgroundColor: active ? c.primary : c.raised }]}
-              accessibilityState={{ selected: active }}
-            >
-              <MaterialIcons name={PLACE_ICONS[k]} size={14} color={active ? c.raised : c.muted} />
-              <Text style={[styles.kindText, { color: active ? c.raised : c.primary }]}>{PLACE_LABELS[k]}</Text>
-            </Pressable>
-          );
-        })}
       </View>
       {!!error && <Text style={[styles.note, { color: c.secondary }]}>{error}</Text>}
     </View>
@@ -162,12 +179,13 @@ const styles = StyleSheet.create({
   choiceText: { flex: 1 },
   choiceName: { fontSize: 14, fontWeight: "600" },
   choiceMeta: { fontSize: 12, marginTop: 1 },
-  own: { flexDirection: "row", gap: 8, marginTop: 6 },
+  quick: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 },
+  quickLabel: { fontSize: 12.5, fontWeight: "600", marginRight: 2 },
+  tag: { flexDirection: "row", alignItems: "center", gap: 6, height: 34, paddingHorizontal: 12, borderRadius: 17 },
+  tagText: { fontSize: 13, fontWeight: "600" },
+  own: { flexDirection: "row", gap: 8, marginTop: 8 },
   input: { flex: 1, height: 38, paddingHorizontal: 12, borderRadius: 12, fontSize: 14 },
   save: { height: 38, minWidth: 64, paddingHorizontal: 14, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   saveText: { fontSize: 14, fontWeight: "700" },
-  kinds: { flexDirection: "row", gap: 6, marginTop: 6 },
-  kind: { flexDirection: "row", alignItems: "center", gap: 4, height: 28, paddingHorizontal: 10, borderRadius: 14 },
-  kindText: { fontSize: 12.5, fontWeight: "600" },
   note: { fontSize: 13, paddingVertical: 6 },
 });

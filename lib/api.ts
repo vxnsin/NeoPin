@@ -304,7 +304,9 @@ export async function fetchPlaceChoices(auth: DeviceAuth, lat: number, lon: numb
   return json(await request(`${httpBase(auth.serverIp)}/api/places/nearby?${query}`, { headers: deviceHeaders(auth) }));
 }
 
-export type PlaceInput = { lat: number; lon: number; name: string; kind?: PlaceKind; osmId?: string | null };
+// Without a name the server names Home and Work itself ("Home", "Home 2", "Work");
+// any other kind without a name is a 400 (name-required).
+export type PlaceInput = { lat: number; lon: number; name?: string; kind?: PlaceKind; osmId?: string | null };
 
 // "I was here": names the spot. An own place that already covers it is corrected.
 export async function savePlaceAt(auth: DeviceAuth, place: PlaceInput, userId?: number): Promise<void> {
