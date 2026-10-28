@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["de.vensin.neopin.live.LiveModule"]
+  }
+}
