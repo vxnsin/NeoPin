@@ -29,7 +29,7 @@ export default {
     },
     android: {
       package: "de.vensin.neopin",
-      versionCode: 8,
+      versionCode: 9,
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
         backgroundColor: "#d3171e",
