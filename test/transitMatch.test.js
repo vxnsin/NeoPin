@@ -138,7 +138,8 @@ afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const record = (fixes) => fixes.forEach((f) => recordPosition(luis.user.id, "phone", f.lat, f.lon, f.ts));
+// Phones send whole milliseconds; the generated fixes are rounded the same way.
+const record = (fixes) => fixes.forEach((f) => recordPosition(luis.user.id, "phone", f.lat, f.lon, Math.round(f.ts)));
 
 // Imports the test feed for the Würzburg region: a few fixes there today make it a region.
 async function withTimetables() {
@@ -286,10 +287,96 @@ test("without timetables OpenStreetMap gives the line number of a ride", async (
       to: { name: "Hauptbahnhof", lat: D.lat, lon: D.lon },
       source: "osm",
     });
-    assert.equal(Number(getDb().prepare("SELECT COUNT(*) AS n FROM transit_osm_cache").get().n), 2, "both ends are cached");
+    assert.ok(Number(getDb().prepare("SELECT COUNT(*) AS n FROM transit_osm_cache").get().n) >= 2, "both ends are cached");
   } finally {
     overpass.close();
   }
+});
+
+// On foot from `a` to `b`, a fix every 15 m at walking pace, as the thinning stores them.
+function walk(startTs, a, b) {
+  const length = distanceM(a.lat, a.lon, b.lat, b.lon);
+  const fixes = [];
+  for (let d = 15; d < length; d += 15) {
+    fixes.push({ ts: startTs + (d / 1.4) * 1000, lat: a.lat + ((b.lat - a.lat) * d) / length, lon: a.lon + ((b.lon - a.lon) * d) / length });
+  }
+  fixes.push({ ts: startTs + (length / 1.4) * 1000, lat: b.lat, lon: b.lon });
+  return fixes;
+}
+
+test("the walk to the stop and from it are split off, the ride in between is Bus 10", async () => {
+  await withTimetables();
+  // Home about 400 m south of Sanderring, the office 600 m north of the Hauptbahnhof. (The
+  // visit at the office takes in the last stretch of the walk, so a short walk would look fast.)
+  const home = { lat: 49.785, lon: A.lon };
+  const office = { lat: 49.8071, lon: D.lon };
+  const t0 = DAY0 + 5 * 60 * MIN + 50 * MIN;
+  record([0, 5, 10, 15].map((m) => ({ ts: t0 + m * MIN, ...home })));
+  const toStop = walk(t0 + 16 * MIN, home, A);
+  record(toStop);
+  // Two minutes at the stop: no visit, and the thinning stores nothing while the phone stands still.
+  const bus = ride(toStop[toStop.length - 1].ts + 2 * MIN, [A, B, C, D], 8, 30);
+  record(bus);
+  const fromStop = walk(bus[bus.length - 1].ts, D, office);
+  record(fromStop);
+  const there = fromStop[fromStop.length - 1].ts;
+  record([1, 6, 11].map((m) => ({ ts: there + m * MIN, ...office })));
+
+  const { segments } = await (await api(`/timeline?deviceId=phone&date=${DAY}&tz=0`)).json();
+  assert.deepEqual(
+    segments.map((seg) => seg.type + (seg.type === "trip" ? `:${seg.mode}` : "")),
+    ["visit", "trip:walking", "trip:transit", "trip:walking", "visit"]
+  );
+  const [, toA, rideSeg, toOffice] = segments;
+  assert.deepEqual(rideSeg.transit, BUS_10);
+  assert.ok(distanceM(rideSeg.path[0][0], rideSeg.path[0][1], A.lat, A.lon) < 60, "the ride starts at Sanderring");
+  assert.ok(distanceM(rideSeg.path.at(-1)[0], rideSeg.path.at(-1)[1], D.lat, D.lon) < 60, "and ends at the Hauptbahnhof");
+  assert.equal(toA.end, rideSeg.start, "no time is lost between walk and ride");
+  assert.equal(rideSeg.end, toOffice.start);
+  assert.ok(toA.distanceM > 300 && toOffice.distanceM > 400);
+});
+
+test("a trip corrected before the stops were known is not cut later, the correction covers all of it", async () => {
+  // The same morning as above, but without timetables: one trip from home to the office.
+  const home = { lat: 49.785, lon: A.lon };
+  const office = { lat: 49.8071, lon: D.lon };
+  const t0 = DAY0 + 5 * 60 * MIN + 50 * MIN;
+  record([0, 5, 10, 15].map((m) => ({ ts: t0 + m * MIN, ...home })));
+  const toStop = walk(t0 + 16 * MIN, home, A);
+  record(toStop);
+  const bus = ride(toStop[toStop.length - 1].ts + 2 * MIN, [A, B, C, D], 8, 30);
+  record(bus);
+  const fromStop = walk(bus[bus.length - 1].ts, D, office);
+  record(fromStop);
+  const there = fromStop[fromStop.length - 1].ts;
+  record([1, 6, 11].map((m) => ({ ts: there + m * MIN, ...office })));
+
+  const before = await theTrip();
+  const put = await api("/trips/mode", { method: "PUT", body: JSON.stringify({ deviceId: "phone", start: before.start, mode: "transit" }) });
+  assert.equal(put.status, 204);
+
+  // Now the timetables arrive and would cut the trip at Sanderring and the Hauptbahnhof.
+  await withTimetables();
+  const after = await theTrip();
+  assert.equal(after.start, before.start);
+  assert.equal(after.end, before.end, "still the one trip that was corrected");
+  assert.equal(after.mode, "transit");
+  assert.equal(after.corrected, true);
+});
+
+test("a drive without stops at either end is not cut", async () => {
+  await withTimetables();
+  const home = { lat: 49.785, lon: A.lon };
+  record([0, 5, 10].map((m) => ({ ts: DAY0 + m * MIN, ...home })));
+  const drive = ride(DAY0 + 11 * MIN, [home, { lat: 49.79, lon: 9.92 }, { lat: 49.8, lon: 9.92 }], 12, 0);
+  record(drive);
+  const last = drive[drive.length - 1];
+  record([1, 6, 11].map((m) => ({ ts: last.ts + m * MIN, lat: last.lat, lon: last.lon })));
+  const { segments } = await (await api(`/timeline?deviceId=phone&date=${DAY}&tz=0`)).json();
+  assert.deepEqual(
+    segments.map((seg) => seg.type + (seg.type === "trip" ? `:${seg.mode}` : "")),
+    ["visit", "trip:driving", "visit"]
+  );
 });
 
 test("with TRANSIT off trips keep their speed-based mode and corrections still apply", async () => {

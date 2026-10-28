@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { getDb } from "./db.js";
 import { distanceM } from "./history.js";
 import { LOOKUP_TIMEOUT_MS, askOverpass, overpassEnabled } from "./overpass.js";
+import { MIN_TRIP_M, tripSegment } from "./timeline.js";
 
 // Which bus, tram or train a trip of the timeline was. A trip is a candidate when it starts
 // and ends at a stop, is faster than walking or cycling, and halted every few hundred metres
@@ -19,6 +20,12 @@ const MAX_SHAPE_DISTANCE_M = 25;
 // in time mean the vehicle stood still: at a stop, or at a red light.
 const HALT_MIN_S = 12;
 const HALT_MAX_M = 40;
+// Faster than this over WINDOW_M is a vehicle, slower is a walk: where a trip changes from
+// one to the other, next to a stop, is where the ride began or ended.
+const RIDE_MS = 2.5;
+const WINDOW_M = 150;
+// The stop may be a few fixes before or after where the speed changes.
+const LOOK_AROUND = 4;
 const KM_PER_DEG = 111.32;
 
 export const TRANSIT_KINDS = ["bus", "tram", "subway", "train", "ferry"];
@@ -35,8 +42,8 @@ export function rideProfile(fixes) {
     const b = fixes[i];
     const d = distanceM(a.lat, a.lon, b.lat, b.lon);
     const dt = (b.ts - a.ts) / 1000;
-    if (dt >= HALT_MIN_S && d <= HALT_MAX_M) {
-      // Several slow fixes in a row are one halt.
+    // The wait at the boarding stop is no halt along the way; several slow fixes in a row are one halt.
+    if (dt >= HALT_MIN_S && d <= HALT_MAX_M && distance > HALT_MAX_M) {
       if (!halts.length || distance - halts[halts.length - 1] > HALT_MAX_M) halts.push(distance);
     }
     distance += d;
@@ -322,6 +329,94 @@ export function matchOsm(trip) {
   };
 }
 
+// ---- the walk to the stop ----
+
+function cumulativeM(fixes) {
+  const dist = [0];
+  for (let i = 1; i < fixes.length; i++) dist.push(dist[i - 1] + distanceM(fixes[i - 1].lat, fixes[i - 1].lon, fixes[i].lat, fixes[i].lon));
+  return dist;
+}
+
+const speedOver = (fixes, dist, i, k) => {
+  const dt = (fixes[k].ts - fixes[i].ts) / 1000;
+  return dt > 0 ? (dist[k] - dist[i]) / dt : 0;
+};
+
+// The first and last point of a trip are the centres of the visits around it, placed at the
+// time of the visit's first or last fix: the jump onto them is no speed, so they are left out.
+
+// The first fix from which the phone covered WINDOW_M faster than a walk, or -1.
+function firstFast(fixes, dist) {
+  const last = fixes.length - 2;
+  for (let i = 1; i < last; i++) {
+    let k = i + 1;
+    while (k < last && dist[k] - dist[i] < WINDOW_M) k++;
+    if (speedOver(fixes, dist, i, k) >= RIDE_MS) return i;
+  }
+  return -1;
+}
+
+// The last fix up to which the phone had just covered WINDOW_M faster than a walk, or -1.
+function lastFast(fixes, dist) {
+  for (let k = fixes.length - 2; k > 1; k--) {
+    let i = k - 1;
+    while (i > 1 && dist[k] - dist[i] < WINDOW_M) i--;
+    if (speedOver(fixes, dist, i, k) >= RIDE_MS) return k;
+  }
+  return -1;
+}
+
+// How far the nearest known stop is: from the timetables, or from the cached OpenStreetMap
+// answer. Without either, OpenStreetMap is asked for the next load.
+function nearestStopM(lat, lon) {
+  const gtfs = stopsNear(lat, lon)[0]?.distance ?? Infinity;
+  if (gtfs <= NEAR_STOP_M) return gtfs;
+  const osm = osmAround(lat, lon).cached;
+  return osm ? (nearestStop(osm.stops, lat, lon)?.distance ?? Infinity) : Infinity;
+}
+
+// Fixes this much apart in their distance to the stop count as equally close.
+const SAME_SPOT_M = 10;
+
+// The fix around `at` closest to a stop, within NEAR_STOP_M, or -1. Of fixes equally close
+// (a wait at the stop), boarding takes the last one (the ride starts when the wait ends) and
+// alighting the first.
+function stopIndexAround(fixes, at, last) {
+  const from = Math.max(0, at - LOOK_AROUND);
+  const to = Math.min(fixes.length - 1, at + LOOK_AROUND);
+  let best = null;
+  for (let i = from; i <= to; i++) {
+    const d = nearestStopM(fixes[i].lat, fixes[i].lon);
+    if (d > NEAR_STOP_M) continue;
+    if (!best || d < best.d - SAME_SPOT_M || (last && d <= best.d + SAME_SPOT_M)) best = { i, d: Math.min(d, best?.d ?? d) };
+  }
+  return best?.i ?? -1;
+}
+
+// A trip that began or ended on foot is cut where the ride began and ended, at the stops:
+// the walk to the stop, the ride, the walk from the stop. The timetables and the halts then
+// see the ride alone. A walk shorter than a trip's minimum is no walk and stays with the ride.
+export function splitAtStops(trip) {
+  const fixes = trip.fixes;
+  const lastIndex = (fixes?.length ?? 0) - 1;
+  if (lastIndex < 4) return [trip];
+  const dist = cumulativeM(fixes);
+  const fast = firstFast(fixes, dist);
+  if (fast < 0) return [trip];
+  const slow = lastFast(fixes, dist);
+  const board = stopIndexAround(fixes, fast, true);
+  const alight = stopIndexAround(fixes, slow, false);
+  const start = board > 0 && dist[board] >= MIN_TRIP_M ? board : 0;
+  const end = alight >= 0 && dist[lastIndex] - dist[alight] >= MIN_TRIP_M ? alight : lastIndex;
+  if (start === 0 && end === lastIndex) return [trip];
+  if (end <= start || dist[end] - dist[start] < MIN_TRIP_M) return [trip];
+  const parts = [];
+  if (start > 0) parts.push(tripSegment(fixes.slice(0, start + 1)));
+  parts.push(tripSegment(fixes.slice(start, end + 1)));
+  if (end < lastIndex) parts.push(tripSegment(fixes.slice(end)));
+  return parts;
+}
+
 // ---- stored results and corrections ----
 
 // Changes whenever timetable data is imported: stored "no line" results older than this are
@@ -366,6 +461,20 @@ function corrections(userId, deviceId, from, to) {
 // then OpenStreetMap; lookups that are not cached yet get up to waitMs, the rest is there on
 // the next load. A correction wins over everything.
 export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 } = {}) {
+  if (config.transit) {
+    // Rides that began or ended on foot are cut at the stops first, in place. A corrected trip
+    // stays as the person saw it when they corrected it: cut later, the correction would stay
+    // with the walk that keeps the trip's start, and the ride would ignore it.
+    const tripsBefore = segments.filter((s) => s.type === "trip");
+    const pinned = tripsBefore.length ? corrections(userId, deviceId, tripsBefore[0].start, tripsBefore[tripsBefore.length - 1].start) : new Map();
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      if (segment.type !== "trip" || segment.gap || !segment.fixes || pinned.has(segment.start)) continue;
+      const parts = splitAtStops(segment);
+      if (parts.length !== 1 || parts[0] !== segment) segments.splice(i, 1, ...parts);
+      i += parts.length - 1;
+    }
+  }
   const allTrips = segments.filter((s) => s.type === "trip");
   const trips = allTrips.filter((s) => !s.gap && s.fixes?.length >= 2);
   const undecided = [];
