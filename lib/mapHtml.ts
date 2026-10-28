@@ -237,10 +237,25 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       var bg = d.avatar ? "" : "background:" + colour(ownerName(d));
       return '<span class="avatar ' + state(d) + '" style="' + bg + '">' + inner + "</span>";
     }
-    // "64 %" or "100 %, charging", only while the device is online.
+    // "23:14" today, "Mon 23:14" this week, else "27.10. 23:14".
+    function clock(ts) {
+      var d = new Date(ts);
+      if (isNaN(d.getTime())) return "";
+      var t = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      var age = Date.now() - d.getTime();
+      if (age < 86400000 && d.getDate() === new Date().getDate()) return t;
+      if (age < 6 * 86400000) return d.toLocaleDateString([], { weekday: "short" }) + " " + t;
+      return d.toLocaleDateString([], { day: "2-digit", month: "2-digit" }) + " " + t;
+    }
+    // "64 %" or "100 %, charging"; offline it is the last reading with its time, "12 % at 23:14".
     function batteryText(d) {
-      if (d.status !== "online" || !d.battery) return "";
-      return " · " + Math.round(d.battery.level) + " %" + (d.battery.charging ? ", charging" : "");
+      if (!d.battery) return "";
+      var level = Math.round(d.battery.level) + " %";
+      if (d.status !== "online") {
+        var when = d.battery.updatedAt ? clock(d.battery.updatedAt) : "";
+        return " · " + level + (when ? " at " + when : "");
+      }
+      return " · " + level + (d.battery.charging ? ", charging" : "");
     }
     function popupHtml(d) {
       return '<div class="popup"><b>' + esc(fullName(d)) + "</b><span>" + (state(d) === "offline" ? "Offline" : "Online") + " · " + esc(ago(d.lastPing)) + esc(batteryText(d)) + "</span></div>";

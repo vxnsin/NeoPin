@@ -691,7 +691,7 @@ export default function MapScreen() {
               <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {statusText(device, timeAgo)}
               </Text>
-              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
+              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} stale={device.status !== "online"} /> : null}
             </View>
             {noteUnder(device)}
           </View>
@@ -727,7 +727,7 @@ export default function MapScreen() {
                   {primary.deviceId} · {statusText(primary, timeAgo)}
                   {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
                 </Text>
-                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
+                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} stale={primary.status !== "online"} /> : null}
               </View>
               {open ? null : noteUnder(primary)}
             </View>
