@@ -282,6 +282,8 @@ export type Timeline = {
   segments: Segment[];
   // Some place names are still being looked up, asking again in a few seconds has them.
   placesPending?: boolean;
+  // Trip paths are still being drawn along the line or the roads; until then a path is the GPS trace.
+  pathsPending?: boolean;
 };
 
 export type AccountSummary = User & { devices: number };

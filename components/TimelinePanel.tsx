@@ -32,8 +32,10 @@ import {
   formatCoords,
   formatDistance,
   formatDuration,
+  routeChange,
   routeSegments,
   shiftDay,
+  stillPending,
   shortDayLabel,
   transitRow,
   tripColor,
@@ -42,9 +44,11 @@ import {
   visitKind,
   visitNumbers,
   visitTitle,
+  type RouteSegment,
 } from "@/lib/timeline";
 
-// Place names the server is still looking up are asked for again, a few times at most.
+// Place names the server is still looking up, and paths it is still smoothing, are asked for
+// again, a few times at most.
 const PENDING_RETRY_MS = 4000;
 const PENDING_RETRIES = 5;
 
@@ -119,6 +123,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const bottomRef = useRef(bottomPadding);
   bottomRef.current = bottomPadding;
   const hasRoute = useRef(false);
+  // What the map shows now, to tell whether a refresh only smoothed the lines.
+  const shownRoute = useRef<RouteSegment[]>([]);
   const heightRef = useRef(height);
   heightRef.current = height;
   const dragFrom = useRef(height);
@@ -205,6 +211,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         if (current !== run.current) return;
         setTimeline(result);
         const segments = routeSegments(result.segments);
+        shownRoute.current = segments;
         hasRoute.current = segments.length > 0;
         if (segments.length) post({ type: "route", segments, bottom: bottomRef.current });
         else post({ type: "routeClear" });
@@ -213,6 +220,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         if (current !== run.current) return;
         setTimeline(null);
         setError(e?.message || "The timeline could not be loaded.");
+        shownRoute.current = [];
         hasRoute.current = false;
         post({ type: "routeClear" });
       })
@@ -221,19 +229,33 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
 
   useEffect(() => () => post({ type: "routeClear" }), [post]);
 
-  // Same day again for new place names only: the route on the map stays as it is.
+  // Same day again for new place names or smoother paths. The map keeps its view: smoothed lines
+  // are swapped in place, and only a day that changed in more than its lines is drawn anew.
   const refreshPlaces = useCallback(() => {
     const current = run.current;
     const mine = ++refreshRun.current;
     const fresh = () => current === run.current && mine === refreshRun.current;
     fetchTimeline(creds, deviceId, day, queryUser)
-      .then((result) => fresh() && setTimeline(result))
+      .then((result) => {
+        if (!fresh()) return;
+        setTimeline(result);
+        const segments = routeSegments(result.segments);
+        const change = routeChange(shownRoute.current, segments);
+        shownRoute.current = segments;
+        hasRoute.current = segments.length > 0;
+        if (change === "paths") post({ type: "routePaths", segments });
+        else if (change === "full") {
+          setSelected(null);
+          if (segments.length) post({ type: "route", segments, bottom: bottomRef.current });
+          else post({ type: "routeClear" });
+        }
+      })
       // A failed try still counts, the next one is scheduled all the same.
       .catch(() => fresh() && setRefreshFailures((n) => n + 1));
-  }, [creds, deviceId, day, queryUser]);
+  }, [creds, deviceId, day, queryUser, post]);
 
   useEffect(() => {
-    if (!timeline?.placesPending || pendingTries.current >= PENDING_RETRIES) return;
+    if (!stillPending(timeline) || pendingTries.current >= PENDING_RETRIES) return;
     const timer = setTimeout(() => {
       pendingTries.current += 1;
       refreshPlaces();
