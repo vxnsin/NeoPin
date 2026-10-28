@@ -11,6 +11,9 @@ import { resetTransitMatches } from "../src/transitMatch.js";
 import { resetPaths } from "../src/paths.js";
 
 config.locationWaitMs = 100;
+// The real Firebase key in a local .env must not leak into tests, test/push.test.js brings its own.
+config.fcmServiceAccountFile = null;
+config.fcmServiceAccountJson = null;
 // Tests never ask the real Overpass, test/places.test.js brings its own.
 config.placeLookupUrl = null;
 config.placeFallbackUrl = null;

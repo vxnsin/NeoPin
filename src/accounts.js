@@ -161,6 +161,7 @@ export function linkedDevices(userId) {
 
 export function unlinkDevice(userId, deviceId) {
   const result = getDb().prepare("DELETE FROM tokens WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
+  getDb().prepare("DELETE FROM push_tokens WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
   // A removed device cannot stand for anyone anymore.
   getDb().prepare("UPDATE users SET primary_device_id = NULL WHERE id = ? AND primary_device_id = ?").run(userId, deviceId);
   return Number(result.changes) > 0;
@@ -169,6 +170,7 @@ export function unlinkDevice(userId, deviceId) {
 export function setPassword(userId, password) {
   getDb().prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hashPassword(password), userId);
   getDb().prepare("DELETE FROM tokens WHERE user_id = ?").run(userId);
+  getDb().prepare("DELETE FROM push_tokens WHERE user_id = ?").run(userId);
 }
 
 // One token per device. Logging in again on the same device replaces it.
@@ -195,6 +197,8 @@ export function userForToken(token, deviceId) {
 }
 
 export function revokeToken(token) {
+  const row = getDb().prepare("SELECT user_id, device_id FROM tokens WHERE token_hash = ?").get(hashToken(token));
+  if (row) getDb().prepare("DELETE FROM push_tokens WHERE user_id = ? AND device_id = ?").run(row.user_id, row.device_id);
   getDb().prepare("DELETE FROM tokens WHERE token_hash = ?").run(hashToken(token));
 }
 

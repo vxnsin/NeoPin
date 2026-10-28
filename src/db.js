@@ -75,6 +75,14 @@ const SCHEMA = `
     updated_at TEXT NOT NULL,
     PRIMARY KEY (user_id, device_id)
   );
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    token TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, device_id)
+  );
   CREATE TABLE IF NOT EXISTS place_cache (
     cell TEXT PRIMARY KEY,
     fetched_at INTEGER NOT NULL,

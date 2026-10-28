@@ -118,10 +118,47 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `TRANSIT_DIR` | `data/transit` | Where the catalog and the downloaded feeds are kept, next to the database |
 | `TRANSIT_REGION_KM` | `30` | Size of the regions that get timetable data, around wherever the accounts have been |
 | `ROAD_MATCH_URL` | `https://routing.openstreetmap.de/routed-{profile}` | OSRM server that snaps trips to the roads, see [Smoother paths](#smoother-paths). `{profile}` becomes `car`, `bike` or `foot`. It sees the whole way of every trip it is asked about. Point it at your own OSRM or set `off` |
+| `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
+| `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
+| `PUSH_WAIT_MS` | `20000` | How long asking an offline phone for its location waits for the answer |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
 
 Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device tokens and 120 profile picture requests per minute and IP.
+
+## Push notifications
+
+With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations and find requests. Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
+
+How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds.
+
+Find over push: when somebody asks to find a person (`findRequest`) and that person has devices with a token but none online, the request is not ended with `offline`. It stays pending for the usual two minutes, the asker gets `findPending`, and every device of the person without an open socket gets a notification push (title `Find request`, body `<name> wants to find you`, high priority, channel `default`) with the data `{ "type": "findRequest", "session": "<id>", "from": "<display name>" }` (all values strings). Devices that are online only get the WebSocket message. A device that connects while the request is pending receives the `findRequest` message right after its first `dataResponse`, so tapping the notification, opening the app and connecting shows the question; answering works as usual with `findAnswer`. At most one find push per asker and asked person every 30 seconds. Hidden people and people outside the asker's groups are treated as before, the asker cannot tell whether a push went out. Without FCM or without a token the request still ends with `offline`.
+
+Tokens that FCM reports as dead are deleted, as are the tokens of unlinked devices.
+
+Set it up:
+
+1. Open [console.firebase.google.com](https://console.firebase.google.com), **Add project**.
+2. In the project add an **Android app** with the package name `de.vensin.neopin` and download `google-services.json`. It goes into the app build.
+3. **Project settings → Service accounts → Generate new private key**. This JSON is the server's credential, keep it secret.
+4. Give it to the server and restart:
+
+```yaml
+services:
+  neopin:
+    environment:
+      - FCM_SERVICE_ACCOUNT_FILE=/app/data/firebase-service-account.json
+    volumes:
+      - neopin-data:/app/data   # put the key file into this volume
+```
+
+Or bind-mount it read-only: `./firebase-service-account.json:/run/secrets/fcm.json:ro` with `FCM_SERVICE_ACCOUNT_FILE=/run/secrets/fcm.json`.
+
+Limits:
+
+- An Android app that was force-stopped receives no push until it is opened again, and aggressive battery managers of some manufacturers (Xiaomi, Huawei, Oppo, Samsung sleeping apps, ...) hold or drop pushes of apps they put to sleep.
+- iOS needs APNs: an Apple Developer account and an APNs key uploaded to the Firebase project. iOS also throttles silent pushes and does not run them for apps the user swiped away, so waking an iPhone is best effort.
+- One app build is tied to one Firebase project (its `google-services.json`). A server can only push to apps built for the project of its service account.
 
 ## Transit data
 
@@ -175,7 +212,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
-| `{ "type": "findRequest", "userId" }` | Ask to find that person. `findRequest` to their devices and `findPending` back, or `findEnded` with a reason |
+| `{ "type": "findRequest", "userId" }` | Ask to find that person. `findRequest` to their devices (a push to those without a connection, see [Push notifications](#push-notifications)) and `findPending` back, or `findEnded` with a reason |
 | `{ "type": "findAnswer", "session", "accept" }` | The asked person says yes or no. Yes: `findStarted` to both sides |
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy"?, "heading"? }` | Forwarded to the other side as `findPosition`, not stored |
 | `{ "type": "findEnd", "session" }` | Ends the find, both sides get `findEnded` |
@@ -191,7 +228,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | Message | Meaning |
 |:--|:--|
 | `{ "type": "requestLocation", "from"? }` | Send an `updatePosition` now |
-| `{ "type": "findRequest", "session", "from", "expiresAt" }` | Somebody wants to find you, answer within two minutes |
+| `{ "type": "findRequest", "session", "from", "expiresAt" }` | Somebody wants to find you, answer within two minutes. Also sent right after the `dataResponse` to a device that connects while the request is pending |
 | `{ "type": "findPending" | "findStarted", "session", "peer", "expiresAt" }` | Your request is waiting, or both sides share positions now, for up to half an hour |
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
 | `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |
@@ -228,14 +265,15 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/login` | | `{ "username", "password" }`, sets the cookie. `401` when wrong, `429` after 5 tries a minute |
 | `POST` | `/api/auth/login` | | `{ "username", "password", "deviceId", "deviceType"? }`, answers with the device `token` |
 | `GET` | `/logout` | | Ends the session |
-| `GET` | `/api/status` | | `{ "version" }`, used by the login screens and the Docker health check |
+| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push" }`, used by the login screens and the Docker health check |
 | `GET` | `/api/me` | ✓ | The signed-in account |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
 | `GET` | `/api/devices` | ✓ | The devices linked to the account |
 | `PUT` | `/api/me/primary-device` | ✓ | `{ "deviceId" }` picks the device that stands for you, `null` goes back to automatic |
 | `PUT` | `/api/users/:id/primary-device` | admin | The same for another account |
 | `GET` | `/api/getData` | ✓ | All devices |
-| `POST` | `/api/sendPing` | ✓ | `{ "deviceId"? }`, asks one or all devices and answers with the list |
+| `POST` | `/api/sendPing` | ✓ | `{ "deviceId"?, "userId"? }`, asks one or all devices and answers with the list. An offline device is woken with a push when [push](#push-notifications) is set up: `202` when it has not answered in time |
+| `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
 | `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). The admin may pass `userId` |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |

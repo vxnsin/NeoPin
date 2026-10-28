@@ -5,11 +5,13 @@ import crypto from "crypto";
 // Nothing of it goes into the history. Sessions live in memory.
 export const PENDING_MS = 2 * 60_000;
 export const ACTIVE_MS = 30 * 60_000;
+// A find push per asker and asked person at most this often.
+export const FIND_PUSH_COOLDOWN_MS = 30_000;
 
 const sameDevice = (a, userId, deviceId) => a.userId === userId && a.deviceId === deviceId;
 
 // onEnd(session, reason) is told whenever a session is over, by whichever side or the clock.
-export function createFinder({ onEnd = () => {}, now = Date.now } = {}) {
+export function createFinder({ onEnd = () => {}, now = () => Date.now() } = {}) {
   const sessions = new Map();
 
   function end(session, reason) {
@@ -70,6 +72,11 @@ export function createFinder({ onEnd = () => {}, now = Date.now } = {}) {
       session.target.deviceId = deviceId;
       expireIn(session, ACTIVE_MS);
       return session;
+    },
+
+    // Sessions of the asker that wait for the devices of this account to answer.
+    pendingFor(userId) {
+      return [...sessions.values()].filter((s) => s.status === "pending" && s.target.userId === userId && s.expiresAt > now());
     },
 
     // The other side of an active session, to send a position to.

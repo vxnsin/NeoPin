@@ -31,6 +31,7 @@ test("there is no self-service sign-up", async () => {
     version: config.version,
     commit: config.commit,
     builtAt: config.builtAt,
+    push: false,
   });
 });
 

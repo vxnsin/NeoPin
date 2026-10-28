@@ -43,6 +43,12 @@ function gitCommit() {
   }
 }
 
+// "off", empty and unset all mean: not configured.
+const envOrNull = (name) => {
+  const value = (process.env[name] ?? "").trim();
+  return value && value.toLowerCase() !== "off" ? value : null;
+};
+
 export const config = {
   version: pkg.version,
   commit: (process.env.NEOPIN_COMMIT || gitCommit() || "").slice(0, 40) || null,
@@ -74,6 +80,15 @@ export const config = {
   transitDir: path.resolve(rootDir, process.env.TRANSIT_DIR || path.join(path.dirname(process.env.DATABASE_PATH || "data/neopin.db"), "transit")),
   // The regions that get timetables are cells of about this size around where the users have been.
   transitRegionKm: Number(process.env.TRANSIT_REGION_KM) || 30,
+  // Push notifications through Firebase Cloud Messaging: the service account key of the Firebase
+  // project, as a file or inline JSON. Without either, push is off.
+  fcmServiceAccountFile: envOrNull("FCM_SERVICE_ACCOUNT_FILE"),
+  fcmServiceAccountJson: envOrNull("FCM_SERVICE_ACCOUNT_JSON"),
+  // Overrides for tests: null takes them from the service account and Google's address.
+  fcmUrl: null,
+  fcmTokenUrl: null,
+  // How long asking an offline device for its location waits for the answer.
+  pushWaitMs: Number(process.env.PUSH_WAIT_MS) || 20 * 1000,
   // Only behind a reverse proxy: take the client IP and https from X-Forwarded-*.
   trustProxy: process.env.TRUST_PROXY === "true",
   // Send the dashboard cookie over HTTPS only. Turn on once the server sits behind TLS.
