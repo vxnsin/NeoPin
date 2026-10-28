@@ -8,10 +8,9 @@ services:
       - "3012:3012"
     environment:
       - PORT=3012
-      # - ADMIN_USERNAME=admin
-      # - ADMIN_PASSWORD=choose-a-long-one   # generated and printed in the logs when unset
-      # - TRUST_PROXY=true                   # behind a reverse proxy
-      # - SECURE_COOKIES=true                # once HTTPS is in place
+      # The admin password is generated on the first start and printed once in the logs.
+      # - TRUST_PROXY=true       # behind a reverse proxy
+      # - SECURE_COOKIES=true    # once HTTPS is in place
       # - HISTORY_DAYS=365
     volumes:
       - neopin-data:/app/data
