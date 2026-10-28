@@ -76,10 +76,13 @@ export default {
       [
         "expo-splash-screen",
         {
-          image: "./assets/images/splash-icon.png",
+          // The round logo reads on both backgrounds. The dark one is the app's dark surface, so the
+          // splash follows the phone's setting and hands over to the loader without a jump.
+          image: "./assets/images/logo.png",
           imageWidth: 200,
           resizeMode: "contain",
           backgroundColor: "#ffffff",
+          dark: { backgroundColor: "#090a0d" },
         },
       ],
     ],
