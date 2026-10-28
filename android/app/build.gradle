@@ -2,6 +2,19 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// Push notifications need Firebase. The build still works without it: the plugin is only applied when
+// google-services.json is there, in this folder, in the project root or at the path of the
+// GOOGLE_SERVICES_JSON file secret on EAS.
+def googleServicesFile = file("google-services.json")
+if (!googleServicesFile.exists()) {
+    def candidates = [rootDir.parentFile.toString() + "/google-services.json", System.getenv("GOOGLE_SERVICES_JSON")]
+    def found = candidates.find { it && new File(it).exists() }
+    if (found) googleServicesFile.bytes = new File(found).bytes
+}
+if (googleServicesFile.exists()) {
+    apply plugin: "com.google.gms.google-services"
+}
+
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
