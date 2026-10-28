@@ -879,6 +879,90 @@ body.is-timeline .maplibregl-popup {
 }
 
 
+/* A second device of a person: a small chip with the device icon in the person's colour, and the
+   person as a mini avatar on its lower right, where the avatar pin carries its device badge. */
+.pin__chipwrap {
+  position: relative;
+  padding: 4px;
+}
+
+.pin__chipwrap::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -3px;
+  z-index: -1;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--surface-solid);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.pin__chip {
+  --ring: var(--offline);
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--avatar-bg, #64748b);
+  color: #ffffff;
+  box-shadow: 0 0 0 2px var(--surface-solid), 0 0 0 3.5px var(--ring), var(--shadow-md);
+}
+
+.pin[data-state="online"] .pin__chip {
+  --ring: var(--online);
+}
+
+.pin[data-state="stale"] .pin__chip {
+  --ring: var(--stale);
+}
+
+.dtype--chip {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  color: inherit;
+  stroke-width: 2.4;
+}
+
+.pin__mini {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--avatar-bg, #64748b);
+  color: #ffffff;
+  font-size: 8px;
+  font-weight: 700;
+  box-shadow: 0 0 0 1.5px var(--surface-solid);
+}
+
+.pin__mini img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* A device the map hides, while it is picked from the list: dashed, at its last position. */
+.pin__chip--ghost {
+  border: 2px dashed var(--offline);
+  background: color-mix(in srgb, var(--surface-solid) 80%, transparent);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-md);
+}
+
+.pin__label--dim {
+  color: var(--text-muted);
+}
+
 /* Names show on hover and selection, and for every pin once the map is close enough. */
 .pin__label {
   position: absolute;

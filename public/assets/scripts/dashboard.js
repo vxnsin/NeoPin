@@ -280,7 +280,7 @@ function located() {
 }
 
 function fitAll(animate) {
-  const points = located().map((d) => [d.position.longitude, d.position.latitude]);
+  const points = drawnDevices().map((d) => [d.position.longitude, d.position.latitude]);
   if (points.length === 0) {
     if (animate) toast("No device has sent a position yet.");
     return;
@@ -295,8 +295,40 @@ function fitAll(animate) {
   fitBoundsTo(bounds, padding, duration);
 }
 
-function pinHtml(device) {
-  return `<span class="pin__body"><span class="pin__bubble">${avatarHtml(device)}${typeIcon(device, " dtype--badge")}</span><span class="pin__label">${esc(fullName(device))}</span></span>`;
+// One avatar per person on the map: their primary device, the same pick the people list makes.
+// The rest of their devices are chips while online and off the map while offline, except the
+// selected one, which shows as a ghost at its last position when picked from the list.
+function pinKinds() {
+  const kinds = new Map();
+  for (const { devices: list } of peopleOf(devices)) {
+    list.forEach((d, i) => kinds.set(keyOf(d), i === 0 ? "avatar" : d.status === "online" ? "chip" : "hidden"));
+  }
+  return kinds;
+}
+
+function drawnDevices() {
+  const kinds = pinKinds();
+  return located().filter((d) => kinds.get(keyOf(d)) !== "hidden" || keyOf(d) === selectedId);
+}
+
+// The person on the chip's lower right, where the avatar pin carries its device badge.
+function miniHtml(device) {
+  const inner = device.avatarUrl ? `<img src="${esc(device.avatarUrl)}" alt="" decoding="async" />` : esc(initials(ownerName(device)));
+  return `<span class="pin__mini ${colourClass(`user:${device.userId}`)}">${inner}</span>`;
+}
+
+function pinHtml(device, kind) {
+  const text = kind === "ghost" ? `${device.deviceId} · ${timeAgo(device.lastPing)}` : fullName(device);
+  const label = `<span class="pin__label${kind === "ghost" ? " pin__label--dim" : ""}">${esc(text)}</span>`;
+  if (kind === "chip") {
+    return `<span class="pin__body"><span class="pin__chipwrap"><span class="pin__chip ${colourClass(`user:${device.userId}`)}">${typeIcon(device, " dtype--chip")}${miniHtml(device)}</span></span>${label}</span>`;
+  }
+  if (kind === "ghost") {
+    return `<span class="pin__body"><span class="pin__chipwrap"><span class="pin__chip pin__chip--ghost">${typeIcon(device, " dtype--chip")}</span></span>${label}</span>`;
+  }
+  // The avatar pin looks like the person's row: their name for the letters and their colour.
+  const avatar = avatarHtml(device, "", { label: ownerName(device), colour: `user:${device.userId}` });
+  return `<span class="pin__body"><span class="pin__bubble">${avatar}${typeIcon(device, " dtype--badge")}</span>${label}</span>`;
 }
 
 // Pins closer than this on the screen merge into one cluster marker.
@@ -340,7 +372,7 @@ function placeCluster(entry) {
 }
 
 function updateClusters() {
-  const byId = new Map(located().map((d) => [keyOf(d), d]));
+  const byId = new Map(drawnDevices().map((d) => [keyOf(d), d]));
   const points = [...byId.keys()].sort().map((id) => {
     const d = byId.get(id);
     const p = map.project([d.position.longitude, d.position.latitude]);
@@ -449,9 +481,11 @@ map.on("moveend", updateClusters);
 
 function syncMarkers() {
   const seen = new Set();
-  for (const device of located()) {
+  const kinds = pinKinds();
+  for (const device of drawnDevices()) {
     const id = keyOf(device);
     const state = freshness(device);
+    const kind = kinds.get(id) === "hidden" ? "ghost" : kinds.get(id) ?? "avatar";
     const lngLat = [device.position.longitude, device.position.latitude];
     seen.add(id);
 
@@ -470,10 +504,11 @@ function syncMarkers() {
     }
 
     entry.marker.setLngLat(lngLat);
-    const key = `${state}|${device.deviceType}|${device.avatarUrl}|${fullName(device)}`;
+    const key = `${kind}|${state}|${device.deviceType}|${device.avatarUrl}|${fullName(device)}|${kind === "ghost" ? device.lastPing : ""}`;
     if (entry.key !== key) {
-      entry.el.innerHTML = pinHtml(device);
+      entry.el.innerHTML = pinHtml(device, kind);
       entry.el.dataset.state = state;
+      entry.el.dataset.kind = kind;
       entry.el.setAttribute("aria-label", `${fullName(device)}, ${STATE_LABELS[state]}`);
       entry.key = key;
     }
