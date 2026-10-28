@@ -10,6 +10,8 @@ export const PEEK_CONTENT = 78;
 export const OVERSHOOT = 40;
 // A flick, in px/s: the panel moves one rest in that direction, however short the pull.
 export const FLICK = 500;
+// How the panel settles at a rest: quick, with the finger's momentum, barely past the rest.
+export const SNAP_SPRING = { damping: 30, stiffness: 320, mass: 0.9 };
 
 export function panelSnaps(windowHeight: number, topInset: number, bottomInset = 0): Snaps {
   return {
@@ -20,13 +22,17 @@ export function panelSnaps(windowHeight: number, topInset: number, bottomInset =
   };
 }
 
+// The two below run on the UI thread while the finger drags, hence the worklet marks.
+
 // While the finger drags, the panel follows but not beyond the top or far below the lowest rest.
 export function clampDrag(height: number, snaps: Snaps): number {
+  "worklet";
   return Math.min(snaps.high, Math.max(snaps.peek - OVERSHOOT, height));
 }
 
 // Where the panel comes to rest when the finger lets go.
 export function restAfterDrag(height: number, velocityDown: number, snaps: Snaps): number {
+  "worklet";
   const rests = [snaps.peek, snaps.low, snaps.mid, snaps.high];
   if (velocityDown > FLICK) {
     const below = rests.filter((rest) => rest < height);

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
@@ -20,7 +22,7 @@ import {
 import type { StoredCredentials } from "@/lib/credentials";
 import { DEVICE_ICONS, freshness, typeOf, type Device } from "@/lib/devices";
 import { getReportingPreset, onSettingsChange } from "@/lib/settings";
-import { clampDrag, restAfterDrag, type Snaps } from "@/lib/sheetSnap";
+import { SNAP_SPRING, clampDrag, restAfterDrag, type Snaps } from "@/lib/sheetSnap";
 import {
   MODE_CHOICES,
   MODE_ICONS,
@@ -116,35 +118,52 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const [refreshFailures, setRefreshFailures] = useState(0);
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const rows = useRef<Record<number, number>>({});
-  // While the finger drags, the panel follows it; the map only hears about the height it rests at.
-  const [drag, setDrag] = useState<number | null>(null);
-  const shownHeight = drag ?? height;
+  // The panel's height lives on the UI thread: the finger moves it and a spring settles it at a
+  // rest, without a render per frame. React and the map only hear the rest it settles at.
+  const shown = useSharedValue(height);
+  const dragFrom = useSharedValue(height);
+  // The rest the spring is heading for, so the height prop coming back from it does not restart it.
+  const target = useRef(height);
+  const panelStyle = useAnimatedStyle(() => ({ height: shown.value }));
   const bottomPadding = height + 16;
   const bottomRef = useRef(bottomPadding);
   bottomRef.current = bottomPadding;
   const hasRoute = useRef(false);
   // What the map shows now, to tell whether a refresh only smoothed the lines.
   const shownRoute = useRef<RouteSegment[]>([]);
-  const heightRef = useRef(height);
-  heightRef.current = height;
-  const dragFrom = useRef(height);
   const callbacks = useRef({ onClose, onHeightChange });
   callbacks.current = { onClose, onHeightChange };
+  const settle = useCallback((rest: number) => {
+    target.current = rest;
+    callbacks.current.onHeightChange(rest);
+  }, []);
+  // A new height from outside (the window changed, the panel opened): glide there too.
+  useEffect(() => {
+    if (height === target.current) return;
+    target.current = height;
+    shown.value = withSpring(height, SNAP_SPRING);
+  }, [height, shown]);
   const { peek, low, mid, high } = snaps;
   const dragGesture = useMemo(() => {
     const rests = { peek, low, mid, high };
     return Gesture.Pan()
-      .runOnJS(true)
       // A tap on the buttons in the header stays a tap.
       .activeOffsetY([-6, 6])
+      // Grabbing the panel while it still settles takes it from where it is.
       .onBegin(() => {
-        dragFrom.current = heightRef.current;
+        dragFrom.value = shown.value;
       })
-      .onUpdate((e) => setDrag(clampDrag(dragFrom.current - e.translationY, rests)))
+      .onUpdate((e) => {
+        shown.value = clampDrag(dragFrom.value - e.translationY, rests);
+      })
       // Dragging down ends at the header strip, never closed: the map gets the room, the day stays on it.
-      .onEnd((e) => callbacks.current.onHeightChange(restAfterDrag(dragFrom.current - e.translationY, e.velocityY, rests)))
-      .onFinalize(() => setDrag(null));
-  }, [peek, low, mid, high]);
+      // The spring carries on with the finger's speed, the panel height grows upwards.
+      .onEnd((e) => {
+        const rest = restAfterDrag(dragFrom.value - e.translationY, e.velocityY, rests);
+        shown.value = withSpring(rest, { ...SNAP_SPRING, velocity: -e.velocityY });
+        scheduleOnRN(settle, rest);
+      });
+  }, [peek, low, mid, high, shown, dragFrom, settle]);
 
   useEffect(() => {
     if (hasRoute.current) post({ type: "routeBottom", bottom: bottomPadding });
@@ -301,7 +320,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const chipText = (active: boolean) => ({ color: active ? c.onSecondary : c.primary });
 
   return (
-    <View style={[styles.panel, { height: shownHeight, backgroundColor: c.raised, paddingBottom: insets.bottom + 8 }]}>
+    <Animated.View style={[styles.panel, panelStyle, { backgroundColor: c.raised, paddingBottom: insets.bottom + 8 }]}>
       <GestureDetector gesture={dragGesture}>
         <View collapsable={false} accessibilityHint="Drag up or down to resize">
           <View style={[styles.grabber, { backgroundColor: c.muted }]} />
@@ -616,7 +635,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           })}
         </ScrollView>
       )}
-    </View>
+    </Animated.View>
   );
 
 }
