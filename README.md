@@ -149,6 +149,10 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
+| `{ "type": "findRequest", "userId" }` | Ask to find that person. `findRequest` to their devices and `findPending` back, or `findEnded` with a reason |
+| `{ "type": "findAnswer", "session", "accept" }` | The asked person says yes or no. Yes: `findStarted` to both sides |
+| `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy"?, "heading"? }` | Forwarded to the other side as `findPosition`, not stored |
+| `{ "type": "findEnd", "session" }` | Ends the find, both sides get `findEnded` |
 | `{ "type": "ping" }` | `{ "type": "pong" }` |
 | `{ "type": "locationError", "message"? }` | Logged on the console |
 
@@ -161,6 +165,10 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | Message | Meaning |
 |:--|:--|
 | `{ "type": "requestLocation", "from"? }` | Send an `updatePosition` now |
+| `{ "type": "findRequest", "session", "from", "expiresAt" }` | Somebody wants to find you, answer within two minutes |
+| `{ "type": "findPending" | "findStarted", "session", "peer", "expiresAt" }` | Your request is waiting, or both sides share positions now, for up to half an hour |
+| `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
+| `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |
 | `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `battery` is `null` until the device reported one |
 
 </details>
