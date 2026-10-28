@@ -284,6 +284,8 @@ export type Timeline = {
   placesPending?: boolean;
   // Trip paths are still being drawn along the line or the roads; until then a path is the GPS trace.
   pathsPending?: boolean;
+  // Stops the person dismissed on this day (a red light, a jam), to bring one back. Older servers send none.
+  dismissed?: { start: number; end: number }[];
 };
 
 export type AccountSummary = User & { devices: number };
@@ -364,6 +366,25 @@ export async function setTripMode(auth: DeviceAuth, deviceId: string, start: num
       method: "PUT",
       headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
       body: JSON.stringify({ deviceId, start, mode }),
+    })
+  );
+}
+
+// "That was no stop": the server counts the stretch as on the way and the trips around it become
+// one. `dismissed: false` brings it back. The stop is named by its device, start and end.
+export async function dismissVisit(
+  auth: DeviceAuth,
+  deviceId: string,
+  span: { start: number; end: number },
+  dismissed: boolean,
+  userId?: number
+): Promise<void> {
+  const query = forUser(userId);
+  await noContent(
+    await request(`${httpBase(auth.serverIp)}/api/visits/dismissed${query ? `?${query}` : ""}`, {
+      method: "PUT",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId, start: span.start, end: span.end, dismissed }),
     })
   );
 }
