@@ -66,6 +66,7 @@ import {
   fetchMe,
   fetchServerStatus,
   setPrimaryDeviceRequest,
+  pingDeviceRequest,
   type Group,
   type Invite,
   type User,
@@ -120,6 +121,16 @@ export default function MapScreen() {
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
   const [serverLabel, setServerLabel] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The device being asked for a fresh position, and a short note under its row when it could not be.
+  const [pinging, setPinging] = useState<string | null>(null);
+  const [pingNote, setPingNote] = useState<{ key: string; text: string } | null>(null);
+  const pingNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (pingNoteTimer.current) clearTimeout(pingNoteTimer.current);
+    },
+    []
+  );
   const [editingProfile, setEditingProfile] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -572,6 +583,7 @@ export default function MapScreen() {
 
   const isMine = (d: Device) => isOwnDevice(d, user?.id, creds?.deviceId);
   const me = devices.find(isMine);
+  const myDevices = user ? devices.filter((d) => d.userId === user.id) : [];
   const profileAvatar = user?.avatarUrl ?? null;
   // The timeline panel opens at its middle rest and keeps the height the finger left it at,
   // within the rests of the current window.
@@ -596,18 +608,58 @@ export default function MapScreen() {
     focusDevice(person.primary, false);
   };
 
-  // Your own device stands for you; a second tap on the filled star goes back to automatic.
-  const pickPrimary = async (device: Device) => {
-    if (!creds) return;
+  // One of your devices stands for you; null lets the server take one that is online.
+  const pickPrimary = async (deviceId: string | null) => {
+    if (!creds || deviceId === (creds.user.primaryDeviceId ?? null)) return;
     try {
-      // The new list arrives over the socket and redraws the rows.
-      await setPrimaryDeviceRequest(creds, device.primary ? null : device.deviceId);
+      // The device list arrives over the socket; the account's choice comes back here.
+      changeUser(await setPrimaryDeviceRequest(creds, deviceId));
     } catch (error: any) {
       Alert.alert("Main device", error?.message || "The main device could not be changed.");
     }
   };
 
-  const linkedDevice = (device: Device, pickable: boolean) => {
+  // Asks one device for a fresh position. The position itself comes over the socket and redraws
+  // the row; only a device the server cannot reach leaves a note under it.
+  const askDevice = async (device: Device) => {
+    if (!creds || pinging) return;
+    const key = deviceKey(device);
+    const note = (text: string) => {
+      setPingNote({ key, text });
+      if (pingNoteTimer.current) clearTimeout(pingNoteTimer.current);
+      pingNoteTimer.current = setTimeout(() => setPingNote(null), 3000);
+    };
+    setPinging(key);
+    try {
+      if (!(await pingDeviceRequest(creds, device.deviceId, device.userId))) note("Not connected right now");
+    } catch (error: any) {
+      note(error?.status === 404 ? "Not connected right now" : error?.message || "Could not ask the device.");
+    } finally {
+      setPinging(null);
+    }
+  };
+
+  // A round button with a size of its own; a bare icon took no taps on Android.
+  const askButton = (device: Device, who: string) => (
+    <Pressable
+      style={({ pressed }) => [styles.askButton, { backgroundColor: c.subtle, opacity: pressed ? 0.7 : 1 }]}
+      onPress={() => askDevice(device)}
+      disabled={pinging !== null}
+      accessibilityRole="button"
+      accessibilityLabel={`Ask ${who} for a fresh position`}
+    >
+      {pinging === deviceKey(device) ? (
+        <ActivityIndicator size="small" color={c.primary} />
+      ) : (
+        <MaterialIcons name="refresh" size={18} color={c.primary} />
+      )}
+    </Pressable>
+  );
+
+  const noteUnder = (device: Device) =>
+    pingNote?.key === deviceKey(device) ? <Text style={[styles.pingNote, { color: c.secondary }]}>{pingNote.text}</Text> : null;
+
+  const linkedDevice = (device: Device) => {
     const state = freshness(device);
     return (
       <Pressable
@@ -629,22 +681,9 @@ export default function MapScreen() {
             </Text>
             {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
           </View>
+          {noteUnder(device)}
         </View>
-        {pickable ? (
-          <Pressable
-            onPress={() => pickPrimary(device)}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityState={{ selected: Boolean(device.primary) }}
-            accessibilityLabel={device.primary ? `${device.deviceId} is your main device` : `Make ${device.deviceId} your main device`}
-          >
-            <MaterialIcons
-              name={device.primary ? "star" : "star-border"}
-              size={20}
-              color={device.primary ? STATE_COLORS.stale : c.muted}
-            />
-          </Pressable>
-        ) : null}
+        {!isMine(device) ? askButton(device, device.deviceId) : null}
         {device.position && <MaterialIcons name="near-me" size={18} color={c.muted} />}
       </Pressable>
     );
@@ -675,7 +714,9 @@ export default function MapScreen() {
               </Text>
               {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
             </View>
+            {open ? null : noteUnder(primary)}
           </View>
+          {!person.isMe ? askButton(primary, person.name) : null}
           {serverFinds && !person.isMe && person.online && person.userId !== undefined && (
             <Pressable
               onPress={() => startFind(person)}
@@ -690,7 +731,7 @@ export default function MapScreen() {
         </Pressable>
         {open && (
           <View style={styles.linked}>
-            {person.devices.map((device) => linkedDevice(device, person.isMe && person.devices.length > 1))}
+            {person.devices.map(linkedDevice)}
           </View>
         )}
       </View>
@@ -969,6 +1010,31 @@ export default function MapScreen() {
               </View>
               <Text style={[styles.presetHint, { color: c.muted }]}>{REPORTING_PRESETS[preset].description}</Text>
 
+              {myDevices.length > 1 ? (
+                <>
+                  <Text style={[styles.sectionTitle, { color: c.muted }]}>Main device</Text>
+                  <View style={styles.chipRow}>
+                    {[null, ...myDevices.map((d) => d.deviceId)].map((id) => {
+                      const active = id === (creds.user.primaryDeviceId ?? null);
+                      return (
+                        <Pressable
+                          key={id ?? "auto"}
+                          onPress={() => pickPrimary(id)}
+                          style={[styles.deviceChip, { backgroundColor: active ? c.secondary : c.subtle }]}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                        >
+                          <Text style={[styles.presetLabel, { color: active ? c.onSecondary : c.primary }]}>{id ?? "Automatic"}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <Text style={[styles.presetHint, { color: c.muted }]}>
+                    The device that stands for you on the map and in the list. Automatic takes one that is online.
+                  </Text>
+                </>
+              ) : null}
+
               <HideSection
                 auth={creds}
                 hiddenUntil={creds.user.hiddenUntil}
@@ -1082,6 +1148,10 @@ const styles = StyleSheet.create({
   deviceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, borderRadius: 14, paddingHorizontal: 6 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
   findButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  askButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  pingNote: { fontSize: 12, marginTop: 2 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  deviceChip: { borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 },
   deviceMeta: { fontSize: 12.5 },
   // The text gives way first, so a battery next to it stays on the line.
   metaText: { flexShrink: 1 },

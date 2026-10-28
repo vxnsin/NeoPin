@@ -9,6 +9,8 @@ export type User = {
   mustChangePassword?: boolean;
   // Only on the own account, from servers that can hide: until when (ms), null when visible.
   hiddenUntil?: number | null;
+  // The device picked to stand for the account, null for automatic. Older logins have none stored.
+  primaryDeviceId?: string | null;
 };
 
 export type DeviceAuth = { serverIp: string; deviceId: string; token: string };
@@ -156,6 +158,19 @@ export async function setPrimaryDeviceRequest(auth: DeviceAuth, deviceId: string
       body: JSON.stringify({ deviceId }),
     })
   );
+}
+
+// Asks one device for a fresh position. True when the server could reach it; the position itself
+// arrives over the socket. A device that is not connected is a 404 from the server.
+export async function pingDeviceRequest(auth: DeviceAuth, deviceId: string, userId?: number): Promise<boolean> {
+  const response = await request(`${httpBase(auth.serverIp)}/api/sendPing`, {
+    method: "POST",
+    headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceId, userId }),
+  });
+  if (response.status === 202) return false;
+  await json(response);
+  return true;
 }
 
 export async function fetchMe(auth: DeviceAuth): Promise<User> {
