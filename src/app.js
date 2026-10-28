@@ -59,7 +59,7 @@ import {
   removeMember,
   renameGroup,
 } from "./groups.js";
-import { daysWithData, positionsBetween, recordPosition } from "./history.js";
+import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { createFinder } from "./find.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
@@ -221,6 +221,8 @@ const Timeline = t.object({
   placesPending: t.boolean(),
   // Some trips are still being snapped to the roads, a reload in a few seconds has them.
   pathsPending: t.boolean(),
+  // Stops the person dismissed on this day, so the clients can bring one back.
+  dismissed: t.array(t.object({ start: t.number(), end: t.number() })),
 });
 
 const Message = t.object({ message: t.string() });
@@ -1011,7 +1013,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
           const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
-          const timeline = buildTimeline(points);
+          const dismissed = dismissedVisits(userId, ctx.query.deviceId, range.from, range.to);
+          const timeline = buildTimeline(points, { dismissed });
           // The paths need the final mode of every trip, corrections included, so they come after the lines.
           const [places, paths] = await Promise.all([
             namePlaces(userId, timeline.segments, { tzOffsetMin: ctx.query.tz ?? 0 }),
@@ -1025,7 +1028,32 @@ export function createApp({ gracefulShutdown = true } = {}) {
             ...timeline,
             placesPending: places.pending,
             pathsPending: paths.pending,
+            dismissed,
           };
+        }
+      );
+
+      // "That was no stop": a red light or a jam the timeline took for a stay. `dismissed: false`
+      // brings it back. The stop is named by its device, start and end, as the timeline sent it.
+      api.put(
+        "/visits/dismissed",
+        {
+          query: ForUser,
+          body: t.object({
+            deviceId: t.string().min(1).max(64),
+            start: t.int().min(0),
+            end: t.int().min(0),
+            dismissed: t.boolean(),
+          }),
+          response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const { deviceId, start, end, dismissed } = ctx.body;
+          if (end < start || end - start > 86_400_000) throw problem(400, "bad-span", "end has to follow start, within a day");
+          const userId = targetUserId(ctx, ctx.query.userId);
+          const done = dismissed ? dismissVisit(userId, deviceId, start, end) : restoreVisit(userId, deviceId, start);
+          if (!done) throw problem(404, "unknown-visit", dismissed ? "No stop of that device starts there" : "No dismissed stop starts there");
+          return reply(204);
         }
       );
 

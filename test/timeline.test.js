@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { getDb } from "../src/db.js";
 import { distanceM, daysWithData, positionsBetween, pruneHistory, recordPosition } from "../src/history.js";
 import { buildTimeline, dayRange } from "../src/timeline.js";
-import { startServer } from "./helpers.js";
+import { deviceHeaders, startServer } from "./helpers.js";
 
 const MIN = 60_000;
 const DAY0 = Date.UTC(2025, 5, 10, 0, 0, 0);
@@ -94,6 +94,17 @@ test("a short wobble between two stays at one place is one visit", () => {
   assert.equal(segments[0].type, "visit");
 });
 
+test("a dismissed stop is on the way: the trips on both sides become one", () => {
+  const points = aDay();
+  const there = buildTimeline(points).segments.filter((x) => x.type === "visit")[1];
+  const { segments, summary } = buildTimeline(points, { dismissed: [{ start: there.start, end: there.end }] });
+  assert.deepEqual(segments.map((x) => x.type), ["visit", "trip", "visit"]);
+  assert.equal(summary.visits, 2);
+  assert.ok(segments[1].path.some(([lat]) => Math.abs(lat - 48.16) < 0.001), "the trip runs through where the stop was");
+  // A dismissed span elsewhere in the day changes nothing.
+  assert.equal(buildTimeline(points, { dismissed: [{ start: DAY0 + 500 * MIN, end: DAY0 + 510 * MIN }] }).segments.length, 5);
+});
+
 test("an empty day has nothing to show", () => {
   const { segments, summary } = buildTimeline([]);
   assert.deepEqual(segments, []);
@@ -150,6 +161,30 @@ test("the timeline endpoint returns the day of the signed-in account", async () 
 
   assert.equal((await fetch(url)).status, 401);
   assert.equal((await fetch(`${s.baseUrl}/api/timeline?deviceId=phone&date=bad`, { headers: { cookie } })).status, 400);
+});
+
+test("a stop that was none can be dismissed and brought back", async () => {
+  const { user, token } = await s.account("luis");
+  for (const p of aDay()) recordPosition(user.id, "phone", p.lat, p.lon, p.ts);
+  const headers = { "content-type": "application/json", ...deviceHeaders("phone", token) };
+  const day = async () => (await fetch(`${s.baseUrl}/api/timeline?deviceId=phone&date=2025-06-10&tz=0`, { headers })).json();
+  const put = (body) => fetch(`${s.baseUrl}/api/visits/dismissed`, { method: "PUT", headers, body: JSON.stringify(body) });
+
+  const before = await day();
+  assert.deepEqual(before.dismissed, []);
+  const stop = before.segments.filter((x) => x.type === "visit")[1];
+
+  assert.equal((await put({ deviceId: "phone", start: stop.start, end: stop.end, dismissed: true })).status, 204);
+  const after = await day();
+  assert.deepEqual(after.segments.map((x) => x.type), ["visit", "trip", "visit"]);
+  assert.deepEqual(after.dismissed, [{ start: stop.start, end: stop.end }]);
+
+  assert.equal((await put({ deviceId: "phone", start: stop.start, end: stop.end, dismissed: false })).status, 204);
+  assert.equal((await day()).segments.length, 5);
+  // Nothing left to bring back, no fix there, and an end before the start.
+  assert.equal((await put({ deviceId: "phone", start: stop.start, end: stop.end, dismissed: false })).status, 404);
+  assert.equal((await put({ deviceId: "phone", start: stop.start + 1, end: stop.end, dismissed: true })).status, 404);
+  assert.equal((await put({ deviceId: "phone", start: stop.end, end: stop.start, dismissed: true })).status, 400);
 });
 
 test("another account cannot read the timeline", async () => {
