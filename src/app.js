@@ -66,6 +66,7 @@ import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
 import { transitStatus } from "./transit.js";
 import { TRANSIT_KINDS, TRIP_MODES, matchTransit, setTripMode } from "./transitMatch.js";
+import { smoothPaths } from "./paths.js";
 import {
   MAX_RADIUS_M,
   MIN_RADIUS_M,
@@ -201,6 +202,9 @@ const Trip = t.object({
   transit: Transit.nullable().optional(),
   // The person corrected the mode (PUT /api/trips/mode).
   corrected: t.boolean().optional(),
+  // Where `path` comes from when it is not the fixes themselves: the line's course between
+  // the stops, or the fixes snapped to the roads.
+  pathSource: t.enum(["line", "road"]).optional(),
 });
 
 const Timeline = t.object({
@@ -215,6 +219,8 @@ const Timeline = t.object({
   segments: t.array(t.union(Visit, Trip)),
   // Some place names are still being looked up, a reload in a few seconds has them.
   placesPending: t.boolean(),
+  // Some trips are still being snapped to the roads, a reload in a few seconds has them.
+  pathsPending: t.boolean(),
 });
 
 const Message = t.object({ message: t.string() });
@@ -1006,11 +1012,20 @@ export function createApp({ gracefulShutdown = true } = {}) {
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
           const timeline = buildTimeline(points);
-          const [{ pending }] = await Promise.all([
+          // The paths need the final mode of every trip, corrections included, so they come after the lines.
+          const [places, paths] = await Promise.all([
             namePlaces(userId, timeline.segments, { tzOffsetMin: ctx.query.tz ?? 0 }),
-            matchTransit(userId, ctx.query.deviceId, timeline.segments),
+            matchTransit(userId, ctx.query.deviceId, timeline.segments).then(() =>
+              smoothPaths(userId, ctx.query.deviceId, timeline.segments)
+            ),
           ]);
-          return { date: ctx.query.date, deviceId: ctx.query.deviceId, ...timeline, placesPending: pending };
+          return {
+            date: ctx.query.date,
+            deviceId: ctx.query.deviceId,
+            ...timeline,
+            placesPending: places.pending,
+            pathsPending: paths.pending,
+          };
         }
       );
 

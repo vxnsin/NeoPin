@@ -205,8 +205,17 @@ test("a ride along the line with halts at the stops is Bus 10", async () => {
   assert.deepEqual(trip.transit, BUS_10);
   assert.equal(trip.corrected, undefined);
   assert.equal(Number(getDb().prepare("SELECT COUNT(*) AS n FROM trip_transit WHERE transit IS NOT NULL").get().n), 1, "the match is stored");
-  // Loading the day again comes from the stored result.
-  assert.deepEqual((await theTrip()).transit, BUS_10);
+  // The map shows the line's own course from Sanderring to the Hauptbahnhof, not the fixes.
+  assert.equal(trip.pathSource, "line");
+  assert.deepEqual(trip.path[0], [A.lat, A.lon]);
+  assert.deepEqual(trip.path.at(-1), [D.lat, D.lon]);
+  const line = [A, B, C, D];
+  assert.ok(trip.path.every(([lat, lon]) => meanShapeDistance([{ lat, lon }], line) < 1), "every point lies on shape s10");
+  assert.ok(trip.path.length > 10, "with the shape's points in between");
+  // Loading the day again comes from the stored result, the course included.
+  const again = await theTrip();
+  assert.deepEqual(again.transit, BUS_10);
+  assert.deepEqual(again.path, trip.path);
 });
 
 test("a drive past the same stops without halts stays a drive", async () => {
@@ -229,6 +238,7 @@ test("a correction wins over the recognition until it is taken back", async () =
   assert.equal(corrected.mode, "driving");
   assert.equal(corrected.corrected, true);
   assert.equal(corrected.transit, undefined);
+  assert.equal(corrected.pathSource, undefined, "no longer drawn along the line");
 
   assert.equal((await put({ deviceId: "phone", start: trip.start, mode: "auto" })).status, 204);
   const back = await theTrip();
