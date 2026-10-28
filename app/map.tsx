@@ -76,6 +76,7 @@ import {
 } from "@/lib/api";
 import {
   badgeText,
+  chipGroups,
   filterByGroup,
   loadGroupFilter,
   pendingCount,
@@ -930,7 +931,7 @@ export default function MapScreen() {
             <>
               {showGroupChips(groups) && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
-                  {[{ id: null as number | null, name: "All" }, ...groups].map((group) => {
+                  {[{ id: null as number | null, name: "All" }, ...chipGroups(groups)].map((group) => {
                     const active = group.id === groupFilter;
                     return (
                       <Pressable
