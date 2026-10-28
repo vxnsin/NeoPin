@@ -138,7 +138,8 @@ afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const record = (fixes) => fixes.forEach((f) => recordPosition(luis.user.id, "phone", f.lat, f.lon, f.ts));
+// Phones send whole milliseconds; the generated fixes are rounded the same way.
+const record = (fixes) => fixes.forEach((f) => recordPosition(luis.user.id, "phone", f.lat, f.lon, Math.round(f.ts)));
 
 // Imports the test feed for the Würzburg region: a few fixes there today make it a region.
 async function withTimetables() {
@@ -343,6 +344,34 @@ test("the walk to the stop and from it are split off, the ride in between is Bus
   assert.equal(toA.end, rideSeg.start, "no time is lost between walk and ride");
   assert.equal(rideSeg.end, toOffice.start);
   assert.ok(toA.distanceM > 300 && toOffice.distanceM > 400);
+});
+
+test("a trip corrected before the stops were known is not cut later, the correction covers all of it", async () => {
+  // The same morning as above, but without timetables: one trip from home to the office.
+  const home = { lat: 49.785, lon: A.lon };
+  const office = { lat: 49.8071, lon: D.lon };
+  const t0 = DAY0 + 5 * 60 * MIN + 50 * MIN;
+  record([0, 5, 10, 15].map((m) => ({ ts: t0 + m * MIN, ...home })));
+  const toStop = walk(t0 + 16 * MIN, home, A);
+  record(toStop);
+  const bus = ride(toStop[toStop.length - 1].ts + 2 * MIN, [A, B, C, D], 8, 30);
+  record(bus);
+  const fromStop = walk(bus[bus.length - 1].ts, D, office);
+  record(fromStop);
+  const there = fromStop[fromStop.length - 1].ts;
+  record([1, 6, 11].map((m) => ({ ts: there + m * MIN, ...office })));
+
+  const before = await theTrip();
+  const put = await api("/trips/mode", { method: "PUT", body: JSON.stringify({ deviceId: "phone", start: before.start, mode: "transit" }) });
+  assert.equal(put.status, 204);
+
+  // Now the timetables arrive and would cut the trip at Sanderring and the Hauptbahnhof.
+  await withTimetables();
+  const after = await theTrip();
+  assert.equal(after.start, before.start);
+  assert.equal(after.end, before.end, "still the one trip that was corrected");
+  assert.equal(after.mode, "transit");
+  assert.equal(after.corrected, true);
 });
 
 test("a drive without stops at either end is not cut", async () => {
