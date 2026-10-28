@@ -419,7 +419,13 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     function tellSegment(index) {
       window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({ type: "segment", index: index }));
     }
-    function routePadding() { return { top: 110, bottom: route.bottom, left: 40, right: 40 }; }
+    // The panel may cover almost the whole map, and MapLibre cannot fit bounds when the padding
+    // swallows the map: the route keeps a strip of at least 120 px between the top padding and the panel.
+    function routePadding() {
+      var height = map.getContainer().clientHeight;
+      var bottom = Math.max(0, Math.min(route.bottom, height - 110 - 120));
+      return { top: 110, bottom: bottom, left: 40, right: 40 };
+    }
     function fitRoute(index) {
       if (!route) return;
       var bounds = new maplibregl.LngLatBounds();

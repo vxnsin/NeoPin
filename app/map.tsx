@@ -409,9 +409,10 @@ export default function MapScreen() {
   const isMine = (d: Device) => isOwnDevice(d, user?.id, creds?.deviceId);
   const me = devices.find(isMine);
   const profileAvatar = user?.avatarUrl ?? null;
-  // The timeline panel opens at its middle rest and keeps the height the finger left it at.
+  // The timeline panel opens at its middle rest and keeps the height the finger left it at,
+  // within the rests of the current window.
   const panelSnapsNow = panelSnaps(windowHeight, insets.top);
-  const panelHeight = panelRest ?? panelSnapsNow.mid;
+  const panelHeight = Math.min(panelRest ?? panelSnapsNow.mid, panelSnapsNow.high);
   const pending = pendingCount(invites);
   const people = groupPeople(visibleDevices, user?.id);
   const online = visibleDevices.filter((d) => d.status === "online").length;
