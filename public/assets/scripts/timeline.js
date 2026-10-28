@@ -353,7 +353,7 @@ async function loadDay({ keepView = false } = {}) {
       tlBody.scrollTop = scroll;
       if (active !== null) markActive(active);
     } else fitDay();
-    if (data.placesPending && tl.retries < PENDING_RETRIES) {
+    if ((data.placesPending || data.pathsPending) && tl.retries < PENDING_RETRIES) {
       tl.retries += 1;
       setTimeout(() => id === tl.loadId && tl.on && loadDay({ keepView: true }), PENDING_RETRY_MS);
     }

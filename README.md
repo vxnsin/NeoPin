@@ -117,6 +117,7 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `TRANSIT_CATALOG_URL` | the [Mobility Database](https://mobilitydatabase.org) catalog CSV | Which GTFS feeds exist and what each covers |
 | `TRANSIT_DIR` | `data/transit` | Where the catalog and the downloaded feeds are kept, next to the database |
 | `TRANSIT_REGION_KM` | `30` | Size of the regions that get timetable data, around wherever the accounts have been |
+| `ROAD_MATCH_URL` | `https://routing.openstreetmap.de/routed-{profile}` | OSRM server that snaps trips to the roads, see [Smoother paths](#smoother-paths). `{profile}` becomes `car`, `bike` or `foot`. It sees the whole way of every trip it is asked about. Point it at your own OSRM or set `off` |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
 
@@ -131,6 +132,17 @@ Germany is covered by the nationwide feed from [gtfs.de](https://gtfs.de) (data 
 A short wait at a stop leaves no visit, so the walk to the stop, the ride and the walk from it arrive as one trip. The server cuts such a trip where the phone speeds up next to a stop and where it slows down next to one, and the timeline shows the walks and the ride separately. With the data in place, a trip in the timeline that starts and ends at a stop, moves faster than a bike and halts every few hundred metres the way a bus does is matched against the lines serving both stops in that order: the line's shape has to follow the fixes, and of several lines the one with a departure closest to the observed one wins. Such a trip comes back with `mode: "transit"` and a `transit` object (kind, line, headsign, colours, agency, the stops boarded and left, `source: "gtfs"`). Where no timetable covers the ride but OpenStreetMap has route relations at both stops (asked through `PLACE_LOOKUP_URL`, cached like the place names), at least the line number comes back with `source: "osm"`. Results are stored per account, device and trip, and a correction sent with `PUT /api/trips/mode` wins over all of it. The battery profile of the app sends too few fixes for any of this.
 
 **Licenses.** The catalog is published by MobilityData under [Apache 2.0](https://github.com/MobilityData/mobility-database-catalogs/blob/main/LICENSE). Every feed comes under its own license, listed in the catalog and shown in `GET /api/transit`. Many feeds, the gtfs.de one included, are **CC BY 4.0**: if you show the lines to others (a public dashboard, screenshots), name the source, e.g. "Timetable data: gtfs.de / DELFI e.V., CC BY 4.0". Some feeds in the catalog need a login or an API key; those are skipped.
+
+## Smoother paths
+
+With the Balanced profile the app reports every 15 s, with Battery every 2 minutes, and straight lines between those fixes cut through every corner. So the timeline draws trips along the way they really went:
+
+- A recognised bus, tram or train ride follows the line's own course from its timetable, from the boarding to the alighting stop.
+- Walks, bike rides, drives and buses without a known course are snapped to the roads by an [OSRM](https://project-osrm.org) match service with the foot, bike or car profile. Trams, trains and ferries without a course keep their fixes.
+
+The server replaces the trip's `path` with that course and says where it came from in `pathSource` (`line` or `road`); without it the path is the fixes themselves. Distances still come from the fixes. A match that is much longer than the fixes is a detour the phone never made and is not used. Results are cached per trip; a day that is still being matched says `pathsPending`, and a reload a few seconds later has the rest.
+
+**Privacy.** Unlike the place lookup, which only sees single spots, the routing service sees the whole way of every trip it matches. The default is the public OSRM of [FOSSGIS](https://routing.openstreetmap.de), which logs requests (see its privacy statement). It gets the coordinates and the seconds between the fixes, not the date or the account. Run your own [OSRM](https://github.com/Project-OSRM/osrm-backend) and point `ROAD_MATCH_URL` at it, or set it to `off` and the fixes are drawn as they are. FOSSGIS allows light use only: one request a second (the server keeps to it), a valid user agent, and attribution: the routes are based on [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors.
 
 ## Console
 
@@ -224,7 +236,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `PUT` | `/api/users/:id/primary-device` | admin | The same for another account |
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"? }`, asks one or all devices and answers with the list |
-| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. The admin may pass `userId` |
+| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). The admin may pass `userId` |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
 | `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |
@@ -258,6 +270,7 @@ src/
 ├─ gtfs.js         reads GTFS tables out of a feed ZIP
 ├─ transitMatch.js which line a trip was, corrections
 ├─ overpass.js     one queue for every Overpass query
+├─ paths.js        trips along the line's course or snapped to the roads
 ├─ devices.js      in-memory device registry
 ├─ sessions.js     dashboard sessions
 ├─ rateLimit.js    counter for wrong device tokens

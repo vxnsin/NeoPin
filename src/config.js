@@ -62,6 +62,10 @@ export const config = {
   // Asked when Overpass fails, a Photon reverse endpoint. "off" turns it off.
   placeFallbackUrl:
     process.env.PLACE_FALLBACK_URL === "off" ? null : process.env.PLACE_FALLBACK_URL || "https://photon.komoot.io/reverse",
+  // Snaps the trips of the timeline to the roads, an OSRM server; {profile} becomes car, bike
+  // or foot. It sees the whole way of every trip it is asked about. "off" turns it off.
+  roadMatchUrl:
+    process.env.ROAD_MATCH_URL === "off" ? null : process.env.ROAD_MATCH_URL || "https://routing.openstreetmap.de/routed-{profile}",
   // Bus, tram and train lines in the timeline, from GTFS timetables. "off" turns it off.
   transit: !["off", "false", "no", "0"].includes((process.env.TRANSIT ?? "").trim().toLowerCase()),
   // The Mobility Database catalog: which feeds exist, what each covers, where to get it.

@@ -98,6 +98,7 @@ export function pruneHistory(now = Date.now()) {
   const removed = Number(db.prepare("DELETE FROM positions WHERE ts < ?").run(cutoff).changes);
   db.prepare("DELETE FROM trip_transit WHERE start < ?").run(cutoff);
   db.prepare("DELETE FROM trip_modes WHERE start < ?").run(cutoff);
+  db.prepare("DELETE FROM trip_paths WHERE start < ?").run(cutoff);
   db.prepare("DELETE FROM transit_osm_cache WHERE fetched_at < ?").run(now - 30 * 86_400_000);
   return removed;
 }

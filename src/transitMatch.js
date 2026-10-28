@@ -142,6 +142,38 @@ function departureGap(departure, observed) {
 
 const place = (stop) => ({ name: stop.name, lat: stop.lat, lon: stop.lon });
 
+// The line's own course between the two stops, from its GTFS shape: from the shape point
+// nearest the boarding stop to the one nearest the alighting stop after it (a loop line
+// passes a stop twice). The stops themselves are the ends, so the line touches them.
+// Null when the trip has no shape or the shape does not pass both stops in that order.
+export function lineBetween(feedId, shapeId, from, to) {
+  if (!shapeId) return null;
+  const shape = getDb().prepare("SELECT lat, lon FROM transit_shapes WHERE feed_id = ? AND id = ? ORDER BY seq").all(feedId, shapeId);
+  if (shape.length < 2) return null;
+  const nearest = (stop, start) => {
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = start; i < shape.length; i++) {
+      const d = distanceM(stop.lat, stop.lon, shape[i].lat, shape[i].lon);
+      if (d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    return bestD <= NEAR_STOP_M * 2 ? best : -1;
+  };
+  const a = nearest(from, 0);
+  const b = a < 0 ? -1 : nearest(to, a + 1);
+  if (b <= a) return null;
+  return [[from.lat, from.lon], ...shape.slice(a, b + 1).map((p) => [p.lat, p.lon]), [to.lat, to.lon]];
+}
+
+// The line's course rides along with a match, but outside of what the API sends for it.
+function withLinePath(transit, linePath) {
+  if (transit && linePath) Object.defineProperty(transit, "linePath", { value: linePath, enumerable: false });
+  return transit;
+}
+
 // The line of a trip according to the timetables, or null.
 export function matchGtfs(trip) {
   const fixes = trip.fixes;
@@ -196,7 +228,7 @@ export function matchGtfs(trip) {
   const { row } = best;
   const fromStop = from.find((s) => s.feed_id === best.feedId && s.id === row.from_id);
   const toStop = to.find((s) => s.feed_id === best.feedId && s.id === row.to_id);
-  return {
+  const transit = {
     kind: kindOf(row.type),
     line: row.short_name || row.long_name || row.route_id,
     headsign: row.headsign ?? null,
@@ -207,6 +239,7 @@ export function matchGtfs(trip) {
     to: place(toStop),
     source: "gtfs",
   };
+  return withLinePath(transit, lineBetween(best.feedId, row.shape_id, fromStop, toStop));
 }
 
 // ---- OpenStreetMap ----
@@ -425,17 +458,25 @@ const dataStamp = () => Number(getDb().prepare("SELECT MAX(updated_at) AS stamp 
 
 function storedResult(userId, deviceId, trip, stamp) {
   const row = getDb()
-    .prepare("SELECT end_ms, transit, data_stamp FROM trip_transit WHERE user_id = ? AND device_id = ? AND start = ?")
+    .prepare("SELECT end_ms, transit, path, data_stamp FROM trip_transit WHERE user_id = ? AND device_id = ? AND start = ?")
     .get(userId, deviceId, trip.start);
   if (!row || Number(row.end_ms) !== trip.end) return undefined;
   if (row.transit === null && Number(row.data_stamp) < stamp) return undefined;
-  return row.transit === null ? null : JSON.parse(row.transit);
+  return row.transit === null ? null : withLinePath(JSON.parse(row.transit), row.path ? JSON.parse(row.path) : null);
 }
 
 function storeResult(userId, deviceId, trip, transit, stamp) {
   getDb()
-    .prepare("INSERT OR REPLACE INTO trip_transit (user_id, device_id, start, end_ms, transit, data_stamp) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(userId, deviceId, trip.start, trip.end, transit ? JSON.stringify(transit) : null, stamp);
+    .prepare("INSERT OR REPLACE INTO trip_transit (user_id, device_id, start, end_ms, transit, path, data_stamp) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(
+      userId,
+      deviceId,
+      trip.start,
+      trip.end,
+      transit ? JSON.stringify(transit) : null,
+      transit?.linePath ? JSON.stringify(transit.linePath) : null,
+      stamp
+    );
 }
 
 // "That was by car": remembered per account, device and trip start; "auto" forgets it.

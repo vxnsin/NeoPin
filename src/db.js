@@ -155,8 +155,19 @@ const SCHEMA = `
     start INTEGER NOT NULL,
     end_ms INTEGER NOT NULL,
     transit TEXT,
+    path TEXT,
     data_stamp INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
+  );
+  CREATE TABLE IF NOT EXISTS trip_paths (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    start INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    profile TEXT NOT NULL,
+    path TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, device_id, start, profile)
   );
   CREATE TABLE IF NOT EXISTS trip_modes (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -218,6 +229,10 @@ export function initDb(file = config.dbPath) {
   db.prepare(
     "INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) SELECT g.id, u.id, ? FROM user_groups g, users u WHERE g.fixed = 1"
   ).run(new Date().toISOString());
+  // The course of a recognised line between the stops, next to the match itself.
+  if (!db.prepare("PRAGMA table_info(trip_transit)").all().some((c) => c.name === "path")) {
+    db.exec("ALTER TABLE trip_transit ADD COLUMN path TEXT");
+  }
   // The device a person picked to stand for them, NULL for the automatic choice.
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "primary_device_id")) {
     db.exec("ALTER TABLE users ADD COLUMN primary_device_id TEXT");
