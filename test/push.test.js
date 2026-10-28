@@ -1,10 +1,12 @@
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
 import { config } from "../src/config.js";
+import { getDb } from "../src/db.js";
 import { resetFcm } from "../src/fcm.js";
 import { pushTokenOf } from "../src/push.js";
+import { PENDING_MS } from "../src/find.js";
 import { deviceHeaders, shareGroup, startServer } from "./helpers.js";
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
@@ -326,4 +328,144 @@ test("with push off nothing is sent and invites still work", async () => {
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(fake.sent.length, 0);
   assert.equal(fake.tokenCalls, 0);
+});
+
+// Find over push: the asked person is offline, the request waits for the app to open.
+async function findSetup() {
+  await s.account("boss");
+  const luis = await s.account("luis");
+  const anna = await s.account("anna");
+  shareGroup("Friends", luis.user, anna.user);
+  const asker = await s.device("luis", "phone");
+  await asker.next();
+  return { luis, anna, asker };
+}
+
+async function nextOf(client, type) {
+  for (;;) {
+    const msg = await client.next();
+    if (msg.type === type) return msg;
+  }
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 100));
+
+test("a find request to an offline person with a token stays pending and pushes", async () => {
+  const { anna, asker } = await findSetup();
+  await putToken(anna, "phone", { token: "anna-tok", platform: "android" });
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  const pending = await nextOf(asker, "findPending");
+  assert.equal(pending.peer.username, "anna");
+  await settle();
+
+  assert.equal(fake.sent.length, 1);
+  const { message } = fake.sent[0];
+  assert.equal(message.token, "anna-tok");
+  assert.deepEqual(message.notification, { title: "Find request", body: "luis wants to find you" });
+  assert.deepEqual(message.data, { type: "findRequest", session: pending.session, from: "luis" });
+  assert.deepEqual(message.android, { priority: "HIGH", notification: { channel_id: "default" } });
+});
+
+test("an online phone gets the socket message and no push, an offline one the push", async () => {
+  const { anna, asker } = await findSetup();
+  await putToken(anna, "phone");
+  const tabletToken = await s.tokenFor("anna", "tablet");
+  await putToken({ token: tabletToken }, "tablet", { token: "tablet-tok", platform: "android" });
+  const online = await s.device("anna", "phone");
+  await online.next();
+
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  await nextOf(online, "findRequest");
+  await settle();
+  assert.deepEqual(fake.sent.map((m) => m.message.token), ["tablet-tok"]);
+
+  // Everything online: no push at all.
+  const tablet = await s.device("anna", "tablet", tabletToken);
+  await tablet.next();
+  fake.sent.length = 0;
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  await nextOf(asker, "findPending");
+  await settle();
+  assert.equal(fake.sent.length, 0);
+});
+
+test("a device that connects while the request is pending gets it after the device list", async () => {
+  const { anna, asker } = await findSetup();
+  await putToken(anna, "phone");
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  const pending = await nextOf(asker, "findPending");
+
+  const opened = await s.device("anna", "phone");
+  assert.equal(opened.reply.successful, true);
+  assert.equal((await opened.next()).type, "dataResponse");
+  const ask = await opened.next();
+  assert.equal(ask.type, "findRequest");
+  assert.equal(ask.session, pending.session);
+  assert.equal(ask.from.username, "luis");
+  assert.equal(ask.expiresAt, pending.expiresAt);
+
+  opened.send({ type: "findAnswer", session: pending.session, accept: true });
+  assert.equal((await nextOf(asker, "findStarted")).peer.username, "anna");
+});
+
+test("an expired request is not replayed", async () => {
+  const { anna, asker } = await findSetup();
+  await putToken(anna, "phone");
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  await nextOf(asker, "findPending");
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() + PENDING_MS + 1000 });
+  try {
+    const opened = await s.device("anna", "phone");
+    assert.equal((await opened.next()).type, "dataResponse");
+    opened.send({ type: "ping" });
+    assert.equal((await opened.next()).type, "pong", "no findRequest in between");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("without a token or without FCM an offline person ends the request", async () => {
+  const { anna, asker } = await findSetup();
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  assert.equal((await nextOf(asker, "findEnded")).reason, "offline");
+
+  await putToken(anna, "phone");
+  config.fcmServiceAccountJson = null;
+  resetFcm();
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  assert.equal((await nextOf(asker, "findEnded")).reason, "offline");
+  assert.equal(fake.sent.length, 0);
+});
+
+test("a hidden person is not pushed", async () => {
+  const { anna, asker } = await findSetup();
+  await putToken(anna, "phone");
+  getDb().prepare("UPDATE users SET hidden_until = ? WHERE id = ?").run(Date.now() + 60_000, anna.user.id);
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  assert.equal((await nextOf(asker, "findEnded")).reason, "unavailable");
+  await settle();
+  assert.equal(fake.sent.length, 0);
+});
+
+test("at most one find push per asker and person every thirty seconds", async () => {
+  const { anna, asker } = await findSetup();
+  await putToken(anna, "phone");
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  await nextOf(asker, "findPending");
+  asker.send({ type: "findRequest", userId: anna.user.id });
+  const second = await nextOf(asker, "findPending");
+  await settle();
+  assert.equal(fake.sent.length, 1);
+  assert.ok(second.session);
+
+  mock.timers.enable({ apis: ["Date"], now: Date.now() + 31_000 });
+  try {
+    asker.send({ type: "findRequest", userId: anna.user.id });
+    await nextOf(asker, "findPending");
+    await settle();
+    assert.equal(fake.sent.length, 2);
+  } finally {
+    mock.timers.reset();
+  }
 });

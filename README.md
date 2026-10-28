@@ -128,9 +128,13 @@ Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, loc
 
 ## Push notifications
 
-With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people, for now about group invitations. Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
+With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations and find requests. Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
 
-How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds. Tokens that FCM reports as dead are deleted, as are the tokens of unlinked devices.
+How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds.
+
+Find over push: when somebody asks to find a person (`findRequest`) and that person has devices with a token but none online, the request is not ended with `offline`. It stays pending for the usual two minutes, the asker gets `findPending`, and every device of the person without an open socket gets a notification push (title `Find request`, body `<name> wants to find you`, high priority, channel `default`) with the data `{ "type": "findRequest", "session": "<id>", "from": "<display name>" }` (all values strings). Devices that are online only get the WebSocket message. A device that connects while the request is pending receives the `findRequest` message right after its first `dataResponse`, so tapping the notification, opening the app and connecting shows the question; answering works as usual with `findAnswer`. At most one find push per asker and asked person every 30 seconds. Hidden people and people outside the asker's groups are treated as before, the asker cannot tell whether a push went out. Without FCM or without a token the request still ends with `offline`.
+
+Tokens that FCM reports as dead are deleted, as are the tokens of unlinked devices.
 
 Set it up:
 
@@ -208,7 +212,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
-| `{ "type": "findRequest", "userId" }` | Ask to find that person. `findRequest` to their devices and `findPending` back, or `findEnded` with a reason |
+| `{ "type": "findRequest", "userId" }` | Ask to find that person. `findRequest` to their devices (a push to those without a connection, see [Push notifications](#push-notifications)) and `findPending` back, or `findEnded` with a reason |
 | `{ "type": "findAnswer", "session", "accept" }` | The asked person says yes or no. Yes: `findStarted` to both sides |
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy"?, "heading"? }` | Forwarded to the other side as `findPosition`, not stored |
 | `{ "type": "findEnd", "session" }` | Ends the find, both sides get `findEnded` |
@@ -224,7 +228,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | Message | Meaning |
 |:--|:--|
 | `{ "type": "requestLocation", "from"? }` | Send an `updatePosition` now |
-| `{ "type": "findRequest", "session", "from", "expiresAt" }` | Somebody wants to find you, answer within two minutes |
+| `{ "type": "findRequest", "session", "from", "expiresAt" }` | Somebody wants to find you, answer within two minutes. Also sent right after the `dataResponse` to a device that connects while the request is pending |
 | `{ "type": "findPending" | "findStarted", "session", "peer", "expiresAt" }` | Your request is waiting, or both sides share positions now, for up to half an hour |
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
 | `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |

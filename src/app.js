@@ -60,7 +60,7 @@ import {
   renameGroup,
 } from "./groups.js";
 import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
-import { createFinder } from "./find.js";
+import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
 import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
 import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToken } from "./push.js";
 import { createAttemptLimiter } from "./rateLimit.js";
@@ -378,6 +378,34 @@ export function createApp({ gracefulShutdown = true } = {}) {
     for (const target of pushTokensOf(userId)) sendNotification(target, message).catch(() => {});
   }
 
+  // Last find push per asker and asked person, and devices that get their pending find
+  // requests right after the next device list.
+  const findPushes = new Map();
+  const replayFinds = new Set();
+
+  // The devices of the asked account that have a token and no open socket.
+  function findPushTargets(targetId) {
+    if (!fcmEnabled()) return [];
+    const online = new Set(onlineDevices(targetId).map((d) => d.id));
+    return pushTokensOf(targetId).filter((t) => !online.has(t.deviceId));
+  }
+
+  function pushFind(askerId, targetId, targets, session) {
+    const key = `${askerId}:${targetId}`;
+    const now = Date.now();
+    if (now - (findPushes.get(key) ?? 0) < FIND_PUSH_COOLDOWN_MS) return;
+    findPushes.set(key, now);
+    for (const [k, at] of findPushes) if (now - at >= FIND_PUSH_COOLDOWN_MS) findPushes.delete(k);
+    const from = getUser(askerId).display_name;
+    for (const target of targets) {
+      sendNotification(target, {
+        title: "Find request",
+        body: `${from} wants to find you`,
+        data: { type: "findRequest", session: session.id, from },
+      }).catch(() => {});
+    }
+  }
+
   // Whoever is still in a find session hears how it ended. While it was pending, every device
   // of the asked account had the question open.
   const finder = createFinder({
@@ -417,7 +445,15 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
         return payloads.get(userId);
       };
-      for (const device of onlineDevices()) send(device.socket, payloadFor(device.userId));
+      for (const device of onlineDevices()) {
+        send(device.socket, payloadFor(device.userId));
+        const key = `${device.userId}:${device.id}`;
+        if (replayFinds.delete(key)) {
+          for (const s of finder.pendingFor(device.userId)) {
+            send(device.socket, { type: "findRequest", session: s.id, from: peerOf(s.asker.userId), expiresAt: s.expiresAt });
+          }
+        }
+      }
       for (const [viewer, userId] of viewers) send(viewer, payloadFor(userId));
     }, BROADCAST_THROTTLE_MS);
   }
@@ -1400,6 +1436,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
         // What this server understands beyond the basics, so newer apps know what they may send.
         send(socket, { successful: true, features: ["positionBatch", "find"] });
+        if (finder.pendingFor(account).length > 0) replayFinds.add(`${account}:${deviceId}`);
         broadcastDevices();
       };
 
@@ -1446,8 +1483,10 @@ export function createApp({ gracefulShutdown = true } = {}) {
             // Only people who see each other on the map, and nobody who hides right now.
             if (!target || target.id === account || !canSee(me, target.id) || isHidden(target)) return fail("unavailable");
             const phones = onlineDevices(target.id);
-            if (phones.length === 0) return fail("offline");
+            const pushTargets = findPushTargets(target.id);
+            if (phones.length === 0 && pushTargets.length === 0) return fail("offline");
             const session = finder.request({ askerUserId: account, askerDeviceId: deviceId, targetUserId: target.id });
+            if (pushTargets.length > 0) pushFind(account, target.id, pushTargets, session);
             const ask = { type: "findRequest", session: session.id, from: peerOf(account), expiresAt: session.expiresAt };
             for (const phone of phones) send(phone.socket, ask);
             send(socket, { type: "findPending", session: session.id, peer: peerOf(target.id), expiresAt: session.expiresAt });
@@ -1504,6 +1543,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         if (role === "device" && !socket.replaced && detachSocket(account, deviceId, socket)) {
           console.log(chalk.redBright(`[-] Device ${chalk.whiteBright(deviceId)} disconnected. Marked offline.`));
           finder.endAllOf(account, deviceId);
+          replayFinds.delete(`${account}:${deviceId}`);
           broadcastDevices();
         }
       });
