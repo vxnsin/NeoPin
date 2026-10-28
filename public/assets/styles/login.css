@@ -362,3 +362,43 @@ form {
   text-underline-offset: 3px;
   cursor: pointer;
 }
+
+.login__switch {
+  margin: 18px 0 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+.login__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.login__note {
+  min-height: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.login__note:empty {
+  display: none;
+}
+
+.login__note[data-state="ok"] {
+  color: var(--online);
+}
+
+.login__note[data-state="bad"] {
+  color: var(--danger);
+}
+
+#code {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+}
