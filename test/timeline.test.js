@@ -48,6 +48,19 @@ test("a day becomes visits and the trips between them", () => {
   assert.ok(trip.path.length >= 6);
 });
 
+test("waiting at a red light does not turn a drive into a ride by bike or a walk", () => {
+  const points = [];
+  for (let m = 0; m <= 20; m += 5) points.push(at(m, 48.1));
+  // 3 km at about 36 km/h, with four minutes standing at a light halfway.
+  for (let i = 1; i <= 5; i++) points.push(at(20 + i * 0.5, 48.1 + i * 0.0027));
+  for (let m = 1; m <= 4; m++) points.push(at(22.5 + m, 48.1135 + (m % 2) * 0.00001));
+  for (let i = 1; i <= 5; i++) points.push(at(26.5 + i * 0.5, 48.1135 + i * 0.0027));
+  for (let m = 30; m <= 50; m += 5) points.push(at(m, 48.127));
+  const trip = buildTimeline(points).segments.find((x) => x.type === "trip");
+  assert.equal(trip.mode, "driving");
+  assert.equal(trip.durationMs, 9 * MIN, "the trip still lasts as long as it did");
+});
+
 test("a stretch without fixes is a gap, it counts neither as distance nor as moving", () => {
   const points = [];
   for (let m = 0; m <= 30; m += 5) points.push(at(m, 48.1));
