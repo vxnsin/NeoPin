@@ -1,4 +1,4 @@
-import { ApiError, deviceHeaders, fetchTimeline, fetchTimelineDays, loginRequest, normalizeServerUrl } from "../lib/api";
+import { ApiError, deviceHeaders, fetchTimeline, fetchTimelineDays, loginRequest, normalizeServerUrl, pingDeviceRequest } from "../lib/api";
 
 const auth = { serverIp: "ws://10.0.0.2:3012", deviceId: "Luis’ iPhone", token: "t/k+1" };
 
@@ -80,4 +80,21 @@ test("a password change sends both passwords with the device headers and returns
   expect(url).toBe("http://10.0.0.2:3012/api/me/password");
   expect(JSON.parse(init.body)).toEqual({ currentPassword: "old", newPassword: "newpassword" });
   expect(init.headers.Authorization).toBe("Bearer t%2Fk%2B1");
+});
+
+test("asking a device for a position posts its id and tells whether it was reached", async () => {
+  const fetchMock = respond(200, { message: "Location request sent to Pixel", devices: [] });
+  (global as any).fetch = fetchMock;
+  await expect(pingDeviceRequest(auth, "Pixel", 7)).resolves.toBe(true);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://10.0.0.2:3012/api/sendPing");
+  expect(init.method).toBe("POST");
+  expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", userId: 7 });
+});
+
+test("a 202 means no device was reachable, a 404 names the device", async () => {
+  (global as any).fetch = respond(202, { message: "No devices connected" });
+  await expect(pingDeviceRequest(auth, "Pixel", 7)).resolves.toBe(false);
+  (global as any).fetch = respond(404, { title: "device-not-connected", detail: "Device Pixel is not connected" });
+  await expect(pingDeviceRequest(auth, "Pixel", 7)).rejects.toMatchObject({ status: 404 });
 });

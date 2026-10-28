@@ -66,6 +66,7 @@ import {
   fetchMe,
   fetchServerStatus,
   setPrimaryDeviceRequest,
+  pingDeviceRequest,
   type Group,
   type Invite,
   type User,
@@ -120,6 +121,16 @@ export default function MapScreen() {
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
   const [serverLabel, setServerLabel] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The device being asked for a fresh position, and a short note under its row when it could not be.
+  const [pinging, setPinging] = useState<string | null>(null);
+  const [pingNote, setPingNote] = useState<{ key: string; text: string } | null>(null);
+  const pingNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (pingNoteTimer.current) clearTimeout(pingNoteTimer.current);
+    },
+    []
+  );
   const [editingProfile, setEditingProfile] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -187,7 +198,16 @@ export default function MapScreen() {
     fetchServerStatus(creds.serverIp)
       .then((status) => setServerLabel(["Server v" + status.version, status.commit?.slice(0, 7)].filter(Boolean).join(" · ")))
       .catch(() => setServerLabel(null));
-  }, [sheet, creds]);
+    // The main device may have been picked on another device or the dashboard meanwhile.
+    fetchMe(creds)
+      .then((fresh) => {
+        setCreds((current) => (current ? { ...current, user: fresh } : current));
+        updateStoredUser(fresh).catch(() => {});
+      })
+      .catch(() => {});
+    // The settings open with the stored account; the server's copy may be newer only in these fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet, creds?.serverIp, creds?.deviceId, creds?.token]);
 
   useEffect(() => {
     const ticker = setInterval(() => setTick((t) => t + 1), 15_000);
@@ -572,6 +592,7 @@ export default function MapScreen() {
 
   const isMine = (d: Device) => isOwnDevice(d, user?.id, creds?.deviceId);
   const me = devices.find(isMine);
+  const myDevices = user ? devices.filter((d) => d.userId === user.id) : [];
   const profileAvatar = user?.avatarUrl ?? null;
   // The timeline panel opens at its middle rest and keeps the height the finger left it at,
   // within the rests of the current window.
@@ -596,57 +617,89 @@ export default function MapScreen() {
     focusDevice(person.primary, false);
   };
 
-  // Your own device stands for you; a second tap on the filled star goes back to automatic.
-  const pickPrimary = async (device: Device) => {
-    if (!creds) return;
+  // One of your devices stands for you; null lets the server take one that is online.
+  const pickPrimary = async (deviceId: string | null) => {
+    if (!creds || deviceId === (creds.user.primaryDeviceId ?? null)) return;
     try {
-      // The new list arrives over the socket and redraws the rows.
-      await setPrimaryDeviceRequest(creds, device.primary ? null : device.deviceId);
+      // The device list arrives over the socket; the account's choice comes back here.
+      changeUser(await setPrimaryDeviceRequest(creds, deviceId));
     } catch (error: any) {
       Alert.alert("Main device", error?.message || "The main device could not be changed.");
     }
   };
 
-  const linkedDevice = (device: Device, pickable: boolean) => {
+  // Asks one device for a fresh position. The position itself comes over the socket and redraws
+  // the row; only a device the server cannot reach leaves a note under it.
+  const askDevice = async (device: Device) => {
+    if (!creds || pinging) return;
+    const key = deviceKey(device);
+    const note = (text: string) => {
+      setPingNote({ key, text });
+      if (pingNoteTimer.current) clearTimeout(pingNoteTimer.current);
+      pingNoteTimer.current = setTimeout(() => setPingNote(null), 3000);
+    };
+    // A retry starts clean: an earlier note under this row would outlive a successful ask.
+    if (pingNoteTimer.current) clearTimeout(pingNoteTimer.current);
+    setPingNote(null);
+    setPinging(key);
+    try {
+      if (!(await pingDeviceRequest(creds, device.deviceId, device.userId))) note("Not connected right now");
+    } catch (error: any) {
+      note(error?.status === 404 ? "Not connected right now" : error?.message || "Could not ask the device.");
+    } finally {
+      setPinging(null);
+    }
+  };
+
+  // A round button with a size of its own; a bare icon took no taps on Android.
+  const askButton = (device: Device, who: string) => (
+    <Pressable
+      style={({ pressed }) => [styles.askButton, { backgroundColor: c.subtle, opacity: pressed ? 0.7 : 1 }]}
+      onPress={() => askDevice(device)}
+      disabled={pinging !== null}
+      accessibilityRole="button"
+      accessibilityLabel={`Ask ${who} for a fresh position`}
+    >
+      {pinging === deviceKey(device) ? (
+        <ActivityIndicator size="small" color={c.primary} />
+      ) : (
+        <MaterialIcons name="refresh" size={18} color={c.primary} />
+      )}
+    </Pressable>
+  );
+
+  const noteUnder = (device: Device) =>
+    pingNote?.key === deviceKey(device) ? <Text style={[styles.pingNote, { color: c.secondary }]}>{pingNote.text}</Text> : null;
+
+  // The row and its ask button are siblings, so a screen reader reaches both.
+  const linkedDevice = (device: Device) => {
     const state = freshness(device);
     return (
-      <Pressable
-        key={deviceKey(device)}
-        style={({ pressed }) => [styles.linkedRow, pressed && { backgroundColor: c.subtle }]}
-        onPress={() => focusDevice(device)}
-        accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}`}
-      >
-        <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={20} color={c.muted} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.linkedName, { color: c.primary }]} numberOfLines={1}>
-            {device.deviceId}
-            {isMine(device) ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
-          </Text>
-          <View style={styles.metaRow}>
-            <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[state] }]} />
-            <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
-              {statusText(device, timeAgo)}
+      <View key={deviceKey(device)} style={styles.linkedRow}>
+        <Pressable
+          style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
+          onPress={() => focusDevice(device)}
+          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}`}
+        >
+          <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={20} color={c.muted} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.linkedName, { color: c.primary }]} numberOfLines={1}>
+              {device.deviceId}
+              {isMine(device) ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
             </Text>
-            {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
+            <View style={styles.metaRow}>
+              <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[state] }]} />
+              <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
+                {statusText(device, timeAgo)}
+              </Text>
+              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
+            </View>
+            {noteUnder(device)}
           </View>
-        </View>
-        {pickable ? (
-          <Pressable
-            onPress={() => pickPrimary(device)}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityState={{ selected: Boolean(device.primary) }}
-            accessibilityLabel={device.primary ? `${device.deviceId} is your main device` : `Make ${device.deviceId} your main device`}
-          >
-            <MaterialIcons
-              name={device.primary ? "star" : "star-border"}
-              size={20}
-              color={device.primary ? STATE_COLORS.stale : c.muted}
-            />
-          </Pressable>
-        ) : null}
+        </Pressable>
+        {device.userId !== user?.id ? askButton(device, device.deviceId) : null}
         {device.position && <MaterialIcons name="near-me" size={18} color={c.muted} />}
-      </Pressable>
+      </View>
     );
   };
 
@@ -655,27 +708,32 @@ export default function MapScreen() {
     const open = expanded === person.key;
     return (
       <View key={person.key}>
-        <Pressable
-          style={({ pressed }) => [styles.deviceRow, pressed && { backgroundColor: c.subtle }]}
-          onPress={() => togglePerson(person)}
-          accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}`}
-          accessibilityState={{ expanded: open }}
-        >
-          <Avatar name={person.name} uri={avatarFor(primary.avatarUrl)} state={freshness(primary)} gapColor={c.raised} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
-              {person.name}
-              {person.isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
-            </Text>
-            {/* The ring around the avatar already shows the status, so no dot here. */}
-            <View style={styles.metaRow}>
-              <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
-                {primary.deviceId} · {statusText(primary, timeAgo)}
-                {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
+        {/* The row, the buttons and the chevron are siblings, so a screen reader reaches each. */}
+        <View style={styles.deviceRow}>
+          <Pressable
+            style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
+            onPress={() => togglePerson(person)}
+            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}`}
+            accessibilityState={{ expanded: open }}
+          >
+            <Avatar name={person.name} uri={avatarFor(primary.avatarUrl)} state={freshness(primary)} gapColor={c.raised} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.deviceName, { color: c.primary }]} numberOfLines={1}>
+                {person.name}
+                {person.isMe ? <Text style={{ color: c.muted, fontWeight: "500" }}>  · You</Text> : null}
               </Text>
-              {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
+              {/* The ring around the avatar already shows the status, so no dot here. */}
+              <View style={styles.metaRow}>
+                <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
+                  {primary.deviceId} · {statusText(primary, timeAgo)}
+                  {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
+                </Text>
+                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
+              </View>
+              {open ? null : noteUnder(primary)}
             </View>
-          </View>
+          </Pressable>
+          {!person.isMe ? askButton(primary, person.name) : null}
           {serverFinds && !person.isMe && person.online && person.userId !== undefined && (
             <Pressable
               onPress={() => startFind(person)}
@@ -686,11 +744,18 @@ export default function MapScreen() {
               <MaterialIcons name="near-me" size={18} color={c.secondary} />
             </Pressable>
           )}
-          <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={c.muted} />
-        </Pressable>
+          <Pressable
+            onPress={() => togglePerson(person)}
+            hitSlop={8}
+            style={styles.chevron}
+            accessibilityLabel={open ? `Hide ${person.name}'s devices` : `Show ${person.name}'s devices`}
+          >
+            <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={c.muted} />
+          </Pressable>
+        </View>
         {open && (
           <View style={styles.linked}>
-            {person.devices.map((device) => linkedDevice(device, person.isMe && person.devices.length > 1))}
+            {person.devices.map(linkedDevice)}
           </View>
         )}
       </View>
@@ -969,6 +1034,31 @@ export default function MapScreen() {
               </View>
               <Text style={[styles.presetHint, { color: c.muted }]}>{REPORTING_PRESETS[preset].description}</Text>
 
+              {myDevices.length > 1 ? (
+                <>
+                  <Text style={[styles.sectionTitle, { color: c.muted }]}>Main device</Text>
+                  <View style={styles.chipRow}>
+                    {[null, ...myDevices.map((d) => d.deviceId)].map((id) => {
+                      const active = id === (creds.user.primaryDeviceId ?? null);
+                      return (
+                        <Pressable
+                          key={id ?? "auto"}
+                          onPress={() => pickPrimary(id)}
+                          style={[styles.deviceChip, { backgroundColor: active ? c.secondary : c.subtle }]}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                        >
+                          <Text style={[styles.presetLabel, { color: active ? c.onSecondary : c.primary }]}>{id ?? "Automatic"}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                  <Text style={[styles.presetHint, { color: c.muted }]}>
+                    The device that stands for you on the map and in the list. Automatic takes one that is online.
+                  </Text>
+                </>
+              ) : null}
+
               <HideSection
                 auth={creds}
                 hiddenUntil={creds.user.hiddenUntil}
@@ -1077,11 +1167,18 @@ const styles = StyleSheet.create({
   deviceList: { maxHeight: 420 },
   empty: { paddingVertical: 14 },
   linked: { marginLeft: 22, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: "rgba(128,128,128,0.25)", marginBottom: 6 },
-  linkedRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 12 },
+  linkedRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 2, paddingHorizontal: 6 },
+  // The tappable part of a row, with the highlight; the buttons beside it are their own controls.
+  rowPress: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6, paddingHorizontal: 6, borderRadius: 12 },
+  chevron: { width: 30, height: 34, alignItems: "center", justifyContent: "center" },
   linkedName: { fontSize: 14.5, fontWeight: "600" },
-  deviceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, borderRadius: 14, paddingHorizontal: 6 },
+  deviceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 1 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
   findButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  askButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  pingNote: { fontSize: 12, marginTop: 2 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  deviceChip: { borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14 },
   deviceMeta: { fontSize: 12.5 },
   // The text gives way first, so a battery next to it stays on the line.
   metaText: { flexShrink: 1 },
