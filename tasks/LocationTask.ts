@@ -3,7 +3,7 @@ import * as Location from "expo-location";
 import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
 import { readBattery } from "@/lib/battery";
-import { holdFixes, reportMessages, takeHeldFixes, toFix } from "@/lib/fixes";
+import { holdFixes, reportMessages, takeHeldFixes, toFix, type Fix } from "@/lib/fixes";
 import type { Message } from "@/lib/SocketClient";
 import { reportInterval } from "@/lib/reportInterval";
 import { loadSettings } from "@/lib/settings";
@@ -20,6 +20,13 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (error || !data) return;
   // The system may hand over several fixes at once, iOS does when it defers updates.
   const fixes = ((data as { locations?: Location.LocationObject[] }).locations ?? []).map(toFix);
+  await reportFixes(fixes);
+});
+
+// Sends the newest of these fixes as the live position, the older ones as history. It uses the shared
+// socket if it is alive, or a short-lived connection of our own. Without a connection everything is
+// held on the phone for the next one.
+export async function reportFixes(fixes: Fix[]): Promise<void> {
   const latest = fixes.pop();
   if (!latest) return;
 
@@ -44,7 +51,7 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
     await holdFixes([...older, latest]);
     console.warn("Background push failed:", err?.message);
   }
-});
+}
 
 // Logs in, sends what messagesFor returns for the server's features, and closes again.
 function pushOnce(creds: StoredCredentials, messagesFor: (features: string[]) => Message[]): Promise<void> {

@@ -39,6 +39,7 @@ import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby"
 import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
+import { onSheetRequest, takeRequestedSheet } from "@/lib/sheetRequest";
 import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
@@ -121,6 +122,14 @@ export default function MapScreen() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
+  // A tapped invitation notification opens the groups sheet, also when it started the app.
+  useEffect(() => {
+    if (takeRequestedSheet()) setSheet("groups");
+    return onSheetRequest((requested) => {
+      takeRequestedSheet();
+      setSheet(requested);
+    });
+  }, []);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
   const [serverLabel, setServerLabel] = useState<string | null>(null);

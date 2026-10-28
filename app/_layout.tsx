@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AppState, View, Dimensions, StyleSheet } from "react-native";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
+import * as Notifications from "expo-notifications";
 import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
-import { socket } from "@/lib/socket";
+import { socket, readCredentials } from "@/lib/socket";
+import { openFromNotification, startPush } from "@/lib/push";
 import { checkAndPrompt } from "@/lib/updates";
 import { logout } from "@/lib/logout";
 import { startPositionReporting } from "@/handlers/Location";
@@ -43,6 +45,31 @@ function ConnectionLifecycle() {
     });
     return () => subscription.remove();
   }, []);
+
+  // The device token for push goes to the server once the app is connected, and stays up to date.
+  useEffect(() => {
+    if (!isConnected) return;
+    let stop = () => {};
+    let cancelled = false;
+    readCredentials().then((creds) => {
+      if (creds && !cancelled) stop = startPush(creds);
+    });
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [isConnected]);
+
+  // Tapping a notification, also the one that started the app, opens what it is about.
+  const lastResponse = Notifications.useLastNotificationResponse();
+  const handledResponse = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastResponse) return;
+    const key = `${lastResponse.notification.request.identifier}:${lastResponse.notification.date}`;
+    if (handledResponse.current === key) return;
+    handledResponse.current = key;
+    if (openFromNotification(lastResponse)) router.navigate("/map");
+  }, [lastResponse, router]);
 
   useEffect(() => {
     loadSettings().then((s) => setPreset(s.reporting));
