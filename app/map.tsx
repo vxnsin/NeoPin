@@ -39,7 +39,7 @@ import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
-import BatteryBadge from "@/components/BatteryBadge";
+import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
@@ -670,6 +670,12 @@ export default function MapScreen() {
   const noteUnder = (device: Device) =>
     pingNote?.key === deviceKey(device) ? <Text style={[styles.pingNote, { color: c.secondary }]}>{pingNote.text}</Text> : null;
 
+  // The badge sits inside the row, so the row's label carries the reading too.
+  const rowBattery = (device: Device) => {
+    const battery = batteryOf(device);
+    return battery ? `, ${batteryLabel(battery, device.status !== "online")}` : "";
+  };
+
   // The row and its ask button are siblings, so a screen reader reaches both.
   const linkedDevice = (device: Device) => {
     const state = freshness(device);
@@ -678,7 +684,7 @@ export default function MapScreen() {
         <Pressable
           style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
           onPress={() => focusDevice(device)}
-          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}`}
+          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}${rowBattery(device)}`}
         >
           <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={20} color={c.muted} />
           <View style={{ flex: 1 }}>
@@ -691,7 +697,7 @@ export default function MapScreen() {
               <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {statusText(device, timeAgo)}
               </Text>
-              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
+              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} stale={device.status !== "online"} /> : null}
             </View>
             {noteUnder(device)}
           </View>
@@ -712,7 +718,7 @@ export default function MapScreen() {
           <Pressable
             style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
             onPress={() => togglePerson(person)}
-            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}`}
+            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}${rowBattery(primary)}`}
             accessibilityState={{ expanded: open }}
           >
             <Avatar name={person.name} uri={avatarFor(primary.avatarUrl)} state={freshness(primary)} gapColor={c.raised} />
@@ -727,7 +733,7 @@ export default function MapScreen() {
                   {primary.deviceId} · {statusText(primary, timeAgo)}
                   {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
                 </Text>
-                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
+                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} stale={primary.status !== "online"} /> : null}
               </View>
               {open ? null : noteUnder(primary)}
             </View>
