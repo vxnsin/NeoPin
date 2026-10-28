@@ -93,6 +93,17 @@ Builds are configured in `eas.json`.
 
 JavaScript changes can be shipped to installed apps with EAS Update, no new build needed.
 
+## Push notifications (Android)
+
+Push uses Firebase Cloud Messaging. It wakes the app when someone asks for a fresh position of an offline device, and shows notifications such as group invitations. Without the Firebase config the app builds and runs as before, it just gets no push.
+
+1. Create a project in the [Firebase console](https://console.firebase.google.com) and add an Android app with the package name `de.vensin.neopin`.
+2. Download `google-services.json` and either put it into the `app/` folder (it stays out of git, `.easignore` does not exclude it so EAS Build uploads it), or store it as an EAS file secret named `GOOGLE_SERVICES_JSON`.
+3. Give the server the service account key of the same project (see the server docs), it sends the messages.
+4. Build a new APK. Push needs the native Firebase setup, an EAS Update alone is not enough.
+
+The server has to report `push: true` in `GET /api/status`, otherwise the app does not send its token.
+
 ## Protocol
 
 All messages are JSON over a single WebSocket. The first message must authenticate.
