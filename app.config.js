@@ -11,7 +11,7 @@ export default {
   expo: {
     name: "NeoPin",
     slug: "neopin",
-    version: "1.6.0",
+    version: "1.7.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "neopin",
@@ -41,7 +41,7 @@ export default {
     },
     android: {
       package: "de.vensin.neopin",
-      versionCode: 8,
+      versionCode: 10,
       adaptiveIcon: {
         foregroundImage: "./assets/images/adaptive-icon.png",
         backgroundColor: "#d3171e",
