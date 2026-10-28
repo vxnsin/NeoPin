@@ -72,6 +72,70 @@ const SCHEMA = `
     fetched_at INTEGER NOT NULL,
     candidates TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS transit_regions (
+    cell TEXT PRIMARY KEY,
+    seen_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS transit_feeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cell TEXT NOT NULL,
+    source TEXT NOT NULL,
+    name TEXT NOT NULL,
+    provider TEXT,
+    url TEXT NOT NULL,
+    license TEXT,
+    updated_at INTEGER,
+    stops INTEGER NOT NULL DEFAULT 0,
+    routes INTEGER NOT NULL DEFAULT 0,
+    trips INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (cell, source)
+  );
+  CREATE TABLE IF NOT EXISTS transit_stops (
+    feed_id INTEGER NOT NULL REFERENCES transit_feeds(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    PRIMARY KEY (feed_id, id)
+  );
+  CREATE INDEX IF NOT EXISTS transit_stops_at ON transit_stops(lat, lon);
+  CREATE TABLE IF NOT EXISTS transit_routes (
+    feed_id INTEGER NOT NULL REFERENCES transit_feeds(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    short_name TEXT,
+    long_name TEXT,
+    type INTEGER NOT NULL,
+    color TEXT,
+    text_color TEXT,
+    agency TEXT,
+    timezone TEXT,
+    PRIMARY KEY (feed_id, id)
+  );
+  CREATE TABLE IF NOT EXISTS transit_trips (
+    feed_id INTEGER NOT NULL REFERENCES transit_feeds(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    route_id TEXT NOT NULL,
+    headsign TEXT,
+    shape_id TEXT,
+    PRIMARY KEY (feed_id, id)
+  );
+  CREATE TABLE IF NOT EXISTS transit_stop_times (
+    feed_id INTEGER NOT NULL REFERENCES transit_feeds(id) ON DELETE CASCADE,
+    trip_id TEXT NOT NULL,
+    stop_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    departure INTEGER,
+    PRIMARY KEY (feed_id, trip_id, seq)
+  );
+  CREATE INDEX IF NOT EXISTS transit_stop_times_stop ON transit_stop_times(feed_id, stop_id);
+  CREATE TABLE IF NOT EXISTS transit_shapes (
+    feed_id INTEGER NOT NULL REFERENCES transit_feeds(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    lat REAL NOT NULL,
+    lon REAL NOT NULL,
+    PRIMARY KEY (feed_id, id, seq)
+  );
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.
