@@ -861,6 +861,7 @@ function connect() {
     }
     if (data.type === "dataResponse") receive(data.devices || []);
     // Groups, invites or members changed: the devices in view may change with them.
+    if (data.type === "notificationsChanged") document.dispatchEvent(new Event("notificationschanged"));
     if (data.type === "groupsChanged") {
       socket.send(JSON.stringify({ type: "getData" }));
       document.dispatchEvent(new Event("groupschanged"));

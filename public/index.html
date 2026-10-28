@@ -45,6 +45,8 @@
       <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M16 7l3 3M14 9l2 2" /></symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></symbol>
       <symbol id="i-group" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3" /><circle cx="5.5" cy="16.5" r="2.5" /><circle cx="18.5" cy="16.5" r="2.5" /><path d="M8 21a4 4 0 0 1 8 0" /></symbol>
+      <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0" /></symbol>
+      <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M3 9V6a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a3 3 0 0 0 0 6v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a3 3 0 0 0 0-6Z" /><path d="M13 5v2M13 11v2M13 17v2" /></symbol>
       <symbol id="i-phone" viewBox="0 0 24 24"><rect width="12" height="20" x="6" y="2" rx="2.5" /><path d="M11 18h2" /></symbol>
       <symbol id="i-tablet" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2.5" /><path d="M18 12h.01" /></symbol>
       <symbol id="i-laptop" viewBox="0 0 24 24"><rect width="16" height="11" x="4" y="5" rx="2" /><path d="M2 20h20" /></symbol>
@@ -73,6 +75,10 @@
           <span class="hud-stat__value"><span id="onlineCount">0</span><small>/<span id="totalCount">0</span></small></span>
           <span class="hud-stat__label">online</span>
         </div>
+        <button class="hud-tile hud-bell" id="bellButton" type="button" aria-label="Notifications" title="Notifications" hidden>
+          <svg class="icon"><use href="#i-bell" /></svg>
+          <span class="bell-badge" id="bellBadge" hidden>0</span>
+        </button>
         <div class="hud-account-wrap" id="accountWrap">
           <button class="hud-tile hud-account" id="accountButton" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="accountMenu" aria-label="Account">
             <span id="accountAvatar"></span>
@@ -89,6 +95,7 @@
             </div>
             <button class="menu-item" id="openDevices" type="button"><svg class="icon"><use href="#i-phone" /></svg>My devices</button>
             <button class="menu-item" id="openGroups" type="button"><svg class="icon"><use href="#i-group" /></svg>Groups<span class="notify-dot" id="groupsDot" hidden></span></button>
+            <button class="menu-item" id="openInvites" type="button" hidden><svg class="icon"><use href="#i-ticket" /></svg>Invite codes</button>
             <button class="menu-item" id="openAccounts" type="button" hidden><svg class="icon"><use href="#i-users" /></svg>Accounts</button>
             <button class="menu-item" id="openHide" type="button" hidden><svg class="icon"><use href="#i-eye-off" /></svg>Invisible<span class="tag menu-item__state" id="hideState" hidden>On</span></button>
             <button class="menu-item" id="openProfile" type="button"><svg class="icon"><use href="#i-user" /></svg>Edit profile</button>
@@ -192,5 +199,7 @@
     <script src="/assets/scripts/manage.js"></script>
     <script src="/assets/scripts/crop.js"></script>
     <script src="/assets/scripts/groups.js"></script>
+    <script src="/assets/scripts/invites.js"></script>
+    <script src="/assets/scripts/notifications.js"></script>
   </body>
 </html>
