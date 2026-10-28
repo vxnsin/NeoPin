@@ -247,7 +247,8 @@ const ClientMessage = t.discriminated("type", {
     // Which way the phone points, degrees from north, so the other side can show an arrow.
     heading: t.number().min(0).max(360).optional(),
   }),
-  findEnd: t.object({ type: t.literal("findEnd"), session: t.string().max(32) }),
+  // "met": the phones saw each other over Bluetooth, the search is over because it worked.
+  findEnd: t.object({ type: t.literal("findEnd"), session: t.string().max(32), reason: t.enum(["ended", "met"]).optional() }),
 });
 
 // What a phone needs to know about the other side of a find session.
@@ -1271,7 +1272,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           case "findEnd": {
             if (role !== "device") return;
             const session = finder.get(msg.session);
-            if (session && finder.roleOf(session, account, deviceId)) finder.end(session.id, "ended");
+            if (session && finder.roleOf(session, account, deviceId)) finder.end(session.id, msg.reason ?? "ended");
             break;
           }
         }
