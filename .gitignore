@@ -174,3 +174,6 @@ expo-env.d.ts
 # @end expo-cli
 # Expo export output
 /dist
+
+# Firebase config for push, see README
+google-services.json

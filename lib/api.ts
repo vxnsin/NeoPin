@@ -192,7 +192,7 @@ export async function showMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me/hidden`, { method: "DELETE", headers: deviceHeaders(auth) }));
 }
 
-export type ServerStatus = { version: string; commit?: string | null; builtAt?: string | null };
+export type ServerStatus = { version: string; commit?: string | null; builtAt?: string | null; push?: boolean };
 
 // Which server build runs. Older servers only know their version.
 export async function fetchServerStatus(serverIp: string): Promise<ServerStatus> {
@@ -467,4 +467,23 @@ export type FoundUser = { id: number; username: string; displayName: string; ava
 export async function searchUsers(auth: DeviceAuth, query: string, groupId?: number): Promise<FoundUser[]> {
   const params = `q=${encodeURIComponent(query)}${groupId === undefined ? "" : `&groupId=${groupId}`}`;
   return json(await request(api(auth, `/users/search?${params}`), jsonInit(auth, "GET")));
+}
+
+// The native FCM token of this device, so the server can wake the app. 204 on success.
+export async function registerPushToken(auth: DeviceAuth, token: string, platform: "android" | "ios"): Promise<void> {
+  const response = await request(`${httpBase(auth.serverIp)}/api/push-token`, {
+    method: "PUT",
+    headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+    body: JSON.stringify({ token, platform }),
+  });
+  if (!response.ok) throw new ApiError(await problemText(response, defaultProblem(response.status)), response.status);
+}
+
+export async function removePushToken(auth: DeviceAuth): Promise<void> {
+  const response = await request(
+    `${httpBase(auth.serverIp)}/api/push-token`,
+    { method: "DELETE", headers: deviceHeaders(auth) },
+    4_000
+  );
+  if (!response.ok) throw new ApiError(await problemText(response, defaultProblem(response.status)), response.status);
 }

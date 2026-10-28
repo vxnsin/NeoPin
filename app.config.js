@@ -1,4 +1,11 @@
 import "dotenv/config";
+import fs from "fs";
+
+// Firebase config for push on Android: the path of an EAS file secret, or a file next to this one.
+// Without it the app still builds, it just cannot receive push.
+const googleServicesFile = [process.env.GOOGLE_SERVICES_JSON, "./google-services.json"].find(
+  (path) => path && fs.existsSync(path)
+);
 
 export default {
   expo: {
@@ -52,6 +59,7 @@ export default {
         "BLUETOOTH_CONNECT",
       ],
       softwareKeyboardLayoutMode: "pan",
+      ...(googleServicesFile && { googleServicesFile }),
     },
     web: {
       bundler: "metro",
@@ -63,6 +71,14 @@ export default {
       "@bacons/apple-targets",
       "expo-font",
       "expo-status-bar",
+      [
+        "expo-notifications",
+        {
+          icon: "./assets/images/notification-icon.png",
+          color: "#d3171e",
+          defaultChannel: "default",
+        },
+      ],
       [
         "expo-image-picker",
         {

@@ -39,6 +39,8 @@ import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby"
 import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
+import { takeFindRequest } from "@/lib/findInbox";
+import { onSheetRequest, takeRequestedSheet } from "@/lib/sheetRequest";
 import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
@@ -121,6 +123,21 @@ export default function MapScreen() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
+  // A tapped invitation notification opens the groups sheet, also when it started the app.
+  useEffect(() => {
+    if (takeRequestedSheet()) setSheet("groups");
+    return onSheetRequest((requested) => {
+      takeRequestedSheet();
+      setSheet(requested);
+    });
+  }, []);
+  // A find request that came in before this screen was mounted.
+  useEffect(() => {
+    const waiting = takeFindRequest();
+    if (!waiting) return;
+    setFind((current) => reduceFind(current, waiting));
+    setSheet("find");
+  }, []);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
   const [serverLabel, setServerLabel] = useState<string | null>(null);
@@ -396,6 +413,7 @@ export default function MapScreen() {
             emit({ type: "findEnd", session: data.session });
             return;
           }
+          if (data.type === "findRequest" || data.type === "findStarted") takeFindRequest();
           setFind((current) => reduceFind(current, data));
           if (data.type === "findRequest" || data.type === "findStarted") setSheet("find");
         }

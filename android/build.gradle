@@ -8,6 +8,8 @@ buildscript {
   dependencies {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
+    // Only applied when a google-services.json is present, see app/build.gradle.
+    classpath('com.google.gms:google-services:4.4.4')
     def kotlinVersion = findProperty('android.kotlinVersion')
     classpath(kotlinVersion ? "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion" : 'org.jetbrains.kotlin:kotlin-gradle-plugin')
   }

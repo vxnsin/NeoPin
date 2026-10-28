@@ -4,6 +4,7 @@ import { logoutRequest } from "@/lib/api";
 import { stopBackgroundLocation } from "@/tasks/LocationTask";
 import { resetServerBattery } from "@/lib/battery";
 import { clearHeldFixes } from "@/lib/fixes";
+import { stopPush } from "@/lib/push";
 
 // Closes the socket, stops everything that would reconnect it in the
 // background and forgets the stored login. With remote the server drops the
@@ -15,7 +16,8 @@ export async function logout({ remote = true }: { remote?: boolean } = {}) {
   await Promise.all([
     stopBackgroundLocation().catch(() => {}),
     clearHeldFixes().catch(() => {}),
-    creds ? logoutRequest(creds) : Promise.resolve(),
+    // The token goes first, the server only accepts the call while the login is still valid.
+    stopPush(creds).then(() => (creds ? logoutRequest(creds) : undefined)),
   ]);
   await clearCredentials();
 }
