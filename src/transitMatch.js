@@ -5,16 +5,27 @@ import { LOOKUP_TIMEOUT_MS, askOverpass, overpassEnabled } from "./overpass.js";
 import { MIN_TRIP_M, tripSegment } from "./timeline.js";
 
 // Which bus, tram or train a trip of the timeline was. A trip is a candidate when it starts
-// and ends at a stop, is faster than walking or cycling, and halted every few hundred metres
-// the way a bus does. Then the timetables (src/transit.js) say which lines serve both stops
-// in that order, the shape of the line has to follow the fixes, and of several lines the one
-// with a departure close to the observed one wins. Without timetables the route relations
-// of OpenStreetMap give at least the line number. Results and corrections are stored per
-// account, device and trip start, so nothing is computed twice.
+// and ends at a stop and is faster than walking. Then the timetables (src/transit.js) say
+// which lines serve both stops in that order. A bus or tram has to have halted every few
+// hundred metres; a train, subway or ferry calls every few kilometres or not at all, so
+// instead its departure and its arrival have to match the timetable. The shape of the line
+// has to follow the fixes, and of several lines the one with a departure closest to the
+// observed one wins. Without timetables the route relations of OpenStreetMap give at least
+// the line number. Results and corrections are stored per account, device and trip start,
+// so nothing is computed twice.
 
 export const NEAR_STOP_M = 60;
+// The platforms of a station lie a few hundred metres from the point the timetable gives it.
+export const NEAR_STATION_M = 200;
 const MIN_SPEED_KMH = 12;
 export const HALT_SPACING_M = { min: 300, max: 900 };
+// Kinds that need no halts on the way, and how fast they have to have been on average.
+const NO_HALT_MIN_KMH = { train: 25, subway: 25, ferry: 12 };
+// Without halts, departure and arrival both have to be this close to the timetable.
+const NO_HALT_WINDOW_S = 10 * 60;
+// The route types (basic and extended) of trains, subways and ferries, see kindOf.
+const RAIL_TYPES_SQL =
+  "(r.type IN (1, 2, 4, 12, 1200) OR r.type BETWEEN 100 AND 117 OR r.type BETWEEN 400 AND 405 OR r.type BETWEEN 1000 AND 1021)";
 const MAX_SHAPE_DISTANCE_M = 25;
 // Fixes come every 5 s or 15 m on the move, so two fixes close together but this far apart
 // in time mean the vehicle stood still: at a stop, or at a red light.
@@ -57,9 +68,19 @@ export function rideProfile(fixes) {
   };
 }
 
+// A bus or tram ride: fast enough, with halts every few hundred metres.
 export function looksLikeRide(profile) {
   return profile.speedKmh >= MIN_SPEED_KMH && profile.haltSpacingM >= HALT_SPACING_M.min && profile.haltSpacingM <= HALT_SPACING_M.max;
 }
+
+// Whether a trip with this profile could have been a ride of this kind.
+export function fitsKind(kind, profile) {
+  if (kind in NO_HALT_MIN_KMH) return profile.speedKmh >= NO_HALT_MIN_KMH[kind];
+  return looksLikeRide(profile);
+}
+
+// Worth asking the timetables at all: faster than any walk.
+const mightBeRide = (profile) => profile.speedKmh >= MIN_SPEED_KMH;
 
 // Bus, tram, subway, train or ferry from a GTFS route_type, the basic and the extended ones.
 export function kindOf(routeType) {
@@ -106,14 +127,23 @@ export function meanShapeDistance(fixes, shape) {
 
 // ---- GTFS ----
 
+// The stops a spot is at: bus and tram stops within NEAR_STOP_M, stations served by trains,
+// subways or ferries within NEAR_STATION_M. Nearest first.
 function stopsNear(lat, lon) {
-  const dLat = NEAR_STOP_M / (KM_PER_DEG * 1000);
+  const dLat = NEAR_STATION_M / (KM_PER_DEG * 1000);
   const dLon = dLat / Math.max(0.1, Math.cos((lat * Math.PI) / 180));
   return getDb()
-    .prepare("SELECT feed_id, id, name, lat, lon FROM transit_stops WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?")
+    .prepare(
+      `SELECT s.feed_id, s.id, s.name, s.lat, s.lon,
+              EXISTS (SELECT 1 FROM transit_stop_times st
+                      JOIN transit_trips t ON t.feed_id = st.feed_id AND t.id = st.trip_id
+                      JOIN transit_routes r ON r.feed_id = t.feed_id AND r.id = t.route_id
+                      WHERE st.feed_id = s.feed_id AND st.stop_id = s.id AND ${RAIL_TYPES_SQL}) AS rail
+       FROM transit_stops s WHERE s.lat BETWEEN ? AND ? AND s.lon BETWEEN ? AND ?`
+    )
     .all(lat - dLat, lat + dLat, lon - dLon, lon + dLon)
     .map((s) => ({ ...s, distance: distanceM(lat, lon, s.lat, s.lon) }))
-    .filter((s) => s.distance <= NEAR_STOP_M)
+    .filter((s) => s.distance <= (Number(s.rail) ? NEAR_STATION_M : NEAR_STOP_M))
     .sort((a, b) => a.distance - b.distance);
 }
 
@@ -175,7 +205,7 @@ function withLinePath(transit, linePath) {
 }
 
 // The line of a trip according to the timetables, or null.
-export function matchGtfs(trip) {
+export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
   const fixes = trip.fixes;
   const from = stopsNear(fixes[0].lat, fixes[0].lon);
   const to = stopsNear(fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon);
@@ -194,9 +224,10 @@ export function matchGtfs(trip) {
 
   // The observed departure in each agency's time zone, computed once per zone, not per row.
   const observed = new Map();
-  const observedIn = (timeZone) => {
-    if (!observed.has(timeZone)) observed.set(timeZone, localSeconds(trip.start, timeZone));
-    return observed.get(timeZone);
+  const observedIn = (timeZone, ts = trip.start) => {
+    const key = `${timeZone}:${ts}`;
+    if (!observed.has(key)) observed.set(key, localSeconds(ts, timeZone));
+    return observed.get(key);
   };
 
   let best = null;
@@ -209,7 +240,7 @@ export function matchGtfs(trip) {
     // alighting stops. Not the same stop twice: a loop line does not explain a ride that came back.
     const rows = db
       .prepare(
-        `SELECT t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, b.stop_id AS to_id, a.departure,
+        `SELECT t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, b.stop_id AS to_id, a.departure, b.departure AS arrival,
                 r.short_name, r.long_name, r.type, r.color, r.text_color, r.agency, r.timezone
          FROM transit_stop_times a
          JOIN transit_stop_times b ON b.feed_id = a.feed_id AND b.trip_id = a.trip_id AND b.seq > a.seq AND b.stop_id <> a.stop_id
@@ -219,8 +250,14 @@ export function matchGtfs(trip) {
       )
       .all(feedId, ...fromIds, ...toIds);
     for (const row of rows) {
-      if (!shapeFits(feedId, row.shape_id)) continue;
+      const kind = kindOf(row.type);
+      if (!fitsKind(kind, profile)) continue;
       const gap = departureGap(row.departure, observedIn(row.timezone));
+      // Nothing on the way says "train", so the timetable has to say it at both ends.
+      if (kind in NO_HALT_MIN_KMH && (gap > NO_HALT_WINDOW_S || departureGap(row.arrival, observedIn(row.timezone, trip.end)) > NO_HALT_WINDOW_S)) {
+        continue;
+      }
+      if (!shapeFits(feedId, row.shape_id)) continue;
       if (!best || gap < best.gap) best = { row, gap, feedId };
     }
   }
@@ -399,11 +436,12 @@ function lastFast(fixes, dist) {
   return -1;
 }
 
-// How far the nearest known stop is: from the timetables, or from the cached OpenStreetMap
-// answer. Without either, OpenStreetMap is asked for the next load.
+// How far the nearest known stop is, counted as at most NEAR_STOP_M for a station whose
+// platforms reach further (see stopsNear): from the timetables, or from the cached
+// OpenStreetMap answer. Without either, OpenStreetMap is asked for the next load.
 function nearestStopM(lat, lon) {
-  const gtfs = stopsNear(lat, lon)[0]?.distance ?? Infinity;
-  if (gtfs <= NEAR_STOP_M) return gtfs;
+  const near = stopsNear(lat, lon)[0];
+  if (near) return Math.min(near.distance, NEAR_STOP_M);
   const osm = osmAround(lat, lon).cached;
   return osm ? (nearestStop(osm.stops, lat, lon)?.distance ?? Infinity) : Infinity;
 }
@@ -528,15 +566,22 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
         trip.transit = stored;
         continue;
       }
-      if (!looksLikeRide(rideProfile(trip.fixes))) {
+      const profile = rideProfile(trip.fixes);
+      if (!mightBeRide(profile)) {
         trip.transit = null;
         storeResult(userId, deviceId, trip, null, stamp);
         continue;
       }
-      const gtfs = matchGtfs(trip);
+      const gtfs = matchGtfs(trip, profile);
       if (gtfs) {
         trip.transit = gtfs;
         storeResult(userId, deviceId, trip, gtfs, stamp);
+        continue;
+      }
+      // OpenStreetMap knows no timetable, only the halts can tell a ride from a drive there.
+      if (!looksLikeRide(profile)) {
+        trip.transit = null;
+        storeResult(userId, deviceId, trip, null, stamp);
         continue;
       }
       const ends = [trip.fixes[0], trip.fixes[trip.fixes.length - 1]].map((p) => osmAround(p.lat, p.lon));
