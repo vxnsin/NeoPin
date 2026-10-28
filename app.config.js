@@ -12,11 +12,16 @@ export default {
     newArchEnabled: true,
     ios: {
       bundleIdentifier: "de.vensin.neopin",
+      // Signs the app and the widget extension in targets/widgets. Xcode shows the team id under
+      // Signing & Capabilities; EAS Build brings its own.
+      appleTeamId: process.env.APPLE_TEAM_ID,
       supportsTablet: true,
       infoPlist: {
         NSAppTransportSecurity: {
           NSAllowsArbitraryLoads: true,
         },
+        // The search on the lock screen, see modules/neopin-live.
+        NSSupportsLiveActivities: true,
         NSBluetoothAlwaysUsageDescription: "NeoPin uses Bluetooth to tell how close a person you are finding is.",
         NSLocationWhenInUseUsageDescription:
           "This app needs your location to display the map correctly.",
@@ -55,6 +60,7 @@ export default {
     },
     plugins: [
       "expo-router",
+      "@bacons/apple-targets",
       "expo-font",
       "expo-status-bar",
       [

@@ -296,8 +296,9 @@ export default function MapScreen() {
     };
   }, [findActive, emit]);
 
-  // The lock screen shows the search too. On Android that is an ongoing notification with the
-  // arrow, the metres and a Stop button, which ends the search like the one on the sheet.
+  // The lock screen shows the search too: an ongoing notification on Android, a Live Activity on
+  // iOS. Both have the arrow, the metres and a Stop button, which ends the search like the one on
+  // the sheet.
   const live = useRef(new LiveUpdater((content) => void showLive(content)));
   const stopFindRef = useRef<() => void>(() => {});
   useEffect(() => {

@@ -3,7 +3,8 @@ import { arrowAngle, bearingDeg, distanceBand, distanceBetween, formatMeters, ty
 import { LOST_MS, nearbyText, type NearbyReading } from "./nearby";
 
 // The search on the lock screen. Android shows an ongoing notification with the arrow and the
-// metres, Android 16 keeps the metres in the status bar as a live update.
+// metres, Android 16 keeps the metres in the status bar as a live update. iOS shows a Live
+// Activity, on the lock screen and in the Dynamic Island.
 
 export type { LiveContent };
 export type ActiveFind = Extract<FindState, { phase: "active" }>;

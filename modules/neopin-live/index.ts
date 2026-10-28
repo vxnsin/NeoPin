@@ -12,15 +12,15 @@ export type LiveContent = {
 
 export type LiveResult = "shown" | "denied" | "failed";
 
-// What LiveModule.kt offers. Spelled out here rather than through expo-modules-core's
-// NativeModule type, which names the class, not an instance of it.
+// What LiveModule.kt and LiveModule.swift offer. Spelled out here rather than through
+// expo-modules-core's NativeModule type, which names the class, not an instance of it.
 export type LiveNativeModule = {
   addListener(event: "onAction", listener: (event: { action: "stop" }) => void): { remove(): void };
-  // Shows the notification, or updates the one that is up.
+  // Shows the notification (Android) or the Live Activity (iOS), or updates the one that is up.
   show(content: LiveContent): Promise<LiveResult>;
   hide(): Promise<void>;
 };
 
-// Null on iOS, where the Live Activity takes this part, and in builds from before the module
-// existed: those get this JavaScript through EAS Update too.
+// Null in builds from before the module existed, on iOS also in those without the Live Activity:
+// they get this JavaScript through EAS Update too.
 export const LiveNative: LiveNativeModule | null = requireOptionalNativeModule<LiveNativeModule>("NeoPinLive");
