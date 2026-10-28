@@ -30,9 +30,10 @@ export type Device = {
 
 export type DeviceBattery = { level: number; charging: boolean; updatedAt?: string };
 
-// Only while the device is online: the last reading of a phone that went offline would only mislead.
-export function batteryOf(device: Pick<Device, "battery" | "status">): DeviceBattery | null {
-  return device.status === "online" && device.battery ? device.battery : null;
+// The last reading, also of a device that is offline: shown faded with its time then, because
+// a low last reading says the phone may simply be flat.
+export function batteryOf(device: Pick<Device, "battery">): DeviceBattery | null {
+  return device.battery ?? null;
 }
 
 // Device names are only unique per account.

@@ -6,6 +6,7 @@ import {
   loginRequest,
   normalizeServerUrl,
   pingDeviceRequest,
+  savePlaceAt,
   setTripMode,
 } from "../lib/api";
 
@@ -112,6 +113,16 @@ test("correcting a trip puts the device, the start and the mode and expects no c
   expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", start: 1_750_000_000_000, mode: "transit" });
   (global as any).fetch = respond(404, { title: "trip-not-found", detail: "No trip starts then" });
   await expect(setTripMode(auth, "Pixel", 1, "auto")).rejects.toThrow("No trip starts then");
+});
+
+test("saving a spot as Home sends the kind and leaves the name to the server", async () => {
+  const fetchMock = respond(200, { id: 3 });
+  (global as any).fetch = fetchMock;
+  await savePlaceAt(auth, { lat: 49.79, lon: 9.95, kind: "home" }, 7);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://10.0.0.2:3012/api/places?userId=7");
+  expect(init.method).toBe("POST");
+  expect(JSON.parse(init.body)).toEqual({ lat: 49.79, lon: 9.95, kind: "home" });
 });
 
 test("a 202 means no device was reachable, a 404 names the device", async () => {

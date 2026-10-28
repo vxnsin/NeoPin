@@ -4,6 +4,8 @@ import {
   Alert,
   Animated,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   PanResponder,
   Pressable,
   ScrollView,
@@ -39,9 +41,10 @@ import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
-import BatteryBadge from "@/components/BatteryBadge";
+import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
+import { pinKinds } from "@/lib/mapPins";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
 import type { CropRect } from "@/lib/crop";
 import {
@@ -424,34 +427,52 @@ export default function MapScreen() {
   const sheetOpen = sheet !== null;
   useEffect(() => {
     if (!sheetOpen) return;
+    listAtTop.current = true;
     sheetDrag.setValue(0);
     sheetProgress.setValue(0);
     Animated.timing(sheetProgress, { toValue: 1, duration: 260, useNativeDriver: true }).start();
   }, [sheetOpen, sheetProgress, sheetDrag]);
 
-  // Dragging the top of the sheet down closes it.
+  // Dragging the sheet down closes it. The grabber and the header take the drag at once; the
+  // content takes it only while its list is scrolled to the top, so the list still scrolls.
+  const sheetBack = useRef(() => Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start()).current;
+  const sheetRelease = useRef((dy: number, vy: number) => {
+    if (dy > 80 || vy > 0.8) closeSheetFromDrag();
+    else sheetBack();
+  }).current;
   const sheetPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, g) => g.dy > 4,
       onPanResponderMove: (_, g) => sheetDrag.setValue(Math.max(0, g.dy)),
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 80 || g.vy > 0.8) {
-          closeSheetFromDrag();
-        } else {
-          Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start();
-        }
-      },
-      onPanResponderTerminate: () => Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start(),
+      onPanResponderRelease: (_, g) => sheetRelease(g.dy, g.vy),
+      onPanResponderTerminate: sheetBack,
+    })
+  ).current;
+  const listAtTop = useRef(true);
+  const trackListTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    listAtTop.current = e.nativeEvent.contentOffset.y <= 0;
+  };
+  // Takes the move before the list does, which also stops the list from scrolling along.
+  const contentPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponderCapture: (_, g) => listAtTop.current && g.dy > 8 && Math.abs(g.dx) < g.dy,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_, g) => sheetDrag.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_, g) => sheetRelease(g.dy, g.vy),
+      onPanResponderTerminate: sheetBack,
     })
   ).current;
 
   // The map gets each device with its picture as a data URI, it cannot send the login headers itself.
   // This phone is the "you are here" dot already, so its own device gets no second pin.
   const visibleDevices = filterByGroup(devices, groupFilter, user?.id);
+  // One avatar per person on the map; the rest of their devices are chips or stay off it.
+  const pins = pinKinds(visibleDevices);
   const mapDevices = visibleDevices
     .filter((device) => !isOwnDevice(device, user?.id, creds?.deviceId))
-    .map((device) => ({ ...device, key: deviceKey(device), avatar: avatarFor(device.avatarUrl) }));
+    .map((device) => ({ ...device, key: deviceKey(device), avatar: avatarFor(device.avatarUrl), pin: pins.get(deviceKey(device)) ?? "avatar" }));
   const mapDevicesKey = JSON.stringify(mapDevices);
   useEffect(() => {
     if (webViewLoaded) post({ type: "devices", devices: JSON.parse(mapDevicesKey) });
@@ -595,7 +616,7 @@ export default function MapScreen() {
   const profileAvatar = user?.avatarUrl ?? null;
   // The timeline panel opens at its middle rest and keeps the height the finger left it at,
   // within the rests of the current window.
-  const panelSnapsNow = panelSnaps(windowHeight, insets.top);
+  const panelSnapsNow = panelSnaps(windowHeight, insets.top, insets.bottom);
   const panelHeight = Math.min(panelRest ?? panelSnapsNow.mid, panelSnapsNow.high);
   const pending = pendingCount(invites);
   const people = groupPeople(visibleDevices, user?.id);
@@ -670,6 +691,12 @@ export default function MapScreen() {
   const noteUnder = (device: Device) =>
     pingNote?.key === deviceKey(device) ? <Text style={[styles.pingNote, { color: c.secondary }]}>{pingNote.text}</Text> : null;
 
+  // The badge sits inside the row, so the row's label carries the reading too.
+  const rowBattery = (device: Device) => {
+    const battery = batteryOf(device);
+    return battery ? `, ${batteryLabel(battery, device.status !== "online")}` : "";
+  };
+
   // The row and its ask button are siblings, so a screen reader reaches both.
   const linkedDevice = (device: Device) => {
     const state = freshness(device);
@@ -678,7 +705,7 @@ export default function MapScreen() {
         <Pressable
           style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
           onPress={() => focusDevice(device)}
-          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}`}
+          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}${rowBattery(device)}`}
         >
           <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={20} color={c.muted} />
           <View style={{ flex: 1 }}>
@@ -691,7 +718,7 @@ export default function MapScreen() {
               <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {statusText(device, timeAgo)}
               </Text>
-              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} /> : null}
+              {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} stale={device.status !== "online"} /> : null}
             </View>
             {noteUnder(device)}
           </View>
@@ -712,7 +739,7 @@ export default function MapScreen() {
           <Pressable
             style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
             onPress={() => togglePerson(person)}
-            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}`}
+            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}${rowBattery(primary)}`}
             accessibilityState={{ expanded: open }}
           >
             <Avatar name={person.name} uri={avatarFor(primary.avatarUrl)} state={freshness(primary)} gapColor={c.raised} />
@@ -727,7 +754,7 @@ export default function MapScreen() {
                   {primary.deviceId} · {statusText(primary, timeAgo)}
                   {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
                 </Text>
-                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
+                {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} stale={primary.status !== "online"} /> : null}
               </View>
               {open ? null : noteUnder(primary)}
             </View>
@@ -846,6 +873,7 @@ export default function MapScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} accessibilityLabel="Close" />
         </Animated.View>
         <Animated.View
+          {...contentPan.panHandlers}
           style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16, transform: [{ translateY: Animated.add(sheetProgress.interpolate({ inputRange: [0, 1], outputRange: [windowHeight, 0] }), sheetDrag) }] }]}
         >
           <View {...sheetPan.panHandlers} style={styles.grabArea}>
@@ -920,7 +948,7 @@ export default function MapScreen() {
                 </ScrollView>
               )}
               <Text style={[styles.sheetMeta, { color: c.muted }]}>{summary}</Text>
-              <ScrollView style={styles.deviceList}>
+              <ScrollView style={styles.deviceList} onScroll={trackListTop} scrollEventThrottle={16}>
                 {people.length === 0 && (
                   <Text style={[styles.empty, { color: c.muted }]}>Nobody here yet.</Text>
                 )}
@@ -930,7 +958,7 @@ export default function MapScreen() {
           )}
 
           {sheet === "groups" && creds && (
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               <GroupsPanel
                 auth={creds}
                 userId={creds.user.id}
@@ -944,7 +972,7 @@ export default function MapScreen() {
           )}
 
           {sheet === "settings" && creds && (
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               {creds.user.mustChangePassword ? (
                 <View style={[styles.notice, { backgroundColor: c.subtle }]}>
                   <MaterialIcons name="info-outline" size={18} color={c.secondary} />
