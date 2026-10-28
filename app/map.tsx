@@ -4,6 +4,8 @@ import {
   Alert,
   Animated,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   PanResponder,
   Pressable,
   ScrollView,
@@ -424,25 +426,41 @@ export default function MapScreen() {
   const sheetOpen = sheet !== null;
   useEffect(() => {
     if (!sheetOpen) return;
+    listAtTop.current = true;
     sheetDrag.setValue(0);
     sheetProgress.setValue(0);
     Animated.timing(sheetProgress, { toValue: 1, duration: 260, useNativeDriver: true }).start();
   }, [sheetOpen, sheetProgress, sheetDrag]);
 
-  // Dragging the top of the sheet down closes it.
+  // Dragging the sheet down closes it. The grabber and the header take the drag at once; the
+  // content takes it only while its list is scrolled to the top, so the list still scrolls.
+  const sheetBack = useRef(() => Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start()).current;
+  const sheetRelease = useRef((dy: number, vy: number) => {
+    if (dy > 80 || vy > 0.8) closeSheetFromDrag();
+    else sheetBack();
+  }).current;
   const sheetPan = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, g) => g.dy > 4,
       onPanResponderMove: (_, g) => sheetDrag.setValue(Math.max(0, g.dy)),
-      onPanResponderRelease: (_, g) => {
-        if (g.dy > 80 || g.vy > 0.8) {
-          closeSheetFromDrag();
-        } else {
-          Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start();
-        }
-      },
-      onPanResponderTerminate: () => Animated.spring(sheetDrag, { toValue: 0, useNativeDriver: true }).start(),
+      onPanResponderRelease: (_, g) => sheetRelease(g.dy, g.vy),
+      onPanResponderTerminate: sheetBack,
+    })
+  ).current;
+  const listAtTop = useRef(true);
+  const trackListTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    listAtTop.current = e.nativeEvent.contentOffset.y <= 0;
+  };
+  // Takes the move before the list does, which also stops the list from scrolling along.
+  const contentPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponderCapture: (_, g) => listAtTop.current && g.dy > 8 && Math.abs(g.dx) < g.dy,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_, g) => sheetDrag.setValue(Math.max(0, g.dy)),
+      onPanResponderRelease: (_, g) => sheetRelease(g.dy, g.vy),
+      onPanResponderTerminate: sheetBack,
     })
   ).current;
 
@@ -595,7 +613,7 @@ export default function MapScreen() {
   const profileAvatar = user?.avatarUrl ?? null;
   // The timeline panel opens at its middle rest and keeps the height the finger left it at,
   // within the rests of the current window.
-  const panelSnapsNow = panelSnaps(windowHeight, insets.top);
+  const panelSnapsNow = panelSnaps(windowHeight, insets.top, insets.bottom);
   const panelHeight = Math.min(panelRest ?? panelSnapsNow.mid, panelSnapsNow.high);
   const pending = pendingCount(invites);
   const people = groupPeople(visibleDevices, user?.id);
@@ -846,6 +864,7 @@ export default function MapScreen() {
           <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} accessibilityLabel="Close" />
         </Animated.View>
         <Animated.View
+          {...contentPan.panHandlers}
           style={[styles.sheet, { backgroundColor: c.raised, paddingBottom: insets.bottom + 16, transform: [{ translateY: Animated.add(sheetProgress.interpolate({ inputRange: [0, 1], outputRange: [windowHeight, 0] }), sheetDrag) }] }]}
         >
           <View {...sheetPan.panHandlers} style={styles.grabArea}>
@@ -920,7 +939,7 @@ export default function MapScreen() {
                 </ScrollView>
               )}
               <Text style={[styles.sheetMeta, { color: c.muted }]}>{summary}</Text>
-              <ScrollView style={styles.deviceList}>
+              <ScrollView style={styles.deviceList} onScroll={trackListTop} scrollEventThrottle={16}>
                 {people.length === 0 && (
                   <Text style={[styles.empty, { color: c.muted }]}>Nobody here yet.</Text>
                 )}
@@ -930,7 +949,7 @@ export default function MapScreen() {
           )}
 
           {sheet === "groups" && creds && (
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               <GroupsPanel
                 auth={creds}
                 userId={creds.user.id}
@@ -944,7 +963,7 @@ export default function MapScreen() {
           )}
 
           {sheet === "settings" && creds && (
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               {creds.user.mustChangePassword ? (
                 <View style={[styles.notice, { backgroundColor: c.subtle }]}>
                   <MaterialIcons name="info-outline" size={18} color={c.secondary} />
