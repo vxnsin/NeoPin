@@ -1,4 +1,13 @@
-import { ApiError, deviceHeaders, fetchTimeline, fetchTimelineDays, loginRequest, normalizeServerUrl, pingDeviceRequest } from "../lib/api";
+import {
+  ApiError,
+  deviceHeaders,
+  fetchTimeline,
+  fetchTimelineDays,
+  loginRequest,
+  normalizeServerUrl,
+  pingDeviceRequest,
+  savePlaceAt,
+} from "../lib/api";
 
 const auth = { serverIp: "ws://10.0.0.2:3012", deviceId: "Luis’ iPhone", token: "t/k+1" };
 
@@ -90,6 +99,16 @@ test("asking a device for a position posts its id and tells whether it was reach
   expect(url).toBe("http://10.0.0.2:3012/api/sendPing");
   expect(init.method).toBe("POST");
   expect(JSON.parse(init.body)).toEqual({ deviceId: "Pixel", userId: 7 });
+});
+
+test("saving a spot as Home sends the kind and leaves the name to the server", async () => {
+  const fetchMock = respond(200, { id: 3 });
+  (global as any).fetch = fetchMock;
+  await savePlaceAt(auth, { lat: 49.79, lon: 9.95, kind: "home" }, 7);
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toBe("http://10.0.0.2:3012/api/places?userId=7");
+  expect(init.method).toBe("POST");
+  expect(JSON.parse(init.body)).toEqual({ lat: 49.79, lon: 9.95, kind: "home" });
 });
 
 test("a 202 means no device was reachable, a 404 names the device", async () => {
