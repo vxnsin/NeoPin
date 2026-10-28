@@ -1,5 +1,5 @@
 import { getUser, inferDeviceType, isHidden, linkedDevices, listUsers, publicUser } from "./accounts.js";
-import { lastPosition } from "./history.js";
+import { forgetBattery, lastBattery, lastPosition, recordBattery } from "./history.js";
 import { sharedGroupIds, visibleUserIds } from "./groups.js";
 import { config } from "./config.js";
 
@@ -70,12 +70,24 @@ export function updatePosition(userId, deviceId, latitude, longitude) {
   return device;
 }
 
-// The charge the app last reported, 0 to 100. Kept in memory only: after a restart
-// the next report fills it in again.
+// A report that changed nothing is written down again after this long, so the stored
+// time still says when the phone was last heard from.
+const BATTERY_REWRITE_MS = 5 * 60_000;
+
+// The charge the app last reported, 0 to 100. Also stored, so a device that went offline
+// keeps its last reading through a server restart. A phone on the move reports every few
+// seconds; the database only sees changes and a rewrite every few minutes.
 export function updateBattery(userId, deviceId, level, charging) {
   const device = devices.get(keyOf(userId, deviceId));
   if (!device) return null;
-  device.battery = { level, charging, updatedAt: new Date().toISOString() };
+  const now = Date.now();
+  const previous = device.battery;
+  device.battery = { level, charging, updatedAt: new Date(now).toISOString() };
+  const changed = !previous || previous.level !== level || previous.charging !== charging;
+  if (changed || now - (device.batteryStoredAt ?? 0) >= BATTERY_REWRITE_MS) {
+    recordBattery(userId, deviceId, level, charging, device.battery.updatedAt);
+    device.batteryStoredAt = now;
+  }
   return device;
 }
 
@@ -110,7 +122,8 @@ export function serializeDevices(viewer) {
         position: live?.position ?? (stored ? { latitude: stored.lat, longitude: stored.lon } : null),
         lastPing: live?.lastPing ?? (stored ? new Date(stored.ts).toISOString() : null),
         status: statusOf(live),
-        battery: live?.battery ?? null,
+        // The last reading stays with an offline device, the clients show it as old.
+        battery: live?.battery ?? lastBattery(user.id, link.deviceId),
         avatarUrl: owner.avatarUrl,
         deviceType: live?.deviceType ?? link.deviceType ?? "phone",
         // Picked by the owner to stand for them. The clients still prefer an online device.
@@ -161,6 +174,7 @@ export function timeAgo(timestamp) {
 
 export function removeDevice(userId, deviceId) {
   devices.delete(keyOf(userId, deviceId));
+  forgetBattery(userId, deviceId);
 }
 
 export function resetDevices() {

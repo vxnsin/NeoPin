@@ -64,6 +64,39 @@ test("the dashboard API lists the battery too", async () => {
   assert.equal(devices.find((d) => d.deviceId === "phone").battery.level, 12);
 });
 
+test("an offline device keeps its last reading", async () => {
+  const a = await s.device("luis", "a");
+  await a.next();
+  const b = await s.device("luis", "b");
+  await b.next();
+  b.send({ type: "updateBattery", level: 9, charging: false });
+  await batteryOf(a, "b");
+
+  b.ws.close();
+  for (;;) {
+    const msg = await a.next();
+    const device = msg.type === "dataResponse" && msg.devices.find((d) => d.deviceId === "b");
+    if (device?.status === "offline") {
+      assert.equal(device.battery.level, 9);
+      assert.ok(Date.parse(device.battery.updatedAt));
+      break;
+    }
+  }
+});
+
+test("the last reading survives a server restart", async () => {
+  const { resetDevices, serializeDevices } = await import("../src/devices.js");
+  const phone = await s.device("luis", "phone");
+  await phone.next();
+  phone.send({ type: "updateBattery", level: 42, charging: true });
+  await batteryOf(phone, "phone");
+
+  resetDevices(); // what a restart does to the in-memory registry
+  const device = serializeDevices().find((d) => d.deviceId === "phone");
+  assert.equal(device.status, "offline");
+  assert.deepEqual({ level: device.battery.level, charging: device.battery.charging }, { level: 42, charging: true });
+});
+
 test("a battery level outside 0 to 100 closes the socket", async () => {
   const phone = await s.device("luis", "phone");
   await phone.next();

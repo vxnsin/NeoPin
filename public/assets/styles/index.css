@@ -1233,6 +1233,15 @@ body.is-timeline .maplibregl-popup {
   color: var(--online);
 }
 
+/* The last reading of an offline device: faded, with the time it was taken. */
+.battery--stale {
+  opacity: 0.6;
+}
+
+.battery__when {
+  font-size: 0.85em;
+}
+
 .battery__bolt {
   width: 11px;
   height: 11px;
