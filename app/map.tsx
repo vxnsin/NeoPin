@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  AppState,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -39,6 +40,8 @@ import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby"
 import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
+import InviteCodesPanel from "@/components/InviteCodesPanel";
+import NotificationsPanel from "@/components/NotificationsPanel";
 import { takeFindRequest } from "@/lib/findInbox";
 import { onSheetRequest, takeRequestedSheet } from "@/lib/sheetRequest";
 import AvatarCropper from "@/components/AvatarCropper";
@@ -69,13 +72,17 @@ import {
   fetchGroups,
   fetchInvites,
   fetchMe,
+  fetchNotifications,
+  markNotificationsRead,
   fetchServerStatus,
   setPrimaryDeviceRequest,
   pingDeviceRequest,
+  type AppNotification,
   type Group,
   type Invite,
   type User,
 } from "@/lib/api";
+import { unreadCount, unreadIds } from "@/lib/notifications";
 import {
   badgeText,
   chipGroups,
@@ -107,7 +114,7 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-type Sheet = "devices" | "settings" | "groups" | "find" | null;
+type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
@@ -123,9 +130,10 @@ export default function MapScreen() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [creds, setCreds] = useState<StoredCredentials | null>(null);
   const [sheet, setSheet] = useState<Sheet>(null);
-  // A tapped invitation notification opens the groups sheet, also when it started the app.
+  // A tapped notification opens the sheet it is about, also when it started the app.
   useEffect(() => {
-    if (takeRequestedSheet()) setSheet("groups");
+    const waiting = takeRequestedSheet();
+    if (waiting) setSheet(waiting);
     return onSheetRequest((requested) => {
       takeRequestedSheet();
       setSheet(requested);
@@ -155,6 +163,10 @@ export default function MapScreen() {
   const [editingProfile, setEditingProfile] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  // The ones that were unread when the sheet opened keep their dot while it stays open.
+  const [freshNotes, setFreshNotes] = useState<number[]>([]);
+  const [invitesEnabled, setInvitesEnabled] = useState(false);
   const [foundAvatars, setFoundAvatars] = useState<string[]>([]);
   const [groupFilter, setGroupFilter] = useState<number | null>(null);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
@@ -187,8 +199,9 @@ export default function MapScreen() {
     // Group members show their picture in the groups sheet even without a device.
     groups.forEach((group) => group.members.forEach((member) => add(member.avatarUrl)));
     foundAvatars.forEach(add);
+    notifications.forEach((item) => add(item.data.user.avatarUrl));
     return [...devices, ...extra];
-  }, [devices, user?.avatarUrl, groups, foundAvatars]);
+  }, [devices, user?.avatarUrl, groups, foundAvatars, notifications]);
   const avatarFor = useAvatars(avatarSources, creds);
   // Built once, later theme changes go in as messages so the map does not reload.
   const mapHtml = useMemo(() => buildMapHtml(theme.isDark, insets.bottom), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -217,7 +230,10 @@ export default function MapScreen() {
   useEffect(() => {
     if (sheet !== "settings" || !creds) return;
     fetchServerStatus(creds.serverIp)
-      .then((status) => setServerLabel(["Server v" + status.version, status.commit?.slice(0, 7)].filter(Boolean).join(" · ")))
+      .then((status) => {
+        setServerLabel(["Server v" + status.version, status.commit?.slice(0, 7)].filter(Boolean).join(" · "));
+        setInvitesEnabled(status.invites === true);
+      })
       .catch(() => setServerLabel(null));
     // The main device may have been picked on another device or the dashboard meanwhile.
     fetchMe(creds)
@@ -394,9 +410,56 @@ export default function MapScreen() {
     }
   }, []);
 
+  const loadNotifications = useCallback(async () => {
+    const auth = credsRef.current;
+    if (!auth) return;
+    try {
+      setNotifications(await fetchNotifications(auth));
+      setInvitesEnabled(true);
+    } catch {
+      // an older server has none, keep what is shown
+    }
+  }, []);
+
   useEffect(() => {
     loadGroupFilter().then(setGroupFilter);
   }, []);
+
+  useEffect(() => {
+    if (creds?.token) loadNotifications();
+  }, [creds?.serverIp, creds?.token, loadNotifications]);
+
+  // Coming back to the app may have missed a message.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        loadGroups();
+        loadNotifications();
+      }
+    });
+    return () => subscription.remove();
+  }, [loadGroups, loadNotifications]);
+
+  // Looking at the list reads it. Items that arrive while it is open are read right away.
+  useEffect(() => {
+    const auth = credsRef.current;
+    if (sheet !== "notifications" || !auth) return;
+    const ids = unreadIds(notifications);
+    if (ids.length === 0) return;
+    setFreshNotes((current) => Array.from(new Set([...current, ...ids])));
+    setNotifications((current) => current.map((item) => (ids.includes(item.id) ? { ...item, readAt: new Date().toISOString() } : item)));
+    markNotificationsRead(auth, ids).catch(() => loadNotifications());
+  }, [sheet, notifications, loadNotifications]);
+
+  useEffect(() => {
+    if (sheet !== "notifications") setFreshNotes([]);
+  }, [sheet]);
+
+  const markAllRead = () => {
+    const auth = credsRef.current;
+    setFreshNotes([]);
+    if (auth) markNotificationsRead(auth).catch(() => loadNotifications());
+  };
 
   useEffect(() => {
     if (creds?.token) loadGroups();
@@ -407,6 +470,7 @@ export default function MapScreen() {
       addMessageListener((data) => {
         if (data.type === "dataResponse" && Array.isArray(data.devices)) setDevices(data.devices);
         else if (data.type === "groupsChanged") loadGroups();
+        else if (data.type === "notificationsChanged") loadNotifications();
         else if (FIND_MESSAGES.includes(data.type)) {
           if (data.type === "findPending" && abortNextPending.current) {
             abortNextPending.current = false;
@@ -418,7 +482,7 @@ export default function MapScreen() {
           if (data.type === "findRequest" || data.type === "findStarted") setSheet("find");
         }
       }),
-    [addMessageListener, loadGroups, emit]
+    [addMessageListener, loadGroups, loadNotifications, emit]
   );
 
   const chooseGroup = (id: number | null) => {
@@ -639,6 +703,7 @@ export default function MapScreen() {
   const panelSnapsNow = panelSnaps(windowHeight, insets.top, insets.bottom);
   const panelHeight = Math.min(panelRest ?? panelSnapsNow.mid, panelSnapsNow.high);
   const pending = pendingCount(invites);
+  const unread = unreadCount(notifications);
   const people = groupPeople(visibleDevices, user?.id);
   const online = visibleDevices.filter((d) => d.status === "online").length;
   const summary = !isConnected
@@ -863,10 +928,10 @@ export default function MapScreen() {
           style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setSheet("settings")}
           hitSlop={6}
-          accessibilityLabel={pending > 0 ? `Settings, ${pending} pending invitations` : "Settings"}
+          accessibilityLabel={pending + unread > 0 ? `Settings, ${pending + unread} new` : "Settings"}
         >
           <MaterialIcons name="settings" size={20} color={c.primary} />
-          {pending > 0 && <View style={[styles.dot, { backgroundColor: c.secondary, borderColor: c.raised }]} />}
+          {pending + unread > 0 && <View style={[styles.dot, { backgroundColor: c.secondary, borderColor: c.raised }]} />}
         </Pressable>
       </Pressable>
       )}
@@ -901,7 +966,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "find" ? "Find me" : "People"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -991,6 +1056,18 @@ export default function MapScreen() {
             </ScrollView>
           )}
 
+          {sheet === "inviteCodes" && creds && (
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
+              <InviteCodesPanel auth={creds} isAdmin={creds.user.isAdmin === true} groups={groups} />
+            </ScrollView>
+          )}
+
+          {sheet === "notifications" && creds && (
+            <ScrollView showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
+              <NotificationsPanel items={notifications} fresh={freshNotes} avatarFor={avatarFor} onMarkAll={markAllRead} />
+            </ScrollView>
+          )}
+
           {sheet === "settings" && creds && (
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               {creds.user.mustChangePassword ? (
@@ -1059,6 +1136,34 @@ export default function MapScreen() {
                 )}
                 <MaterialIcons name="chevron-right" size={22} color={c.muted} />
               </Pressable>
+
+              {invitesEnabled && (
+                <>
+                  <Pressable
+                    style={[styles.groupsEntry, { backgroundColor: c.subtle, marginTop: 10 }]}
+                    onPress={() => setSheet("inviteCodes")}
+                    accessibilityLabel="Invite codes"
+                  >
+                    <MaterialIcons name="vpn-key" size={20} color={c.primary} />
+                    <Text style={[styles.groupsEntryText, { color: c.primary }]}>Invite codes</Text>
+                    <MaterialIcons name="chevron-right" size={22} color={c.muted} />
+                  </Pressable>
+                  <Pressable
+                    style={[styles.groupsEntry, { backgroundColor: c.subtle, marginTop: 10 }]}
+                    onPress={() => setSheet("notifications")}
+                    accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+                  >
+                    <MaterialIcons name="notifications-none" size={20} color={c.primary} />
+                    <Text style={[styles.groupsEntryText, { color: c.primary }]}>Notifications</Text>
+                    {unread > 0 && (
+                      <View style={[styles.badge, { backgroundColor: c.secondary }]}>
+                        <Text style={[styles.badgeText, { color: c.onSecondary }]}>{badgeText(unread)}</Text>
+                      </View>
+                    )}
+                    <MaterialIcons name="chevron-right" size={22} color={c.muted} />
+                  </Pressable>
+                </>
+              )}
 
               <Text style={[styles.sectionTitle, { color: c.muted }]}>Position updates</Text>
               <View style={styles.presetRow}>
