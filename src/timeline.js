@@ -32,6 +32,24 @@ function dropJumps(points) {
   return out;
 }
 
+// Slower than this between two fixes is standing still: a red light, a jam, a level crossing.
+const STILL_MS = 0.5;
+
+// The time spent actually moving. Waiting at a light would drag the average of a drive down to a
+// walk, most of all once a dismissed stop folds its minutes into the trip. Without any leg fast
+// enough (two fixes only, or a crawl), the whole duration counts.
+function movingMsOf(points) {
+  let moving = 0;
+  for (let i = 1; i < points.length; i++) {
+    const dt = points[i].ts - points[i - 1].ts;
+    if (dt <= 0) continue;
+    const metres = distanceM(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
+    if (metres / (dt / 1000) >= STILL_MS) moving += dt;
+  }
+  return moving || points[points.length - 1].ts - points[0].ts;
+}
+
+// From the speed while moving, not the average over the whole trip.
 function modeFor(distance, durationMs) {
   const kmh = durationMs > 0 ? distance / 1000 / (durationMs / 3_600_000) : 0;
   if (kmh < 7) return "walking";
@@ -64,7 +82,7 @@ export function tripSegment(points) {
     end,
     durationMs: end - start,
     distanceM: Math.round(distance),
-    mode: modeFor(distance, end - start),
+    mode: modeFor(distance, movingMsOf(points)),
     path: points.map((p) => [p.lat, p.lon]),
   };
   // The fixes with their times, for telling a bus ride from a drive. Not part of the JSON.
