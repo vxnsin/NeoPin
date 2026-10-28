@@ -245,6 +245,11 @@ body.is-timeline .maplibregl-popup {
   font-size: 16px;
 }
 
+.timeline__actions {
+  display: flex;
+  gap: 2px;
+}
+
 .timeline__controls {
   display: grid;
   gap: 8px;
@@ -406,11 +411,7 @@ body.is-timeline .maplibregl-popup {
   height: 16px;
 }
 
-.seg--trip[data-mode="walking"] { --mode: #16a34a; }
-.seg--trip[data-mode="cycling"] { --mode: #2563eb; }
-.seg--trip[data-mode="driving"] { --mode: #ea580c; }
-.seg--trip[data-mode="gap"] { --mode: #94a3b8; }
-
+/* --mode is set on the row: the mode's colour, or the line's own for a matched ride. */
 .seg__text {
   display: grid;
   min-width: 0;
@@ -430,6 +431,163 @@ body.is-timeline .maplibregl-popup {
 .seg__coords {
   font-family: var(--mono);
   font-size: 11.5px;
+}
+
+/* A ride: the line badge, then the vehicle and the stops, cut short when they do not fit. */
+.seg__ride {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.seg__ride-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-badge {
+  flex-shrink: 0;
+  min-width: 28px;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-solid);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* "This was:" under a trip, and "Save as" in the place picker. */
+.mode-chooser {
+  display: grid;
+  gap: 8px;
+  margin: 2px 6px 10px 62px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-solid);
+}
+
+.mode-chooser[hidden] {
+  display: none;
+}
+
+.mode-chooser__label,
+.place-picker__quick > span {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.mode-chooser__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip--icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip--icon .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.chip--icon:hover:not([aria-pressed="true"]) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.chip:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.place-picker__quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.place-picker__quick > span {
+  margin-right: 2px;
+}
+
+/* A red light or a jam can last long enough to pass for a stop. */
+.place-picker__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.place-picker__dismiss:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.place-picker__dismiss .icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* The day's removed stops, each with a way back. */
+.tl-removed {
+  display: grid;
+  gap: 6px;
+  padding: 4px 18px 16px;
+}
+
+.tl-note + .tl-removed {
+  padding-top: 0;
+}
+
+.tl-removed__title {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tl-removed__list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tl-removed__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tl-removed__row .icon {
+  width: 15px;
+  height: 15px;
 }
 
 .seg-item > .seg {
@@ -529,12 +687,11 @@ body.is-timeline .maplibregl-popup {
 
 .place-picker__own {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto;
   gap: 6px;
 }
 
-.place-picker__own input,
-.place-picker__own select {
+.place-picker__own input {
   min-width: 0;
   padding: 7px 9px;
   border: 1px solid var(--border);
@@ -598,6 +755,25 @@ body.is-timeline .maplibregl-popup {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand) 40%, transparent), var(--shadow-md);
 }
 
+/* Where a ride was boarded and left: a small dot in the line's colour, set as --line. */
+.tl-tstop {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 2.5px solid #ffffff;
+  border-radius: 50%;
+  background: var(--line, #7c3aed);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition: box-shadow 0.15s ease;
+}
+
+.tl-tstop:hover,
+.tl-tstop.is-active {
+  z-index: 5;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--line, #7c3aed) 40%, transparent), var(--shadow-md);
+}
+
 /* Devices, bottom left, like the list in Apple's Find My. */
 .devices {
   position: fixed;
@@ -635,7 +811,18 @@ body.is-timeline .maplibregl-popup {
 }
 
 .devices__title .conn {
+  min-width: 0;
   font-size: 12.5px;
+}
+
+/* Next to the folded avatar stack the counts may not fit, they are cut short. */
+.devices__title {
+  min-width: 0;
+}
+
+.devices__title .conn__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .devices__stack {

@@ -438,3 +438,50 @@
 .combo__option[aria-selected="true"] {
   background: var(--brand-soft);
 }
+
+/* Invisible: how long to stay off everyone else's map, or how long it still lasts. */
+.hide {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.hide__choices {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.hide__choices .btn {
+  height: 40px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.hide__active {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.hide__active .icon {
+  color: var(--brand);
+}
+
+.hide__active strong {
+  flex: 1;
+  font-size: 14px;
+}
+
+@media (max-width: 420px) {
+  .hide__choices {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.menu-item__state {
+  margin-left: auto;
+}

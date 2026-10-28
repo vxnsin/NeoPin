@@ -358,3 +358,67 @@ document.getElementById("openProfile").addEventListener("click", () => {
   setMenu(false);
   showProfile();
 });
+
+// Invisible: the choices and labels come from hidden.js.
+
+const isHiddenNow = () => me?.hiddenUntil != null && me.hiddenUntil > Date.now();
+
+function showHide() {
+  openModal("Invisible");
+  renderHide();
+}
+
+// Drawn again after each change, in the same dialog, so the focus stays in it.
+function renderHide() {
+  const active = isHiddenNow();
+  modalBody.innerHTML = `
+    <div class="hide">
+      ${
+        active
+          ? `<div class="hide__active">
+              <svg class="icon"><use href="#i-eye-off" /></svg>
+              <strong>${esc(hiddenLabel(me.hiddenUntil))}</strong>
+              <button class="btn btn--small" type="button" data-show aria-label="Show me again">Show me</button>
+            </div>`
+          : `<div class="hide__choices">${HIDE_CHOICES.map(
+              (choice, i) => `<button class="btn btn--ghost" type="button" data-hide="${i}" aria-label="Hide me: ${esc(choice.label)}">${esc(choice.label)}</button>`
+            ).join("")}</div>`
+      }
+      <p class="hint">${
+        active
+          ? "Nobody else sees you on the map, not even the admin. Your own map and timeline go on."
+          : "Gone from everyone else's map for a while. It turns itself off again, also when this page is closed."
+      }</p>
+      <p class="form-error" role="alert"></p>
+    </div>`;
+  const error = modalBody.querySelector(".form-error");
+  modalBody.querySelector(".hide").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-hide], [data-show]");
+    if (!button) return;
+    const minutes = button.dataset.hide === undefined ? undefined : HIDE_CHOICES[Number(button.dataset.hide)].minutes(new Date());
+    modalBody.querySelectorAll(".hide button").forEach((b) => (b.disabled = true));
+    error.textContent = "";
+    try {
+      const user =
+        button.dataset.show !== undefined
+          ? await call("/api/me/hidden", { method: "DELETE" })
+          : await call("/api/me/hidden", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(minutes ? { minutes } : {}),
+            });
+      applyOwnProfile(user);
+      renderHide();
+      modalBody.querySelector(".hide button")?.focus();
+    } catch (failure) {
+      if (failure.message === "signed-out") return;
+      error.textContent = failure.message || "That did not work, try again.";
+      modalBody.querySelectorAll(".hide button").forEach((b) => (b.disabled = false));
+    }
+  });
+}
+
+document.getElementById("openHide").addEventListener("click", () => {
+  setMenu(false);
+  showHide();
+});
