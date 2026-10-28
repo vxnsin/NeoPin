@@ -34,6 +34,7 @@ import HideSection from "@/components/HideSection";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
+import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { timeAgo } from "@/lib/time";
@@ -345,10 +346,13 @@ export default function MapScreen() {
       .catch(() => {});
   };
 
-  // Pick a photo, then cut the square in the crop view. The settings sheet closes meanwhile,
-  // two modals do not stack reliably on iOS.
+  // The camera badge asks first (system menu), then picks a photo and cuts the square in the crop
+  // view. The settings sheet closes meanwhile, two modals do not stack reliably on iOS.
   const changePhoto = async () => {
     if (!creds || photoBusy) return;
+    const choice = await askPhotoChoice(Boolean(profileAvatar));
+    if (choice === "remove") return deletePhoto();
+    if (choice !== "pick") return;
     setPhotoError("");
     setPhotoBusy(true);
     try {
@@ -721,17 +725,16 @@ export default function MapScreen() {
                   <Text style={[styles.deviceMeta, { color: c.muted }]} numberOfLines={1}>
                     @{creds.user.username} · {creds.deviceId}
                   </Text>
+                  {/* A real button with a height of its own: a bare text link took no taps on Android.
+                      The photo itself is changed or removed through the camera badge. */}
                   <View style={styles.profileActions}>
-                    <Pressable onPress={changePhoto} disabled={photoBusy} hitSlop={8}>
-                      <Text style={[styles.link, { color: c.secondary }]}>{profileAvatar ? "Change photo" : "Add a photo"}</Text>
-                    </Pressable>
-                    {profileAvatar ? (
-                      <Pressable onPress={deletePhoto} disabled={photoBusy} hitSlop={8}>
-                        <Text style={[styles.link, { color: c.muted }]}>Remove</Text>
-                      </Pressable>
-                    ) : null}
-                    <Pressable onPress={() => setEditingProfile((open) => !open)} hitSlop={8}>
-                      <Text style={[styles.link, { color: c.muted }]}>Edit profile</Text>
+                    <Pressable
+                      style={({ pressed }) => [styles.profileButton, { backgroundColor: c.raised, opacity: pressed ? 0.7 : 1 }]}
+                      onPress={() => setEditingProfile((open) => !open)}
+                      accessibilityRole="button"
+                    >
+                      <MaterialIcons name={editingProfile ? "expand-less" : "edit"} size={15} color={c.primary} />
+                      <Text style={[styles.profileButtonText, { color: c.primary }]}>Edit profile</Text>
                     </Pressable>
                   </View>
                   {photoError ? <Text style={[styles.error, { color: c.secondary }]}>{photoError}</Text> : null}
@@ -903,8 +906,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  profileActions: { flexDirection: "row", gap: 16, marginTop: 4 },
-  link: { fontSize: 13.5, fontWeight: "600" },
+  profileActions: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  profileButton: { flexDirection: "row", alignItems: "center", gap: 5, height: 34, paddingHorizontal: 12, borderRadius: 10 },
+  profileButtonText: { fontSize: 13, fontWeight: "600" },
   error: { fontSize: 12, marginTop: 4 },
   sectionTitle: { fontSize: 13, fontWeight: "600", marginTop: 20, marginBottom: 8 },
   presetRow: { flexDirection: "row", gap: 8 },
