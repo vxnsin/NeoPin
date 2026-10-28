@@ -5,7 +5,7 @@ import { distanceM } from "./history.js";
 export const STOP_RADIUS_M = 75;
 export const MIN_VISIT_MS = 5 * 60_000;
 const MERGE_VISITS_M = 150;
-const MIN_TRIP_M = 150;
+export const MIN_TRIP_M = 150;
 const MAX_SPEED_MS = 70; // faster than this between two fixes is a GPS jump
 // Longer than this without a fix is a gap: the phone was off or out of reach, nobody knows the way.
 export const GAP_MS = 15 * 60_000;
@@ -53,7 +53,7 @@ function visitSegment(points) {
   return { type: "visit", start, end, durationMs: end - start, lat: c.lat, lon: c.lon, pointCount: points.length };
 }
 
-function tripSegment(points) {
+export function tripSegment(points) {
   const distance = pathLength(points);
   const start = points[0].ts;
   const end = points[points.length - 1].ts;
