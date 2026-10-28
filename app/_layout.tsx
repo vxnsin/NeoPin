@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { AppState, View, Dimensions, StyleSheet } from "react-native";
 import { Stack, usePathname, useRouter } from "expo-router";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as SplashScreen from "expo-splash-screen";
 import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
@@ -85,22 +86,26 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <WebSocketProvider>
-      <ConnectionLifecycle />
-      <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            animation: "fade",
-          }}
-        />
-        {pathname !== "/map" && <Footer />}
-      </View>
-    </WebSocketProvider>
+    // The gestures of the sheets run natively and need this root above them.
+    <GestureHandlerRootView style={styles.root}>
+      <WebSocketProvider>
+        <ConnectionLifecycle />
+        <View style={[styles.container, { backgroundColor: theme.colors.surface }]}>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              animation: "fade",
+            }}
+          />
+          {pathname !== "/map" && <Footer />}
+        </View>
+      </WebSocketProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   container: {
     flex: 1,
     minHeight: Dimensions.get("window").height,
