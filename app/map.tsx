@@ -31,6 +31,8 @@ import TimelinePanel from "@/components/TimelinePanel";
 import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
+import FindSheet from "@/components/FindSheet";
+import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
 import ProfileForm from "@/components/ProfileForm";
 import GroupsPanel from "@/components/GroupsPanel";
 import AvatarCropper from "@/components/AvatarCropper";
@@ -96,7 +98,7 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-type Sheet = "devices" | "settings" | "groups" | null;
+type Sheet = "devices" | "settings" | "groups" | "find" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
@@ -126,6 +128,13 @@ export default function MapScreen() {
   const [panelRest, setPanelRest] = useState<number | null>(null);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
+  // "Find me": the running search, my own fix and where my phone points while it runs.
+  const [find, setFind] = useState<FindState | null>(null);
+  const [myFix, setMyFix] = useState<FindFix | null>(null);
+  const [heading, setHeading] = useState<number | null>(null);
+  // A search cancelled before the server named its session is ended as soon as it does.
+  const abortNextPending = useRef(false);
+  const serverFinds = isConnected && socket.features.includes("find");
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState("");
   const [, setTick] = useState(0);
@@ -183,6 +192,101 @@ export default function MapScreen() {
   const credsRef = useRef(creds);
   credsRef.current = creds;
 
+  // While a search runs, my position goes to the other side every second, with the compass
+  // reading, so their arrow and mine have something to point with.
+  const findActive = find?.phase === "active" ? find.session : null;
+  useEffect(() => {
+    if (!findActive) return;
+    let cancelled = false;
+    let position: Location.LocationSubscription | null = null;
+    let compass: Location.LocationSubscription | null = null;
+    let lastHeading: number | null = null;
+    (async () => {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== "granted" || cancelled) return;
+      compass = await Location.watchHeadingAsync((h) => {
+        const value = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+        if (value >= 0) {
+          lastHeading = value % 360;
+          setHeading(lastHeading);
+        }
+      }).catch(() => null);
+      if (cancelled) {
+        compass?.remove();
+        return;
+      }
+      position = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 },
+        (location) => {
+          const raw = location.coords.accuracy;
+          const accuracy = raw != null && raw >= 0 ? Math.min(raw, 100_000) : null;
+          const fix: FindFix = { latitude: location.coords.latitude, longitude: location.coords.longitude, accuracy, heading: lastHeading, at: Date.now() };
+          setMyFix(fix);
+          emit({
+            type: "findPosition",
+            session: findActive,
+            latitude: fix.latitude,
+            longitude: fix.longitude,
+            ...(accuracy !== null && { accuracy }),
+            ...(lastHeading !== null && { heading: lastHeading }),
+          });
+        }
+      );
+      if (cancelled) position.remove();
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+      position?.remove();
+      compass?.remove();
+      // The next search starts without a stale fix or compass reading from this one.
+      setMyFix(null);
+      setHeading(null);
+    };
+  }, [findActive, emit]);
+
+  // Swiping the sheet away is a no to a question, or a stop.
+  useEffect(() => {
+    if (sheet !== null || !find || find.phase === "ended") return;
+    if (find.phase === "asked") emit({ type: "findAnswer", session: find.session, accept: false });
+    else if (find.session) emit({ type: "findEnd", session: find.session });
+    else abortNextPending.current = true;
+    setFind(null);
+    setMyFix(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheet]);
+
+  const startFind = (person: Person) => {
+    if (person.userId === undefined) return;
+    abortNextPending.current = false;
+    setFind({
+      phase: "pending",
+      session: "",
+      peer: { id: person.userId, username: person.primary.owner?.username ?? person.name, displayName: person.name, avatarUrl: person.primary.avatarUrl ?? null },
+      expiresAt: Date.now() + 2 * 60_000,
+    });
+    emit({ type: "findRequest", userId: person.userId });
+    setSheet("find");
+  };
+
+  const stopFind = () => {
+    if (find && find.phase !== "ended") {
+      if (find.session) emit({ type: "findEnd", session: find.session });
+      else abortNextPending.current = true;
+    }
+    setFind(null);
+    setMyFix(null);
+    closeSheet();
+  };
+
+  const answerFind = (accept: boolean) => {
+    if (find?.phase !== "asked") return;
+    emit({ type: "findAnswer", session: find.session, accept });
+    if (!accept) {
+      setFind(null);
+      closeSheet();
+    }
+  };
+
   // Groups and invitations decide who is visible. A group that vanished drops the filter back to All.
   const loadGroups = useCallback(async () => {
     const auth = credsRef.current;
@@ -214,8 +318,17 @@ export default function MapScreen() {
       addMessageListener((data) => {
         if (data.type === "dataResponse" && Array.isArray(data.devices)) setDevices(data.devices);
         else if (data.type === "groupsChanged") loadGroups();
+        else if (FIND_MESSAGES.includes(data.type)) {
+          if (data.type === "findPending" && abortNextPending.current) {
+            abortNextPending.current = false;
+            emit({ type: "findEnd", session: data.session });
+            return;
+          }
+          setFind((current) => reduceFind(current, data));
+          if (data.type === "findRequest" || data.type === "findStarted") setSheet("find");
+        }
       }),
-    [addMessageListener, loadGroups]
+    [addMessageListener, loadGroups, emit]
   );
 
   const chooseGroup = (id: number | null) => {
@@ -516,6 +629,16 @@ export default function MapScreen() {
               {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} /> : null}
             </View>
           </View>
+          {serverFinds && !person.isMe && person.online && person.userId !== undefined && (
+            <Pressable
+              onPress={() => startFind(person)}
+              hitSlop={8}
+              style={[styles.findButton, { backgroundColor: c.subtle }]}
+              accessibilityLabel={"Find " + person.name}
+            >
+              <MaterialIcons name="near-me" size={18} color={c.secondary} />
+            </Pressable>
+          )}
           <MaterialIcons name={open ? "expand-less" : "expand-more"} size={22} color={c.muted} />
         </Pressable>
         {open && (
@@ -621,7 +744,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : "People"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "find" ? "Find me" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -632,6 +755,7 @@ export default function MapScreen() {
                   <MaterialIcons name="refresh" size={20} color={c.primary} />
                 </Pressable>
               )}
+              {sheet !== "find" && (
               <Pressable
                 style={[styles.headerButton, { backgroundColor: c.subtle }]}
                 onPress={() => setSheet(sheet === "devices" ? "settings" : sheet === "settings" ? "devices" : "settings")}
@@ -643,8 +767,25 @@ export default function MapScreen() {
                   color={c.primary}
                 />
               </Pressable>
+              )}
             </View>
           </View>
+
+          {sheet === "find" && find && (
+            <FindSheet
+              state={find}
+              mine={myFix}
+              heading={heading}
+              avatarFor={avatarFor}
+              onAccept={() => answerFind(true)}
+              onDecline={() => answerFind(false)}
+              onStop={stopFind}
+              onClose={() => {
+                setFind(null);
+                closeSheet();
+              }}
+            />
+          )}
 
           {sheet === "devices" && (
             <>
@@ -891,6 +1032,7 @@ const styles = StyleSheet.create({
   linkedName: { fontSize: 14.5, fontWeight: "600" },
   deviceRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, borderRadius: 14, paddingHorizontal: 6 },
   deviceName: { fontSize: 15.5, fontWeight: "600" },
+  findButton: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
   deviceMeta: { fontSize: 12.5 },
   // The text gives way first, so a battery next to it stays on the line.
   metaText: { flexShrink: 1 },
