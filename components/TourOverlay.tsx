@@ -1,18 +1,25 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, BackHandler, Easing, Linking, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Animated, BackHandler, Easing, Linking, Pressable, StyleSheet, Text, View, useWindowDimensions, type HostInstance } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import type { TourStep, TourTarget } from "@/lib/tour";
 
-// Where a target sits on the map screen, and how round its corners are.
+// Where a control sits in its window, and how round its corners are.
 export type TourRect = { x: number; y: number; width: number; height: number; radius: number };
 
 type Props = {
   steps: TourStep[];
-  measure: (target: TourTarget) => Promise<TourRect | null>;
+  index: number;
+  // The next step. One on another sheet comes after this overlay has faded out; the screen then
+  // opens that sheet and a fresh overlay over it, in the same window as its controls.
+  onIndex: (next: number) => void;
   // Done or skipped, after the overlay has faded out.
   onFinish: () => void;
+  // The control in window coordinates, null when it is not on the screen.
+  measure: (target: TourTarget) => Promise<TourRect | null>;
+  // Lets a sheet slide in before what is on it gets measured.
+  delay?: number;
   // The dashboard's address, linked from the admin step.
   dashboard?: string;
 };
@@ -20,19 +27,22 @@ type Props = {
 const PAD = 6;
 const CARD_GAP = 16;
 
-// The first-login walk over the map: everything dims except the spot a step is about, with a card
-// that points at it. The dim is one view with a huge border around the spot, so the hole keeps
-// round corners without an SVG, and it glides from one spot to the next.
-export default function TourOverlay({ steps, measure, onFinish, dashboard }: Props) {
+type Hole = { x: number; y: number; w: number; h: number; r: number };
+
+// Everything dims except the control a step is about, and a card next to it says what it does.
+// The dim is one view with a huge border around the hole, so the hole keeps round corners without
+// an SVG, and it glides from one control to the next.
+export default function TourOverlay({ steps, index, onIndex, onFinish, measure, delay = 0, dashboard }: Props) {
   const { colors: c, isDark } = useThemeManager();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const [index, setIndex] = useState(0);
+  const [shown, setShown] = useState(index);
   const [spot, setSpot] = useState<TourRect | null>(null);
 
+  const rootRef = useRef<HostInstance>(null);
   const fade = useRef(new Animated.Value(0)).current;
   const card = useRef(new Animated.Value(0)).current;
-  // The hole, JS driven: width, height and corners cannot run on the native driver.
+  // JS driven: width, height and corners cannot run on the native driver.
   const hole = useRef({
     x: new Animated.Value(width / 2),
     y: new Animated.Value(height / 2),
@@ -41,24 +51,48 @@ export default function TourOverlay({ steps, measure, onFinish, dashboard }: Pro
     r: new Animated.Value(0),
   }).current;
   const busy = useRef(true);
-  const finished = useRef(false);
+  const done = useRef(false);
+  const first = useRef(true);
 
   // Big enough to reach every corner from any spot on the screen.
   const border = width + height;
 
+  // The control relative to this overlay, which covers its window.
+  const locate = useCallback(
+    async (target: TourTarget | null): Promise<TourRect | null> => {
+      if (!target) return null;
+      const rect = await measure(target).catch(() => null);
+      if (!rect) return null;
+      const root = await new Promise<{ x: number; y: number }>((resolve) => {
+        // A view that never answers (gone meanwhile, or no native side in tests) counts as the
+        // window's corner, which is where the overlay starts anyway.
+        const timer = setTimeout(() => resolve({ x: 0, y: 0 }), 250);
+        if (typeof rootRef.current?.measureInWindow !== "function") return resolve({ x: 0, y: 0 });
+        rootRef.current.measureInWindow((x, y) => {
+          clearTimeout(timer);
+          resolve({ x, y });
+        });
+      });
+      return { ...rect, x: rect.x - root.x, y: rect.y - root.y };
+    },
+    [measure]
+  );
+
   const show = useCallback(
-    async (next: number, first = false) => {
-      const step = steps[next];
-      const rect = step.target === "map" ? null : await measure(step.target).catch(() => null);
-      const target = rect
+    async (next: number) => {
+      const rect = await locate(steps[next].target);
+      if (done.current) return;
+      const target: Hole = rect
         ? { x: rect.x - PAD, y: rect.y - PAD, w: rect.width + PAD * 2, h: rect.height + PAD * 2, r: rect.radius + PAD }
-        : // Nothing to point at: the hole closes to a point in the middle of the map.
+        : // Nothing to point at: the hole closes to a point and the card sits in the middle.
           { x: width / 2, y: height * 0.45, w: 0, h: 0, r: 0 };
-      setIndex(next);
+      setShown(next);
       setSpot(rect ? { x: target.x, y: target.y, width: target.w, height: target.h, radius: target.r } : null);
+      const entering = first.current;
+      first.current = false;
       const glide = (value: Animated.Value, toValue: number) =>
         Animated.timing(value, { toValue, duration: 340, easing: Easing.out(Easing.cubic), useNativeDriver: false });
-      if (first) {
+      if (entering) {
         hole.x.setValue(target.x);
         hole.y.setValue(target.y);
         hole.w.setValue(target.w);
@@ -66,68 +100,78 @@ export default function TourOverlay({ steps, measure, onFinish, dashboard }: Pro
         hole.r.setValue(target.r);
       }
       Animated.parallel([
-        ...(first
+        ...(entering
           ? [Animated.timing(fade, { toValue: 1, duration: 260, useNativeDriver: true })]
           : [glide(hole.x, target.x), glide(hole.y, target.y), glide(hole.w, target.w), glide(hole.h, target.h), glide(hole.r, target.r)]),
-        Animated.timing(card, { toValue: 1, duration: 240, delay: first ? 120 : 140, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(card, { toValue: 1, duration: 240, delay: entering ? 120 : 140, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       ]).start(() => {
         busy.current = false;
       });
     },
-    [steps, measure, width, height, hole, fade, card]
+    [steps, locate, width, height, hole, fade, card]
   );
 
+  // The first step of this overlay after the delay, later ones as the index moves on.
   useEffect(() => {
-    show(0, true);
-    // Only the first step starts on its own; later ones follow the buttons.
+    const timer = setTimeout(() => show(index), first.current ? delay : 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [index]);
+
+  const leave = useCallback(
+    (then: () => void) => {
+      busy.current = true;
+      Animated.timing(fade, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => then());
+    },
+    [fade]
+  );
 
   const finish = useCallback(() => {
-    if (finished.current) return;
-    finished.current = true;
+    if (done.current) return;
+    done.current = true;
+    leave(onFinish);
+  }, [leave, onFinish]);
+
+  const next = useCallback(() => {
+    if (busy.current || done.current) return;
+    const following = shown + 1;
+    if (following >= steps.length) return finish();
+    if (steps[following].sheet !== steps[shown].sheet) {
+      done.current = true;
+      return leave(() => onIndex(following));
+    }
     busy.current = true;
-    Animated.timing(fade, { toValue: 0, duration: 220, useNativeDriver: true }).start(() => onFinish());
-  }, [fade, onFinish]);
+    Animated.timing(card, { toValue: 0, duration: 140, useNativeDriver: true }).start(() => onIndex(following));
+  }, [shown, steps, finish, leave, card, onIndex]);
 
-  const go = useCallback(
-    (next: number) => {
-      if (busy.current || finished.current) return;
-      if (next >= steps.length) return finish();
-      busy.current = true;
-      Animated.timing(card, { toValue: 0, duration: 140, useNativeDriver: true }).start(() => show(next));
-    },
-    [steps.length, card, show, finish]
-  );
-
-  // Android's back goes one step back, and out of the tour from the first one.
+  // Android's back leaves the tour, like Skip.
   useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (index > 0) go(index - 1);
-      else finish();
+      finish();
       return true;
     });
     return () => subscription.remove();
-  }, [index, go, finish]);
+  }, [finish]);
 
-  const step = steps[index];
-  const last = index === steps.length - 1;
+  const step = steps[shown];
+  const last = shown === steps.length - 1;
   const cardWidth = Math.min(width - 32, 420);
   const cardLeft = (width - cardWidth) / 2;
-  // The card sits above a spot in the lower half and below one in the upper half.
+  // The card sits above a control in the lower half and below one in the upper half.
   const above = !spot || spot.y + spot.height / 2 > height / 2;
   const place = spot
     ? above
       ? { bottom: height - spot.y + CARD_GAP }
       : { top: spot.y + spot.height + CARD_GAP }
-    : { bottom: insets.bottom + 110 };
+    : { bottom: Math.max(insets.bottom + 110, height * 0.3) };
   const caretLeft = spot ? Math.max(22, Math.min(cardWidth - 36, spot.x + spot.width / 2 - cardLeft - 7)) : null;
   const dim = isDark ? "rgba(0,0,0,0.66)" : "rgba(9,10,13,0.52)";
 
   return (
     <Animated.View
+      ref={rootRef}
       style={[StyleSheet.absoluteFill, styles.root, { opacity: fade }]}
-      // Taps around the card go nowhere: the map stays still while the tour talks about it.
+      // Taps around the card go nowhere: the screen stays still while the tour talks about it.
       onStartShouldSetResponder={() => true}
       accessibilityViewIsModal
     >
@@ -179,7 +223,7 @@ export default function TourOverlay({ steps, measure, onFinish, dashboard }: Pro
             <MaterialIcons name={step.icon} size={20} color={c.secondary} />
           </View>
           <Text style={[styles.count, { color: c.muted }]}>
-            {index + 1} of {steps.length}
+            {shown + 1} of {steps.length}
           </Text>
         </View>
         <Text style={[styles.title, { color: c.primary }]} accessibilityRole="header">
@@ -210,13 +254,13 @@ export default function TourOverlay({ steps, measure, onFinish, dashboard }: Pro
               <Text style={[styles.skipText, { color: c.muted }]}>Skip</Text>
             </Pressable>
           )}
-          <View style={styles.dots} importantForAccessibility="no-hide-descendants">
-            {steps.map((s, i) => (
-              <View key={s.key} style={[styles.dot, { backgroundColor: i === index ? c.secondary : c.subtle, width: i === index ? 16 : 6 }]} />
-            ))}
+          <View style={styles.progress} importantForAccessibility="no-hide-descendants">
+            <View style={[styles.track, { backgroundColor: c.subtle }]}>
+              <View style={[styles.fill, { backgroundColor: c.secondary, width: `${((shown + 1) / steps.length) * 100}%` }]} />
+            </View>
           </View>
           <Pressable
-            onPress={() => go(index + 1)}
+            onPress={next}
             style={({ pressed }) => [styles.next, { backgroundColor: c.secondary, opacity: pressed ? 0.8 : 1 }]}
             accessibilityRole="button"
           >
@@ -253,8 +297,10 @@ const styles = StyleSheet.create({
   footer: { flexDirection: "row", alignItems: "center", marginTop: 18 },
   skip: { minWidth: 64, height: 40, justifyContent: "center" },
   skipText: { fontSize: 15, fontWeight: "600" },
-  dots: { flex: 1, flexDirection: "row", justifyContent: "center", gap: 5 },
-  dot: { height: 6, borderRadius: 3 },
+  // Fourteen steps are too many for dots; a thin bar says how far along it is.
+  progress: { flex: 1, paddingHorizontal: 14 },
+  track: { height: 4, borderRadius: 2, overflow: "hidden" },
+  fill: { height: 4, borderRadius: 2 },
   next: { minWidth: 88, height: 42, paddingHorizontal: 18, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   nextText: { fontSize: 15, fontWeight: "700" },
 });

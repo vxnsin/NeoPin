@@ -17,6 +17,7 @@ import {
   View,
   useWindowDimensions,
   type HostInstance,
+  type ScrollViewInstance,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -94,7 +95,21 @@ import {
 import { knownNotifications, notificationPerson, unreadCount, unreadIds } from "@/lib/notifications";
 import TourOverlay, { type TourRect } from "@/components/TourOverlay";
 import SetupBanner from "@/components/SetupBanner";
-import { accountKey, dashboardUrl, finishTour, loadLocalTour, showSetupBanner, tourMayOpen, tourSeen, tourSteps, type TourTarget } from "@/lib/tour";
+import {
+  accountKey,
+  dashboardUrl,
+  finishTour,
+  loadLocalTour,
+  onScreen,
+  scrollToShow,
+  showSetupBanner,
+  tourInterrupted,
+  tourMayOpen,
+  tourSeen,
+  tourSteps,
+  type Rect,
+  type TourTarget,
+} from "@/lib/tour";
 import {
   badgeText,
   filterByGroup,
@@ -125,6 +140,10 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
+// Controls of the tour that sit further down the settings, and the round ones.
+const TOUR_SCROLLED: TourTarget[] = ["groupsEntry", "alertsEntry", "inviteCodesEntry", "presets", "sharingEntry"];
+const ROUND_TARGETS: TourTarget[] = ["timelineButton", "settingsButton", "findButton", "refreshButton"];
+
 type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "ride" | "timelineSharing" | "alerts" | null;
 
 export default function MapScreen() {
@@ -132,7 +151,7 @@ export default function MapScreen() {
   const c = theme.colors;
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { emit, addMessageListener, isConnected } = useWebSocketContext();
 
   const webviewRef = useRef<MapWebViewHandle>(null);
@@ -175,6 +194,7 @@ export default function MapScreen() {
   // nothing else is in front of the map. A ride question waits for it like for a sheet.
   const [tourWanted, setTourWanted] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  const [tourIndex, setTourIndex] = useState(0);
   const [setupDismissed, setSetupDismissed] = useState(false);
   useEffect(() => {
     if (sheet !== null || tourOpen || !pendingRide) return;
@@ -283,7 +303,8 @@ export default function MapScreen() {
   }, []);
 
   useEffect(() => {
-    if (sheet !== "settings" || !creds) return;
+    // The tour asks too, so the entries it points at are there by the time it opens the settings.
+    if ((sheet !== "settings" && !tourOpen) || !creds) return;
     getTimelineSharing(creds)
       .then((sharing) => setSharingEnabled(sharing !== null))
       .catch(() => {});
@@ -305,7 +326,7 @@ export default function MapScreen() {
       .catch(() => {});
     // The settings open with the stored account; the server's copy may be newer only in these fields.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheet, creds?.serverIp, creds?.deviceId, creds?.token]);
+  }, [sheet === "settings" || tourOpen, creds?.serverIp, creds?.deviceId, creds?.token]);
 
   useEffect(() => {
     const ticker = setInterval(() => setTick((t) => t + 1), 15_000);
@@ -605,6 +626,7 @@ export default function MapScreen() {
   const listAtTop = useRef(true);
   const trackListTop = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     listAtTop.current = e.nativeEvent.contentOffset.y <= 0;
+    scrollOffset.current = e.nativeEvent.contentOffset.y;
   };
   // Takes the move before the list does, which also stops the list from scrolling along.
   const contentPan = useRef(
@@ -671,40 +693,91 @@ export default function MapScreen() {
     if (!tourWanted || !tourFree) return;
     const timer = setTimeout(() => {
       setTourWanted(false);
+      setTourIndex(0);
       setTourOpen(true);
     }, 700);
     return () => clearTimeout(timer);
   }, [tourWanted, tourFree]);
 
-  // Done or skipped both count as seen, so it comes once.
-  const endTour = useCallback(() => {
-    setTourOpen(false);
-    const auth = credsRef.current;
-    if (auth) finishTour(auth, auth.user.id).catch(() => {});
-  }, []);
   const isAdmin = creds?.user.isAdmin === true;
   const steps = useMemo(() => tourSteps(isAdmin), [isAdmin]);
+  const tourSheet = tourOpen ? (steps[tourIndex]?.sheet ?? null) : null;
 
-  // What the steps point at, measured against this screen, which the overlay covers.
-  const rootRef = useRef<HostInstance>(null);
-  const barRef = useRef<HostInstance>(null);
-  const timelineButtonRef = useRef<HostInstance>(null);
-  const settingsButtonRef = useRef<HostInstance>(null);
+  // The tour opens the sheet its step's control is on: the people list, then the settings. A sheet
+  // it did not open (a find request) ends it for now, it comes back once the map is free again.
+  useEffect(() => {
+    if (!tourOpen) return;
+    if (tourInterrupted(sheet)) {
+      setTourOpen(false);
+      setTourWanted(true);
+      return;
+    }
+    if (tourSheet === sheet) return;
+    if (tourSheet === null) closeSheet();
+    else setSheet(tourSheet);
+  }, [tourOpen, tourSheet, sheet, closeSheet]);
+
+  // Done or skipped both count as seen, so it comes once. A sheet the tour opened closes with it.
+  const sheetNow = useRef(sheet);
+  sheetNow.current = sheet;
+  const endTour = useCallback(() => {
+    setTourOpen(false);
+    if (sheetNow.current === "devices" || sheetNow.current === "settings") closeSheet();
+    const auth = credsRef.current;
+    if (auth) finishTour(auth, auth.user.id).catch(() => {});
+  }, [closeSheet]);
+
+  // What the steps point at. Each control has a ref and is measured where it really is; one that
+  // is not there (no second group, nobody online to find) leaves the card in the middle.
+  const tourRefs = useRef<Partial<Record<TourTarget, HostInstance | null>>>({}).current;
+  const tourRef = (target: TourTarget) => (node: HostInstance | null) => {
+    tourRefs[target] = node;
+  };
+  const settingsScroll = useRef<ScrollViewInstance>(null);
+  const scrollOffset = useRef(0);
+  useEffect(() => {
+    scrollOffset.current = 0;
+  }, [sheet]);
   const measureTarget = useCallback(
-    (target: TourTarget) =>
-      new Promise<TourRect | null>((resolve) => {
-        const node = target === "people" ? barRef.current : target === "timeline" ? timelineButtonRef.current : target === "settings" ? settingsButtonRef.current : null;
-        const root = rootRef.current;
-        if (!node || !root) return resolve(null);
-        root.measureInWindow((rootX, rootY) =>
-          node.measureInWindow((x, y, width, height) =>
-            // The bar has its own corners, the buttons are round.
-            resolve(width > 0 ? { x: x - rootX, y: y - rootY, width, height, radius: target === "people" ? 22 : height / 2 } : null)
-          )
-        );
-      }),
-    []
+    async (target: TourTarget): Promise<TourRect | null> => {
+      const inWindow = () =>
+        new Promise<Rect | null>((resolve) => {
+          const node = tourRefs[target];
+          if (!node) return resolve(null);
+          // A control that went away meanwhile never answers; the card then sits in the middle.
+          const timer = setTimeout(() => resolve(null), 250);
+          node.measureInWindow((x, y, width, height) => {
+            clearTimeout(timer);
+            resolve({ x, y, width, height });
+          });
+        });
+      const screen = { x: 0, y: 0, width: windowWidth, height: windowHeight - insets.bottom };
+      let rect = await inWindow();
+      // Further down the settings: scroll it up into view first.
+      if (rect && !onScreen(rect, screen) && TOUR_SCROLLED.includes(target) && settingsScroll.current) {
+        settingsScroll.current.scrollTo({ y: scrollToShow(rect, windowHeight, scrollOffset.current), animated: true });
+        await new Promise((resolve) => setTimeout(resolve, 380));
+        rect = await inWindow();
+      }
+      if (!rect || !onScreen(rect, screen)) return null;
+      // The bar has its own corners, the round buttons are circles, the rest are cards.
+      const radius = target === "peopleBar" ? 22 : ROUND_TARGETS.includes(target) ? rect.height / 2 : 14;
+      return { ...rect, radius };
+    },
+    [tourRefs, windowWidth, windowHeight, insets.bottom]
   );
+  const tourOverlay = (delay: number) =>
+    creds ? (
+      <TourOverlay
+        steps={steps}
+        index={tourIndex}
+        onIndex={setTourIndex}
+        onFinish={endTour}
+        measure={measureTarget}
+        delay={delay}
+        dashboard={dashboardUrl(creds.serverIp)}
+      />
+    ) : null;
 
   const refresh = () => emit({ type: "pingDevices" });
 
@@ -949,13 +1022,17 @@ export default function MapScreen() {
     );
   };
 
+  // The tour points at the first Find button in the list.
+  const canFind = (person: Person) => serverFinds && !person.isMe && person.online && person.userId !== undefined;
+  const firstFindKey = people.find(canFind)?.key;
+
   const personRow = (person: Person) => {
     const { primary } = person;
     const open = expanded === person.key;
     return (
       <View key={person.key}>
         {/* The row, the buttons and the chevron are siblings, so a screen reader reaches each. */}
-        <View style={styles.deviceRow}>
+        <View ref={person.key === people[0]?.key ? tourRef("personRow") : undefined} style={styles.deviceRow}>
           <Pressable
             style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
             onPress={() => togglePerson(person)}
@@ -980,8 +1057,9 @@ export default function MapScreen() {
             </View>
           </Pressable>
           {!person.isMe ? askButton(primary, person.name) : null}
-          {serverFinds && !person.isMe && person.online && person.userId !== undefined && (
+          {canFind(person) && (
             <Pressable
+              ref={person.key === firstFindKey ? tourRef("findButton") : undefined}
               onPress={() => startFind(person)}
               hitSlop={8}
               style={[styles.findButton, { backgroundColor: c.subtle }]}
@@ -1009,7 +1087,7 @@ export default function MapScreen() {
   };
 
   return (
-    <View ref={rootRef} style={[styles.container, { backgroundColor: c.surface }]}>
+    <View style={[styles.container, { backgroundColor: c.surface }]}>
       {startGone ? null : <StartScreen ready={!showLoader} onHidden={hideStart} />}
 
       <WebView
@@ -1033,7 +1111,7 @@ export default function MapScreen() {
       {/* The device bar, like the one at the bottom of Apple's Find My. */}
       {!timelineOpen && (
       <Pressable
-        ref={barRef}
+        ref={tourRef("peopleBar")}
         style={[styles.bar, { bottom: insets.bottom + 12, backgroundColor: c.raised }]}
         onPress={() => setSheet("devices")}
         accessibilityLabel={`People, ${summary}`}
@@ -1053,7 +1131,7 @@ export default function MapScreen() {
           ))}
         </View>
         <Pressable
-          ref={timelineButtonRef}
+          ref={tourRef("timelineButton")}
           style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setTimelineOpen(true)}
           hitSlop={6}
@@ -1062,7 +1140,7 @@ export default function MapScreen() {
           <MaterialIcons name="timeline" size={20} color={c.primary} />
         </Pressable>
         <Pressable
-          ref={settingsButtonRef}
+          ref={tourRef("settingsButton")}
           style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setSheet("settings")}
           hitSlop={6}
@@ -1092,18 +1170,14 @@ export default function MapScreen() {
         <SetupBanner top={insets.top + 10} dashboard={dashboardUrl(creds.serverIp)} onDismiss={() => setSetupDismissed(true)} />
       )}
 
-      {tourOpen && creds && (
-        <TourOverlay
-          steps={steps}
-          measure={measureTarget}
-          dashboard={dashboardUrl(creds.serverIp)}
-          onFinish={endTour}
-        />
-      )}
+      {/* Steps on the map itself; the ones on a sheet get their overlay inside the sheet's modal,
+          so it is in the same window as the controls it measures. */}
+      {tourOpen && tourSheet === null && sheet === null && tourOverlay(tourIndex === 0 ? 0 : 250)}
 
       <AvatarCropper photo={cropPhoto} onCancel={cancelCrop} onSave={saveCrop} />
 
-      <Modal visible={sheet !== null} transparent animationType="none" onRequestClose={closeSheet}>
+      {/* Android's back on a sheet the tour opened leaves the tour, like Skip. */}
+      <Modal visible={sheet !== null} transparent animationType="none" onRequestClose={tourOpen ? endTour : closeSheet}>
         <KeyboardAvoidingView style={styles.sheetHost} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <Animated.View style={[styles.backdrop, { opacity: sheetProgress }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={closeSheet} accessibilityLabel="Close" />
@@ -1121,6 +1195,7 @@ export default function MapScreen() {
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
+                  ref={tourRef("refreshButton")}
                   style={[styles.headerButton, { backgroundColor: c.subtle }]}
                   onPress={refresh}
                   accessibilityLabel="Ask every device for a fresh position"
@@ -1177,7 +1252,7 @@ export default function MapScreen() {
           {sheet === "devices" && (
             <>
               {showGroupChips(groups) && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
+                <ScrollView ref={tourRef("groupChips")} horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
                   {[{ id: null as number | null, name: "All" }, ...groups].map((group) => {
                     const active = group.id === groupFilter;
                     return (
@@ -1251,7 +1326,7 @@ export default function MapScreen() {
           )}
 
           {sheet === "settings" && creds && (
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
+            <ScrollView ref={settingsScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               {creds.user.mustChangePassword ? (
                 <View style={[styles.notice, { backgroundColor: c.subtle }]}>
                   <MaterialIcons name="info-outline" size={18} color={c.secondary} />
@@ -1260,7 +1335,7 @@ export default function MapScreen() {
                   </Text>
                 </View>
               ) : null}
-              <View style={[styles.profile, { backgroundColor: c.subtle }]}>
+              <View ref={tourRef("profile")} style={[styles.profile, { backgroundColor: c.subtle }]}>
                 <Pressable onPress={changePhoto} accessibilityLabel="Change your profile photo" disabled={photoBusy}>
                   <Avatar
                     name={creds.user.displayName}
@@ -1305,6 +1380,7 @@ export default function MapScreen() {
               ) : null}
 
               <Pressable
+                ref={tourRef("groupsEntry")}
                 style={[styles.groupsEntry, { backgroundColor: c.subtle }]}
                 onPress={() => setSheet("groups")}
                 accessibilityLabel={pending > 0 ? `Groups, ${pending} pending invitations` : "Groups"}
@@ -1321,6 +1397,7 @@ export default function MapScreen() {
 
               {alertsEnabled && (
                 <Pressable
+                  ref={tourRef("alertsEntry")}
                   style={[styles.groupsEntry, { backgroundColor: c.subtle, marginTop: 10 }]}
                   onPress={() => setSheet("alerts")}
                   accessibilityLabel="Arrival alerts"
@@ -1334,6 +1411,7 @@ export default function MapScreen() {
               {invitesEnabled && (
                 <>
                   <Pressable
+                    ref={tourRef("inviteCodesEntry")}
                     style={[styles.groupsEntry, { backgroundColor: c.subtle, marginTop: 10 }]}
                     onPress={() => setSheet("inviteCodes")}
                     accessibilityLabel="Invite codes"
@@ -1360,7 +1438,7 @@ export default function MapScreen() {
               )}
 
               <Text style={[styles.sectionTitle, { color: c.muted }]}>Position updates</Text>
-              <View style={styles.presetRow}>
+              <View ref={tourRef("presets")} style={styles.presetRow}>
                 {(Object.keys(REPORTING_PRESETS) as ReportingPreset[]).map((key) => {
                   const active = key === preset;
                   return (
@@ -1414,6 +1492,7 @@ export default function MapScreen() {
 
               {sharingEnabled && (
                 <Pressable
+                  ref={tourRef("sharingEntry")}
                   style={[styles.groupsEntry, { backgroundColor: c.subtle }]}
                   onPress={() => setSheet("timelineSharing")}
                   accessibilityLabel="Share my timeline"
@@ -1449,6 +1528,8 @@ export default function MapScreen() {
             </ScrollView>
           )}
         </Animated.View>
+        {/* After the sheet has slid in, so what is on it is measured where it ends up. */}
+        {tourOpen && tourSheet !== null && sheet === tourSheet && tourOverlay(450)}
         </KeyboardAvoidingView>
       </Modal>
     </View>

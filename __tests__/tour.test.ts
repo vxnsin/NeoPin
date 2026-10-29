@@ -7,7 +7,10 @@ import {
   dashboardUrl,
   finishTour,
   loadLocalTour,
+  onScreen,
+  scrollToShow,
   showSetupBanner,
+  tourInterrupted,
   tourMayOpen,
   tourSeen,
   tourSteps,
@@ -28,28 +31,67 @@ afterEach(() => {
   (global as any).fetch = undefined;
 });
 
-test("five or six short steps, the admin gets the dashboard one at the end", () => {
+test("one short step per control, the admin gets the dashboard one at the end", () => {
   const steps = tourSteps(false);
-  expect(steps.length).toBeGreaterThanOrEqual(5);
-  expect(steps.length).toBeLessThanOrEqual(6);
   expect(steps.map((s) => s.key)).not.toContain("dashboard");
   const admin = tourSteps(true);
   expect(admin).toHaveLength(steps.length + 1);
   expect(admin[admin.length - 1].key).toBe("dashboard");
   expect(admin[admin.length - 1].text).toMatch(/dashboard/i);
-  // Every step says what it is about in a few words and points somewhere.
   for (const step of admin) {
-    expect(step.title.length).toBeLessThan(30);
-    expect(step.text.length).toBeLessThan(140);
-    expect(["map", "people", "timeline", "settings"]).toContain(step.target);
+    expect(step.title.length).toBeLessThan(24);
+    expect(step.text.length).toBeLessThan(90);
   }
+  // Only the opening map step and the dashboard have nothing to point at; no control twice.
+  const targets = admin.map((s) => s.target);
+  expect(targets.filter((t) => t === null)).toHaveLength(2);
+  const controls = targets.filter(Boolean);
+  expect(new Set(controls).size).toBe(controls.length);
 });
 
-test("the steps cover the map, Find, the timeline, groups and the settings", () => {
-  const text = tourSteps(false)
-    .map((s) => `${s.title} ${s.text}`)
-    .join(" ");
-  for (const word of [/map/i, /Find/, /timeline/i, /groups/i, /invite code/i, /arrive/i, /battery/i]) expect(text).toMatch(word);
+test("the controls Luis listed each get their step", () => {
+  const targets = tourSteps(false).map((s) => s.target);
+  for (const t of ["peopleBar", "groupChips", "personRow", "findButton", "refreshButton", "timelineButton", "settingsButton", "profile", "groupsEntry", "inviteCodesEntry", "alertsEntry", "presets", "sharingEntry"])
+    expect(targets).toContain(t);
+});
+
+test("each sheet is opened once: map, people, settings, then the map again for the admin", () => {
+  const order = tourSteps(true)
+    .map((s) => s.sheet)
+    .filter((sheet, i, all) => i === 0 || sheet !== all[i - 1]);
+  expect(order).toEqual([null, "devices", "settings", null]);
+  // The map controls are on the map, the list ones on the people sheet.
+  const byKey = Object.fromEntries(tourSteps(false).map((s) => [s.target, s.sheet]));
+  expect(byKey.peopleBar).toBeNull();
+  expect(byKey.settingsButton).toBeNull();
+  expect(byKey.findButton).toBe("devices");
+  expect(byKey.groupChips).toBe("devices");
+  expect(byKey.presets).toBe("settings");
+});
+
+test("a control counts as on screen only when all of it is visible", () => {
+  const screen = { x: 0, y: 0, width: 400, height: 800 };
+  expect(onScreen({ x: 10, y: 700, width: 380, height: 68 }, screen)).toBe(true);
+  expect(onScreen({ x: 10, y: 760, width: 380, height: 68 }, screen)).toBe(false);
+  expect(onScreen({ x: -5, y: 100, width: 40, height: 40 }, screen)).toBe(false);
+  // A view that is laid out but has no size is not there either.
+  expect(onScreen({ x: 10, y: 10, width: 0, height: 0 }, screen)).toBe(false);
+});
+
+test("a control below the fold is scrolled to a little above the middle", () => {
+  // 1000 down on an 800 screen, list at 0: scroll by 1000 - 320.
+  expect(scrollToShow({ x: 0, y: 1000, width: 300, height: 52 }, 800, 0)).toBe(680);
+  expect(scrollToShow({ x: 0, y: 1000, width: 300, height: 52 }, 800, 100)).toBe(780);
+  // Never above the top.
+  expect(scrollToShow({ x: 0, y: 50, width: 300, height: 52 }, 800, 0)).toBe(0);
+});
+
+test("a sheet the tour did not open puts it off", () => {
+  expect(tourInterrupted(null)).toBe(false);
+  expect(tourInterrupted("devices")).toBe(false);
+  expect(tourInterrupted("settings")).toBe(false);
+  expect(tourInterrupted("find")).toBe(true);
+  expect(tourInterrupted("notifications")).toBe(true);
 });
 
 test("the server's word decides when it has one", () => {
