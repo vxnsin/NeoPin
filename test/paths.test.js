@@ -4,7 +4,7 @@ import http from "node:http";
 import { config } from "../src/config.js";
 import { getDb } from "../src/db.js";
 import { recordPosition } from "../src/history.js";
-import { chunks, pathFromMatch, profileFor } from "../src/paths.js";
+import { chunks, pathFromMatch, profileFor, roadWithDetours } from "../src/paths.js";
 import { deviceHeaders, startServer } from "./helpers.js";
 
 const MIN = 60_000;
@@ -28,19 +28,47 @@ test("long traces go to OSRM in pieces of at most 100 points that share their en
 });
 
 test("a match becomes a path: each matching once, a fix where nothing matched between two", () => {
-  const points = [0, 1, 2, 3, 4, 5].map((i) => ({ lat: 48 + i / 1000, lon: 11 }));
+  // Fixes 0 to 2 on the first road, 3 between the roads, 4 and 5 on the second.
+  const lons = [11.1, 11.1, 11.1, 11, 11.2, 11.2];
+  const points = lons.map((lon, i) => ({ lat: 48 + i / 1000, lon }));
   const answer = {
-    matchings: [{ geometry: { coordinates: [[11.1, 48], [11.1, 48.001]] } }, { geometry: { coordinates: [[11.2, 48.004], [11.2, 48.005]] } }],
+    matchings: [{ geometry: { coordinates: [[11.1, 48], [11.1, 48.002]] } }, { geometry: { coordinates: [[11.2, 48.004], [11.2, 48.005]] } }],
     // Point 1 was tidied away inside the first matching, point 3 matched nothing between the two.
     tracepoints: [{ matchings_index: 0 }, null, { matchings_index: 0 }, null, { matchings_index: 1 }, { matchings_index: 1 }],
   };
   assert.deepEqual(pathFromMatch(answer, points), [
     [48, 11.1],
-    [48.001, 11.1],
+    [48.002, 11.1],
     [48.003, 11],
     [48.004, 11.2],
     [48.005, 11.2],
   ]);
+});
+
+test("a fix off the road: the road as far as the last fix on it, out to the fix, back where the next joins", () => {
+  // A road due north, a vertex every ~110 m. The third fix is ~150 m east of it, in a field.
+  const coords = Array.from({ length: 11 }, (_, i) => [11, 48 + i / 1000]);
+  const points = [
+    { lat: 48, lon: 11 },
+    { lat: 48.002, lon: 11 },
+    { lat: 48.004, lon: 11.002 },
+    { lat: 48.006, lon: 11 },
+    { lat: 48.01, lon: 11 },
+  ];
+  assert.deepEqual(roadWithDetours(coords, points), [
+    [48, 11],
+    [48.001, 11],
+    [48.002, 11],
+    [48.004, 11.002],
+    [48.006, 11],
+    [48.007, 11],
+    [48.008, 11],
+    [48.009, 11],
+    [48.01, 11],
+  ]);
+  // Fixes close to the road, also ones OSRM tidied away, leave the road as it is.
+  const near = points.map((p) => ({ ...p, lon: 11.0002 }));
+  assert.deepEqual(roadWithDetours(coords, near), coords.map(([lon, lat]) => [lat, lon]));
 });
 
 test("each mode has its profile, rides without a road keep their fixes", () => {
@@ -187,6 +215,29 @@ test("a match with a detour the phone never made is not used, and not asked agai
   await timeline();
   assert.equal(osrm.calls.length, 1);
   assert.equal(getDb().prepare("SELECT path FROM trip_paths").get().path, null);
+});
+
+test("a part that fits no road keeps its fixes, the rest of the trip is still snapped", async () => {
+  const fixes = aDay(40);
+  // Everything after the twenty-fifth fix is a way OSRM cannot match.
+  const cutoff = fixes[24].lat;
+  osrm.answer({
+    body: (coords) =>
+      coords.some(([, lat]) => lat > cutoff)
+        ? { code: "NoMatch", message: "Could not match the trace." }
+        : {
+            code: "Ok",
+            matchings: [{ geometry: { coordinates: coords.map(([lon, lat]) => [lon + SHIFT, lat]) } }],
+            tracepoints: coords.map(() => ({ matchings_index: 0 })),
+          },
+  });
+  const trip = theTrip(await timeline());
+  assert.equal(trip.pathSource, "road", "one piece that does not fit no longer costs the whole trip its roads");
+  const inner = trip.path.slice(1, -1);
+  const snapped = Math.round((11.5 + SHIFT) * 1e6) / 1e6;
+  assert.ok(inner.some(([, lon]) => lon === snapped), "the first half is on the road");
+  assert.ok(inner.some(([lat, lon]) => lon === 11.5 && lat > cutoff), "the rest keeps its fixes");
+  assert.equal(osrm.calls.length, 3, "the whole trip, then each half");
 });
 
 test("no match keeps the fixes, a broken server is tried again later and is not pending", async () => {
