@@ -64,9 +64,22 @@ export function isHidden(row, now = Date.now()) {
   return !!row && row.hidden_until !== null && row.hidden_until !== undefined && Number(row.hidden_until) > now;
 }
 
-// until: ms since the epoch, HIDDEN_FOREVER, or null to be seen again.
-export function setHiddenUntil(userId, until) {
-  getDb().prepare("UPDATE users SET hidden_until = ? WHERE id = ?").run(until, userId);
+// until: ms since the epoch, HIDDEN_FOREVER, or null to be seen again. Every stretch of hiding is
+// kept as a span, so a shared timeline can leave out where the person was meanwhile. A span that
+// is still running ends now; a new one runs until `until`.
+export function setHiddenUntil(userId, until, now = Date.now()) {
+  const db = getDb();
+  db.prepare("UPDATE users SET hidden_until = ? WHERE id = ?").run(until, userId);
+  db.prepare("UPDATE hidden_spans SET end_ms = ? WHERE user_id = ? AND end_ms > ? AND start <= ?").run(now, userId, now, now);
+  if (until !== null && until > now) db.prepare("INSERT INTO hidden_spans (user_id, start, end_ms) VALUES (?, ?, ?)").run(userId, now, until);
+}
+
+// The spans of hiding that touch a time range, oldest first.
+export function hiddenSpans(userId, from, to) {
+  return getDb()
+    .prepare("SELECT start, end_ms FROM hidden_spans WHERE user_id = ? AND start < ? AND end_ms > ? ORDER BY start")
+    .all(userId, to, from)
+    .map((r) => ({ start: Number(r.start), end: Number(r.end_ms) }));
 }
 
 // What the account itself sees about its hiding: until when, or null when visible.

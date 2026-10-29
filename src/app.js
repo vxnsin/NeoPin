@@ -24,6 +24,7 @@ import {
   userForToken,
   verifyLogin,
   HIDDEN_FOREVER,
+  hiddenSpans,
   hiddenUntilOf,
   isHidden,
   setHiddenUntil,
@@ -60,14 +61,18 @@ import {
   renameGroup,
 } from "./groups.js";
 import { createInvite, getInviteCode, inviteSummary, inviteView, listInvites, registerWithCode, revokeInvite } from "./invites.js";
-import { markRead, notificationsFor } from "./notifications.js";
+import { addNotification, markRead, notificationsFor } from "./notifications.js";
+import { alertRecipients, alertSettings, observePresence, saveAlertSettings } from "./alerts.js";
 import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
-import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
+import { fcmEnabled, sendData, sendNotification, sendWakeUp } from "./fcm.js";
+import { RIDE_ANSWERS, answerRide } from "./rideAnswers.js";
+import { BUFFER_MS, createRideWatch } from "./rides.js";
 import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToken } from "./push.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
+import { SHARING_MODES, canSeeTimeline, saveTimelineSharing, timelinePeople, timelineSharing, withoutSpans } from "./sharing.js";
 import { transitStatus } from "./transit.js";
 import { TRANSIT_KINDS, TRIP_MODES, matchTransit, setTripMode } from "./transitMatch.js";
 import { smoothPaths } from "./paths.js";
@@ -433,6 +438,27 @@ export function createApp({ gracefulShutdown = true } = {}) {
   }, config.statusSweepMs);
   sweep.unref?.();
 
+  const rideWatch = createRideWatch();
+  const rideSweep = setInterval(() => rideWatch.sweep(), BUFFER_MS);
+  rideSweep.unref?.();
+
+  // "Are you on bus 10 to Hauptbahnhof?" while the ride is on, once the timetables know the line:
+  // over the rider's open sockets, and to their Android phones as a data-only push, from which the
+  // app builds a notification with Yes and No. FCM data are strings, so `transit` is JSON there.
+  function askAboutRide(userId, deviceId, fix) {
+    if (!config.transit) return;
+    const question = rideWatch.observe(userId, deviceId, fix);
+    if (!question) return;
+    const { kind, line, headsign, color, from } = question.transit;
+    const message = { type: "rideQuestion", rideId: question.rideId, transit: { kind, line, headsign, color, from }, at: question.at };
+    for (const device of onlineDevices(userId)) send(device.socket, message);
+    if (!fcmEnabled()) return;
+    for (const target of pushTokensOf(userId)) {
+      if (target.platform !== "android") continue;
+      sendData(target, { ...message, t: "rideQuestion", transit: JSON.stringify(message.transit) }).catch(() => {});
+    }
+  }
+
   // Everybody gets the devices of the people they share a group with, so the payload differs
   // per account. Sent to every device and dashboard, at most twice a second.
   function broadcastDevices() {
@@ -475,6 +501,38 @@ export function createApp({ gracefulShutdown = true } = {}) {
     const message = { type: "notificationsChanged" };
     for (const device of onlineDevices()) if (ids.has(device.userId)) send(device.socket, message);
     for (const [viewer, userId] of viewers) if (ids.has(userId)) send(viewer, message);
+  }
+
+  // The Android devices of an account: iPhones have no push yet, they read the list in the app.
+  function pushToAndroid(userId, message) {
+    if (!fcmEnabled()) return;
+    for (const target of pushTokensOf(userId)) {
+      if (target.platform === "android") sendNotification(target, message).catch(() => {});
+    }
+  }
+
+  // Arrived at or left one of the person's alert places: a notification for everyone they chose,
+  // with a push to their Android phones. The time is the server's (TZ), the data carries `at`.
+  function checkPresence(userId, deviceId, fix) {
+    const alerts = observePresence(userId, deviceId, fix);
+    if (alerts.length === 0) return;
+    const recipients = alertRecipients(userId);
+    if (recipients.length === 0) return;
+    const name = getUser(userId).display_name;
+    for (const { direction, place, at } of alerts) {
+      const data = { userId, name, placeId: place.id, placeName: place.name, kind: place.kind, at };
+      const clock = new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      const arrived = direction === "arrived";
+      for (const id of recipients) {
+        addNotification(id, direction, data);
+        pushToAndroid(id, {
+          title: arrived ? `${name} arrived at ${place.name}` : `${name} left ${place.name}`,
+          body: `${arrived ? "Arrived" : "Left"} at ${clock}`,
+          data: { type: direction, userId, placeId: place.id, at },
+        });
+      }
+    }
+    notifyNotifications(recipients);
   }
 
   // Asks devices for a fresh fix and resolves once they answered or the wait is over.
@@ -546,6 +604,17 @@ export function createApp({ gracefulShutdown = true } = {}) {
     if (!user.is_admin) throw problem(403, "forbidden", "You can only see your own devices");
     if (!getUser(requested)) throw problem(404, "unknown-user", "No such account");
     return requested;
+  }
+
+  // Whose timeline a request reads: the signed-in account's, or one shared with it (see
+  // canSeeTimeline). `full` is false for anyone but the owner and the admin, they do not get what
+  // happened while the owner was invisible.
+  function timelineReader(ctx, requested) {
+    const { user } = currentUser(ctx);
+    if (requested === undefined || requested === user.id) return { ownerId: user.id, full: true };
+    if (!canSeeTimeline(user, requested)) throw problem(403, "forbidden", "This timeline is not shared with you");
+    if (!getUser(requested)) throw problem(404, "unknown-user", "No such account");
+    return { ownerId: requested, full: user.is_admin === 1 };
   }
 
 
@@ -625,6 +694,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
   app.get("/", (ctx) => (signedIn(ctx) ? page("index.html") : ctx.redirect("/login")));
   app.get("/index.html", (ctx) => ctx.redirect("/"));
   app.get("/login", () => page("login.html"));
+  // The shared form of an invite code: opens the app with code and server, or the sign-up here.
+  app.get("/invite/:code", () => page("invite.html"));
   // Old links and bookmarks still find the login.
   app.get("/login.html", (ctx) => ctx.redirect("/login"));
   app.register(serveStatic({ dir: path.join(publicDir, "assets"), prefix: "/assets", immutable: () => false }));
@@ -1030,7 +1101,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
-      const Notification = t.object({
+      const InviteUsedNotification = t.object({
         id: t.number(),
         type: t.literal("inviteUsed"),
         createdAt: t.string(),
@@ -1041,6 +1112,22 @@ export function createApp({ gracefulShutdown = true } = {}) {
           groupName: t.string().nullable(),
         }),
       });
+      // Somebody arrived at or left one of their places; `at` is when (ms), `name` their name then.
+      const PresenceNotification = t.object({
+        id: t.number(),
+        type: t.enum(["arrived", "left"]),
+        createdAt: t.string(),
+        readAt: t.string().nullable(),
+        data: t.object({
+          userId: t.number(),
+          name: t.string(),
+          placeId: t.number(),
+          placeName: t.string(),
+          kind: t.enum(PLACE_KINDS),
+          at: t.number(),
+        }),
+      });
+      const Notification = t.union(InviteUsedNotification, PresenceNotification);
 
       api.get("/notifications", { response: { 200: t.array(Notification), 401: t.problem() } }, (ctx) =>
         notificationsFor(currentUser(ctx).user.id)
@@ -1056,6 +1143,42 @@ export function createApp({ gracefulShutdown = true } = {}) {
           const { user } = currentUser(ctx);
           markRead(user.id, ctx.body?.ids);
           notifyNotifications([user.id]);
+          return reply(204);
+        }
+      );
+
+      // Arrival and departure alerts: which own places count, and who hears about them.
+      const AlertSettings = t.object({
+        places: t.array(t.int()).max(200),
+        recipients: t.object({ users: t.array(t.int()).max(200), groups: t.array(t.int()).max(200) }),
+      });
+
+      api.get("/alerts", { response: { 200: AlertSettings, 401: t.problem() } }, (ctx) => alertSettings(currentUser(ctx).user.id));
+
+      api.put(
+        "/alerts",
+        { body: AlertSettings, response: { 200: AlertSettings, 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          try {
+            return saveAlertSettings(user.id, ctx.body);
+          } catch (error) {
+            if (error.code === "invalid") throw problem(400, "invalid-alerts", error.message);
+            throw error;
+          }
+        }
+      );
+
+      // "Yes, I am on that bus" or "no": the answer to a rideQuestion, for the finished trip.
+      api.post(
+        "/rides/answer",
+        {
+          body: t.object({ rideId: t.string().min(1).max(64), answer: t.enum(RIDE_ANSWERS) }),
+          response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          if (!answerRide(user.id, ctx.body.rideId, ctx.body.answer)) throw problem(404, "unknown-ride", "No such ride");
           return reply(204);
         }
       );
@@ -1311,11 +1434,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
           response: { 200: Timeline, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
         async (ctx) => {
-          const userId = targetUserId(ctx, ctx.query.userId);
+          const { ownerId: userId, full } = timelineReader(ctx, ctx.query.userId);
           const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
-          const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
-          const dismissed = dismissedVisits(userId, ctx.query.deviceId, range.from, range.to);
+          // The fixes and dismissed stops from while the owner was invisible are not for others.
+          const spans = full ? [] : hiddenSpans(userId, range.from, range.to);
+          const points = withoutSpans(positionsBetween(userId, ctx.query.deviceId, range.from, range.to), spans);
+          const dismissed = withoutSpans(dismissedVisits(userId, ctx.query.deviceId, range.from, range.to), spans);
           const timeline = buildTimeline(points, { dismissed });
           // The paths need the final mode of every trip, corrections included, so they come after the lines.
           const [places, paths] = await Promise.all([
@@ -1384,7 +1509,49 @@ export function createApp({ gracefulShutdown = true } = {}) {
           query: t.object({ deviceId: t.string().max(64), tz: t.number().optional(), userId: t.number().optional() }),
           response: { 200: t.array(t.string()), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
-        (ctx) => daysWithData(targetUserId(ctx, ctx.query.userId), ctx.query.deviceId, ctx.query.tz ?? 0)
+        (ctx) => {
+          const { ownerId, full } = timelineReader(ctx, ctx.query.userId);
+          return daysWithData(ownerId, ctx.query.deviceId, ctx.query.tz ?? 0, { exceptHidden: !full });
+        }
+      );
+
+      // Who may read my timeline: nobody ("off"), everyone in my groups, or chosen people and groups.
+      const TimelineSharing = t.object({
+        mode: t.enum(SHARING_MODES),
+        users: t.array(t.int()).max(200),
+        groups: t.array(t.int()).max(200),
+      });
+
+      api.get("/timeline/sharing", { response: { 200: TimelineSharing, 401: t.problem() } }, (ctx) =>
+        timelineSharing(currentUser(ctx).user.id)
+      );
+
+      api.put(
+        "/timeline/sharing",
+        { body: TimelineSharing, response: { 200: TimelineSharing, 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          try {
+            return saveTimelineSharing(user.id, ctx.body);
+          } catch (error) {
+            if (error.code === "invalid") throw problem(400, "invalid-sharing", error.message);
+            throw error;
+          }
+        }
+      );
+
+      // Whose timelines I may read, myself first, with the devices to pick from.
+      api.get(
+        "/timeline/people",
+        {
+          response: {
+            200: t.array(
+              t.object({ userId: t.number(), displayName: t.string(), avatarUrl: t.string().nullable(), devices: t.array(t.string()) })
+            ),
+            401: t.problem(),
+          },
+        },
+        (ctx) => timelinePeople(currentUser(ctx).user)
       );
 
       // Which regions have timetable data for the lines in the timeline, and how fresh it is.
@@ -1603,7 +1770,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           console.log(chalk.greenBright(`[+] Device ${label} connected.`));
         }
         // What this server understands beyond the basics, so newer apps know what they may send.
-        send(socket, { successful: true, features: ["positionBatch", "find"] });
+        send(socket, { successful: true, features: ["positionBatch", "find", "rideQuestion"] });
         if (finder.pendingFor(account).length > 0) replayFinds.add(`${account}:${deviceId}`);
         broadcastDevices();
       };
@@ -1620,19 +1787,34 @@ export function createApp({ gracefulShutdown = true } = {}) {
             await requestLocation({ except: { userId: account, deviceId }, viewer: getUser(account) });
             send(socket, { type: "dataResponse", devices: serializeDevices(getUser(account)) });
             break;
-          case "updatePosition":
+          case "updatePosition": {
             if (role !== "device") return;
             updatePosition(account, deviceId, msg.latitude, msg.longitude);
             reported(account, deviceId);
             if (msg.battery) updateBattery(account, deviceId, msg.battery.level, msg.battery.charging);
-            recordPosition(account, deviceId, msg.latitude, msg.longitude, fixTime(msg.recordedAt), fixExtras(msg));
+            const at = fixTime(msg.recordedAt);
+            const stored = recordPosition(account, deviceId, msg.latitude, msg.longitude, at, fixExtras(msg));
             broadcastDevices();
+            checkPresence(account, deviceId, { lat: msg.latitude, lon: msg.longitude, ts: at, accuracy: msg.accuracy ?? null });
+            // The ride watch sees what the timeline will see: the stored fixes.
+            if (stored) askAboutRide(account, deviceId, { ts: at, lat: msg.latitude, lon: msg.longitude });
             break;
+          }
           case "positionBatch": {
             if (role !== "device") return;
             // Only the history: these fixes are older than what the map already shows.
             const points = [...msg.points].sort((a, b) => fixTime(a.recordedAt) - fixTime(b.recordedAt));
             for (const p of points) recordPosition(account, deviceId, p.latitude, p.longitude, fixTime(p.recordedAt), fixExtras(p));
+            // Where the phone was last tells whether it came or went while it had no connection.
+            const newest = points.at(-1);
+            if (newest) {
+              checkPresence(account, deviceId, {
+                lat: newest.latitude,
+                lon: newest.longitude,
+                ts: fixTime(newest.recordedAt),
+                accuracy: newest.accuracy ?? null,
+              });
+            }
             break;
           }
           case "updateBattery":
@@ -1739,6 +1921,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
     stop() {
       clearTimeout(broadcastTimer);
       clearInterval(sweep);
+      clearInterval(rideSweep);
       broadcastTimer = null;
     },
   };

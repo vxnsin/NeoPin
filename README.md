@@ -121,6 +121,7 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
 | `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
 | `PUSH_WAIT_MS` | `20000` | How long asking an offline phone for its location waits for the answer |
+| `TZ` | the system's | Time zone of the clock times in push texts, e.g. `Europe/Berlin`. The Docker image runs in UTC without it |
 | `INVITE_CODES` | on | Sign-up with invite codes, see [Invite codes](#invite-codes). `off` turns it off |
 | `INVITE_TTL_DAYS` | `7` | How long an invite code stays valid |
 | `INVITE_MAX_OPEN` | `5` | Open codes a non-admin account may hold at once, the admin has no limit |
@@ -137,6 +138,7 @@ Without an invite there is no sign-up: the admin creates accounts. With invite c
 - A code works once and for `INVITE_TTL_DAYS` days. A non-admin holds at most `INVITE_MAX_OPEN` open codes (`429` beyond that), revoking, using or expiring one frees a slot. `GET /api/invite-codes` lists your codes with their status (`open`, `used`, `expired`, `revoked`), the admin sees all. `DELETE /api/invite-codes/:id` revokes an open one.
 - The sign-up page can ask `POST /api/invite-codes/check` (`{ "code" }`) who invited and to which group. It only says `valid: true` or `false`, never why.
 - `POST /api/register` (`{ "code", "username", "password", "displayName"? }`) creates the account in one step with the code: a normal, non-admin account that does not have to change its password. It joins the fixed groups like every new account, and the code's group on top of that, without a pending invite. Afterwards the client logs in as usual. Unknown, used, expired and revoked codes all answer the same `404`. A taken or invalid username answers `409` / `400` and the code stays unused.
+- A code is shared as `https://your-server/invite/7K3QM-X9TV2`, a link every messenger makes clickable. The page says who invited, opens the app with the code and this server's address (`neopin://invite?code=…&server=…`; on Android with a fallback to the browser when the app is missing) and offers the sign-up in the browser (`/login?code=…`).
 - Wrong codes count against the same per-IP limit as wrong device tokens, and both routes share the login limit.
 - When a code is used, the admin accounts and the creator get a notification (`GET /api/notifications`, `POST /api/notifications/read`), a `{ "type": "notificationsChanged" }` message on their sockets and, where [push](#push-notifications) is set up, a push `New account`.
 
@@ -144,7 +146,7 @@ Without an invite there is no sign-up: the admin creates accounts. With invite c
 
 ## Push notifications
 
-With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations and find requests. Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
+With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations, find requests and [arrivals](#arrival-alerts). Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
 
 How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds.
 
@@ -176,6 +178,14 @@ Limits:
 - iOS needs APNs: an Apple Developer account and an APNs key uploaded to the Firebase project. iOS also throttles silent pushes and does not run them for apps the user swiped away, so waking an iPhone is best effort.
 - One app build is tied to one Firebase project (its `google-services.json`). A server can only push to apps built for the project of its service account.
 
+## Arrival alerts
+
+Everybody can let others know when they arrive at or leave one of their own places. `GET /api/alerts` answers `{ "places": [placeId], "recipients": { "users": [id], "groups": [id] } }`, `PUT` takes the same and answers what was saved. Until someone saves, their places of kind `home` and `work` count and nobody is told. A place that is not your own, someone who shares no group with you (or yourself) and a group you are not in answer `400`. A group means its members at the time of the alert, also those who join later.
+
+The server decides from the positions every device sends (`updatePosition`, and the newest fix of a `positionBatch`). Inside is within the place's radius, at least 60 m; arrived takes two fixes inside at least 2 minutes apart; left takes two fixes more than 50 m beyond the radius, the later one at least 3 minutes after the last fix inside. Every device of a person counts on its own, the alerts are per person: the same place and direction at most once in 10 minutes, so two phones coming home make one alert. The first change after a place was switched on only learns where the device is. While a person is invisible (`PUT /api/me/hidden`) nothing goes out, and only people who still share a group with the person when it happens are told.
+
+Each recipient gets a notification `arrived` or `left` with `{ userId, name, placeId, placeName, kind, at }` (`at` in ms), `notificationsChanged` on their sockets and, on Android phones with [push](#push-notifications), a notification `Kaspar arrived at Home` / `Leo left Work` with the clock time (`TZ`) in the body and the data `{ "type", "userId", "placeId", "at" }`. iPhones read it in the list.
+
 ## Transit data
 
 Rides by bus, tram or train need timetables, and nobody keeps the timetables of the whole world. The server holds only the [Mobility Database](https://mobilitydatabase.org) catalog, a CSV with every known [GTFS](https://gtfs.org) feed, its provider, license and the rectangle on the map it covers. From the stored positions of all accounts it knows its **regions**: cells of about `TRANSIT_REGION_KM` that had positions in the last 90 days. For every region it downloads the feeds that cover it and imports only the slice inside the region (stops, lines, trips, departures, shapes) into SQLite. That happens in the background, shortly after the start and then once a week; the start never waits for it. A region nobody has been in for 90 days loses its data again. `GET /api/transit` shows the regions, their feeds and when they were last imported.
@@ -183,6 +193,8 @@ Rides by bus, tram or train need timetables, and nobody keeps the timetables of 
 Germany is covered by the nationwide feed from [gtfs.de](https://gtfs.de) (data by DELFI e.V., includes DB Regio and long-distance trains) instead of the catalog's pieces, because it covers everything. It is about 300 MB, so the first import takes a few minutes. The server sends its name and version as user agent to the catalog and the feed hosts, nothing about the accounts.
 
 A short wait at a stop leaves no visit, so the walk to the stop, the ride and the walk from it arrive as one trip. The server cuts such a trip where the phone speeds up next to a stop and where it slows down next to one, and the timeline shows the walks and the ride separately. With the data in place, a trip in the timeline that starts and ends at a stop (a station counts up to 200 m away, its platforms are long) is matched against the lines serving both stops in that order. A bus or tram ride has to halt every few hundred metres; a train, subway or ferry calls every few kilometres or not at all, so instead its departure and its arrival both have to be within ten minutes of the timetable and a train has to have averaged 25 km/h. The line's shape has to follow the fixes, and of several lines the one with a departure closest to the observed one wins. Such a trip comes back with `mode: "transit"` and a `transit` object (kind, line, headsign, colours, agency, the stops boarded and left, `source: "gtfs"`). Where no timetable covers a ride with bus-like halts but OpenStreetMap has route relations at both stops (asked through `PLACE_LOOKUP_URL`, cached like the place names), at least the line number comes back with `source: "osm"`. Results are stored per account, device and trip, and a correction sent with `PUT /api/trips/mode` wins over all of it. The battery profile of the app sends too few fixes for any of this.
+
+**Confirming a ride while riding.** The server also watches a ride while it is on. Per device it keeps the stored fixes since the last stay (at most 90 minutes) and looks at them at most every 30 seconds of the ride: when the phone first went faster than a walk next to a timetable stop, has been on its way for 3 minutes since, fast enough for a vehicle, and went past at least two further stops of a line, the timetables are asked as for a finished trip, without the arrival. A match is asked about once per ride: `{ "type": "rideQuestion", "rideId", "transit": { kind, line, headsign, color, from }, "at" }` (`at` is when the ride was boarded, in ms) to the rider's open sockets, and on Android phones with [push](#push-notifications) a data-only push with the same fields plus `"t": "rideQuestion"`, `transit` as a JSON string (FCM data are strings); the app builds the notification with Yes and No from it. `POST /api/rides/answer` (`{ "rideId", "answer": "yes" | "no" }`) answers `204`, `404` for an unknown ride or someone else's. In the timeline the trip that contains the boarding then gets that line on "yes" (up to the last of its stops the trip went past, when the timetables alone would not match it) and no line, its speed's mode, on "no". A correction with `PUT /api/trips/mode` still wins. Without an answer nothing changes. With `TRANSIT=off` nothing is asked; without push only the sockets are.
 
 **Licenses.** The catalog is published by MobilityData under [Apache 2.0](https://github.com/MobilityData/mobility-database-catalogs/blob/main/LICENSE). Every feed comes under its own license, listed in the catalog and shown in `GET /api/transit`. Many feeds, the gtfs.de one included, are **CC BY 4.0**: if you show the lines to others (a public dashboard, screenshots), name the source, e.g. "Timetable data: gtfs.de / DELFI e.V., CC BY 4.0". Some feeds in the catalog need a login or an API key; those are skipped.
 
@@ -196,6 +208,14 @@ With the Balanced profile the app reports every 15 s, with Battery every 2 minut
 The server replaces the trip's `path` with that course and says where it came from in `pathSource` (`line` or `road`); without it the path is the fixes themselves. Distances still come from the fixes. A match that is much longer than the fixes is a detour the phone never made and is not used. Results are cached per trip; a day that is still being matched says `pathsPending`, and a reload a few seconds later has the rest.
 
 **Privacy.** Unlike the place lookup, which only sees single spots, the routing service sees the whole way of every trip it matches. The default is the public OSRM of [FOSSGIS](https://routing.openstreetmap.de), which logs requests (see its privacy statement). It gets the coordinates and the seconds between the fixes, not the date or the account, and not the centres of the stays at both ends of a trip. Run your own [OSRM](https://github.com/Project-OSRM/osrm-backend) and point `ROAD_MATCH_URL` at it, or set it to `off` and the fixes are drawn as they are. FOSSGIS allows light use only: one request a second (the server keeps to it), a valid user agent, and attribution: the routes are based on [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors.
+
+## Shared timelines
+
+A timeline is private until its owner shares it. `PUT /api/timeline/sharing` takes `{ "mode", "users", "groups" }`: `off` (the default), `groups` for everyone who shares a group with you, or `selected` for the people in `users` and the members of `groups`. Only people and groups you share a group with can be picked (`400` otherwise), and the picks are kept while another mode is on. Whoever stops sharing a group with you loses access, also when picked by name. The admin reads every timeline, as before.
+
+`GET /api/timeline/people` lists whose timelines you may read, yourself first, with their linked devices, and `GET /api/timeline` / `/api/timeline/days` take their `userId`; anything else answers `403`. A shared timeline is for reading: naming places, correcting trips and dismissing stops stay with the owner and the admin.
+
+The server keeps every stretch of being invisible, from switching it on until it runs out or is switched off. Fixes inside those stretches, and stops dismissed there, are left out of a timeline read by anyone but the owner and the admin, and a day spent invisible does not appear in their `days`.
 
 ## Console
 
@@ -222,7 +242,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 
 | Message | Answer |
 |:--|:--|
-| `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true }`, then a `dataResponse` |
+| `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true, "features": ["positionBatch", "find", "rideQuestion"] }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
 | `{ "type": "updatePosition", "latitude", "longitude", "battery"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }` |
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
@@ -248,6 +268,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "findPending" | "findStarted", "session", "peer", "expiresAt" }` | Your request is waiting, or both sides share positions now, for up to half an hour |
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
 | `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |
+| `{ "type": "rideQuestion", "rideId", "transit", "at" }` | The server thinks you are riding this line right now, answer with `POST /api/rides/answer`, see [Transit data](#transit-data) |
 | `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `battery` is `null` until the device reported one, and stays the last reading (with its `updatedAt`) while the device is offline |
 
 </details>
@@ -286,7 +307,8 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/invite-codes/check` | | `{ "code" }` answers `{ "valid", "invitedBy"?, "groupName"? }` |
 | `POST` `GET` | `/api/invite-codes` | ✓ | Create a code (`{ "groupId"?, "note"? }`, `201`) and list your own, the admin gets all |
 | `DELETE` | `/api/invite-codes/:id` | ✓ | Revokes an open code. `204`, else `404` |
-| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`) |
+| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`, `arrived`, `left`) |
+| `GET` `PUT` | `/api/alerts` | ✓ | `{ "places", "recipients": { "users", "groups" } }`: which own places send [arrival alerts](#arrival-alerts) to whom. `400` for foreign places, people or groups |
 | `POST` | `/api/notifications/read` | ✓ | `{ "ids"? }` marks them read, all when omitted. `204` |
 | `GET` | `/api/me` | ✓ | The signed-in account |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
@@ -296,8 +318,11 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"?, "userId"? }`, asks one or all devices and answers with the list. An offline device is woken with a push when [push](#push-notifications) is set up: `202` when it has not answered in time |
 | `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
-| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). The admin may pass `userId` |
+| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
+| `GET` `PUT` | `/api/timeline/sharing` | ✓ | `{ "mode": "off" \| "groups" \| "selected", "users", "groups" }`: who may read your timeline. `400` for people or groups you share nothing with |
+| `GET` | `/api/timeline/people` | ✓ | `[{ userId, displayName, avatarUrl, devices }]`: whose timelines you may read, you first |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
+| `POST` | `/api/rides/answer` | ✓ | `{ rideId, answer: "yes" \| "no" }` answers a `rideQuestion`. `204`, `404` for an unknown ride or someone else's |
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
 | `PUT` | `/api/visits/dismissed` | ✓ | `{ deviceId, start, end, dismissed }` removes a stop that was none, a red light or a jam: its fixes count as on the way and the trips around it become one. `dismissed: false` brings it back. The timeline lists the day's dismissed stops in `dismissed` |
 | `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |

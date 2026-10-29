@@ -184,6 +184,21 @@ const SCHEMA = `
     mode TEXT NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
   );
+  CREATE TABLE IF NOT EXISTS ride_answers (
+    ride_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    boarded_at INTEGER NOT NULL,
+    line TEXT NOT NULL,
+    transit TEXT NOT NULL,
+    feed_id INTEGER,
+    trip_id TEXT,
+    from_seq INTEGER,
+    asked_at INTEGER NOT NULL,
+    answer TEXT,
+    answered_at INTEGER,
+    UNIQUE (user_id, device_id, boarded_at)
+  );
   CREATE TABLE IF NOT EXISTS dismissed_visits (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id TEXT NOT NULL,
@@ -191,6 +206,27 @@ const SCHEMA = `
     end_ms INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
   );
+  CREATE TABLE IF NOT EXISTS timeline_sharing (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS timeline_share_users (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    viewer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, viewer_id)
+  );
+  CREATE TABLE IF NOT EXISTS timeline_share_groups (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+  );
+  CREATE TABLE IF NOT EXISTS hidden_spans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    start INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS hidden_spans_user ON hidden_spans(user_id, start);
   CREATE TABLE IF NOT EXISTS invite_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -213,6 +249,43 @@ const SCHEMA = `
     read_at TEXT
   );
   CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, id);
+  CREATE TABLE IF NOT EXISTS alert_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS alert_places (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, place_id)
+  );
+  CREATE TABLE IF NOT EXISTS alert_users (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, recipient_id)
+  );
+  CREATE TABLE IF NOT EXISTS alert_groups (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+  );
+  CREATE TABLE IF NOT EXISTS place_presence (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    inside INTEGER,
+    last_inside INTEGER,
+    pending TEXT,
+    pending_at INTEGER,
+    seen_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, place_id, device_id)
+  );
+  CREATE TABLE IF NOT EXISTS place_alerts (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, place_id, direction)
+  );
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.
@@ -223,7 +296,14 @@ export function initDb(file = config.dbPath) {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   const hadGroups = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_groups'").get();
+  const hadSpans = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'hidden_spans'").get();
   db.exec(SCHEMA);
+  // Servers from before the spans: whoever hides right now is hidden from now on, when it began is unknown.
+  const hasHidden = db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "hidden_until");
+  if (!hadSpans && hasHidden) {
+    const now = Date.now();
+    db.prepare("INSERT INTO hidden_spans (user_id, start, end_ms) SELECT id, ?, hidden_until FROM users WHERE hidden_until > ?").run(now, now);
+  }
   // A fixed group holds every account: nobody leaves it, nobody is removed, it is not deleted.
   const hadFixed = db.prepare("PRAGMA table_info(user_groups)").all().some((c) => c.name === "fixed");
   if (!hadFixed) {
@@ -273,6 +353,10 @@ export function initDb(file = config.dbPath) {
   // The device a person picked to stand for them, NULL for the automatic choice.
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "primary_device_id")) {
     db.exec("ALTER TABLE users ADD COLUMN primary_device_id TEXT");
+  }
+  // Which snapping version made a stored path; older rows are matched again (see paths.js).
+  if (!db.prepare("PRAGMA table_info(trip_paths)").all().some((c) => c.name === "algo")) {
+    db.exec("ALTER TABLE trip_paths ADD COLUMN algo INTEGER NOT NULL DEFAULT 1");
   }
   return db;
 }

@@ -144,14 +144,24 @@ export async function sendWakeUp(target, { from = "" } = {}) {
   return ok ? "sent" : "failed";
 }
 
+// FCM takes strings only.
+const stringValues = (data) => Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)]));
+
 // A visible notification. `data` carries the type and whatever the app needs to open the right screen.
 export function sendNotification(target, { title, body, data = {} }) {
   if (!fcmEnabled()) return Promise.resolve(false);
   return deliver(target, {
     notification: { title, body },
-    data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)])),
+    data: stringValues(data),
     android: { priority: "HIGH", notification: { channel_id: "default" } },
   });
+}
+
+// A data-only message the app turns into a notification of its own, one with buttons for example.
+// High priority, so it gets through to a sleeping phone; after `ttlS` it is not worth showing.
+export function sendData(target, data, { ttlS = 600 } = {}) {
+  if (!fcmEnabled()) return Promise.resolve(false);
+  return deliver(target, { data: stringValues(data), android: { priority: "HIGH", ttl: `${ttlS}s` } });
 }
 
 export function resetFcm() {
