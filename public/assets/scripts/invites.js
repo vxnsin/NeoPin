@@ -26,7 +26,8 @@ async function copyText(text) {
   }
 }
 
-const inviteLink = (code) => `${location.origin}/login?code=${encodeURIComponent(code)}`;
+// The invite page opens the app, or the sign-up here when there is none.
+const inviteLink = (code) => `${location.origin}/invite/${encodeURIComponent(code)}`;
 
 function expiresText(iso) {
   const ms = Date.parse(iso) - Date.now();

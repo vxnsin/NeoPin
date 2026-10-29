@@ -402,3 +402,22 @@ form {
   font-family: var(--mono);
   letter-spacing: 0.08em;
 }
+
+/* invite.html */
+.invite__code {
+  margin: 0 0 22px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.invite__code:empty {
+  display: none;
+}
+
+.invite__actions {
+  display: grid;
+}
+
+.invite__actions .login__submit {
+  text-decoration: none;
+}

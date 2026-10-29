@@ -694,6 +694,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
   app.get("/", (ctx) => (signedIn(ctx) ? page("index.html") : ctx.redirect("/login")));
   app.get("/index.html", (ctx) => ctx.redirect("/"));
   app.get("/login", () => page("login.html"));
+  // The shared form of an invite code: opens the app with code and server, or the sign-up here.
+  app.get("/invite/:code", () => page("invite.html"));
   // Old links and bookmarks still find the login.
   app.get("/login.html", (ctx) => ctx.redirect("/login"));
   app.register(serveStatic({ dir: path.join(publicDir, "assets"), prefix: "/assets", immutable: () => false }));
