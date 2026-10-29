@@ -14,15 +14,6 @@ export function getGroup(groupId) {
   return getDb().prepare("SELECT * FROM user_groups WHERE id = ?").get(groupId) ?? null;
 }
 
-// Puts a new account into every fixed group.
-export function joinFixedGroups(userId) {
-  getDb()
-    .prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) SELECT id, ?, ? FROM user_groups WHERE fixed = 1")
-    .run(userId, now());
-}
-
-export const isFixed = (group) => group?.fixed === 1;
-
 export function isMember(groupId, userId) {
   return !!getDb().prepare("SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?").get(groupId, userId);
 }
@@ -85,9 +76,14 @@ export function cancelInvite(inviteId) {
   getDb().prepare("DELETE FROM group_invites WHERE id = ?").run(inviteId);
 }
 
+// Straight in, without an invite: for the admin creating an account.
+export function addMember(groupId, userId) {
+  getDb().prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)").run(groupId, userId, now());
+}
+
 export function acceptInvite(inviteId) {
   const row = getInvite(inviteId);
-  getDb().prepare("INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)").run(row.group_id, row.user_id, now());
+  addMember(row.group_id, row.user_id);
   cancelInvite(inviteId);
   return row;
 }
@@ -138,7 +134,8 @@ export function groupsFor(user) {
       ownerId: g.owner_id,
       role: g.owner_id === user.id ? "owner" : "member",
       canManage: manager,
-      fixed: isFixed(g),
+      // No group is fixed any more, older apps still read the field.
+      fixed: false,
       members: membersOf(g.id).map((id) => memberView(id, g.owner_id)),
       pendingInvites: pending,
     };

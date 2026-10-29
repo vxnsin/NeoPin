@@ -678,3 +678,181 @@
 .share__note {
   padding: 4px 16px 12px;
 }
+
+/* Group chips to pick from in a form: the form has its own padding already. */
+.chips--pick {
+  padding: 2px 0 0;
+}
+
+/* First setup of a new server: over everything but the loader, and no way around it. */
+.setup {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.setup[hidden] {
+  display: none;
+}
+
+.setup__card {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+  max-height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.setup__head {
+  display: grid;
+  gap: 2px;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setup__head strong {
+  font-size: 19px;
+}
+
+.setup__steps {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.setup__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.setup__form {
+  display: grid;
+  gap: 10px;
+  padding: 16px 20px 20px;
+}
+
+.setup__body > .setup__lead {
+  padding: 16px 20px 0;
+}
+
+.setup__lead {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.setup__lead strong {
+  color: var(--text);
+}
+
+.setup__tabs {
+  padding: 12px 20px 0;
+}
+
+.setup__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.setup .invite-new {
+  margin: 0;
+}
+
+.setup__link {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* The tour: a light on one part of the page, the rest dimmed, and a card with a few words. */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+}
+
+.tour[hidden] {
+  display: none;
+}
+
+/* The dimmed page with a hole where the control is (tour.js draws the path). */
+.tour__dim {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: rgba(8, 10, 14, 0.6);
+}
+
+.tour__spot {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px var(--brand);
+  pointer-events: none;
+}
+
+.tour__spot[hidden] {
+  display: none;
+}
+
+.tour__card {
+  position: fixed;
+  display: grid;
+  gap: 6px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 16px 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lg);
+  transition: left 0.25s ease, top 0.25s ease;
+}
+
+.tour__count {
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tour__title {
+  font-size: 16px;
+}
+
+.tour__text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.tour__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.tour__skip {
+  margin-right: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour__card {
+    transition: none;
+  }
+}
+
+/* A tag is inline-block, so the hidden attribute needs saying (the menu's "On" for Invisible). */
+.tag[hidden] {
+  display: none;
+}

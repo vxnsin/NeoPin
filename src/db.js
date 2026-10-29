@@ -314,22 +314,19 @@ export function initDb(file = config.dbPath) {
     const recorded = !!db.prepare("SELECT 1 FROM positions LIMIT 1").get();
     db.prepare("INSERT INTO meta (key, value) VALUES ('hidden_spans_since', ?)").run(String(recorded ? Date.now() : 0));
   }
-  // A fixed group holds every account: nobody leaves it, nobody is removed, it is not deleted.
-  const hadFixed = db.prepare("PRAGMA table_info(user_groups)").all().some((c) => c.name === "fixed");
-  if (!hadFixed) {
+  // Groups used to be fixed (one held every account for good). None is any more: an old
+  // "Everyone" group stays with its members as a normal group. The column stays for older apps.
+  if (!db.prepare("PRAGMA table_info(user_groups)").all().some((c) => c.name === "fixed")) {
     db.exec("ALTER TABLE user_groups ADD COLUMN fixed INTEGER NOT NULL DEFAULT 0");
-    // The "Everyone" group that servers from before groups got is that group.
-    db.exec("UPDATE user_groups SET fixed = 1 WHERE id = (SELECT MIN(id) FROM user_groups WHERE name = 'Everyone')");
   }
+  db.exec("UPDATE user_groups SET fixed = 0 WHERE fixed <> 0");
   // Servers from before groups existed: everybody saw everybody, so keep that as one group
   // ("Everyone", owned by the admin) and nothing disappears. Narrow it down from there.
   if (!hadGroups) {
     const admin = db.prepare("SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1").get();
     if (admin) {
       const stamp = new Date().toISOString();
-      const group = db
-        .prepare("INSERT INTO user_groups (name, owner_id, fixed, created_at) VALUES ('Everyone', ?, 1, ?)")
-        .run(admin.id, stamp);
+      const group = db.prepare("INSERT INTO user_groups (name, owner_id, created_at) VALUES ('Everyone', ?, ?)").run(admin.id, stamp);
       db.prepare("INSERT INTO group_members (group_id, user_id, joined_at) SELECT ?, id, ? FROM users").run(Number(group.lastInsertRowid), stamp);
     }
   }
@@ -352,10 +349,6 @@ export function initDb(file = config.dbPath) {
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "hidden_until")) {
     db.exec("ALTER TABLE users ADD COLUMN hidden_until INTEGER");
   }
-  // Everybody is in the fixed groups, also those removed before groups could be fixed.
-  db.prepare(
-    "INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) SELECT g.id, u.id, ? FROM user_groups g, users u WHERE g.fixed = 1"
-  ).run(new Date().toISOString());
   // The course of a recognised line between the stops, next to the match itself.
   if (!db.prepare("PRAGMA table_info(trip_transit)").all().some((c) => c.name === "path")) {
     db.exec("ALTER TABLE trip_transit ADD COLUMN path TEXT");
@@ -367,6 +360,17 @@ export function initDb(file = config.dbPath) {
   // Which snapping version made a stored path; older rows are matched again (see paths.js).
   if (!db.prepare("PRAGMA table_info(trip_paths)").all().some((c) => c.name === "algo")) {
     db.exec("ALTER TABLE trip_paths ADD COLUMN algo INTEGER NOT NULL DEFAULT 1");
+  }
+  // When the account went through the short tour of the app and of the dashboard, NULL for not yet.
+  // Whoever had an account before the tours existed knows their way around already.
+  if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "tour_app_at")) {
+    db.exec("ALTER TABLE users ADD COLUMN tour_app_at TEXT");
+    db.exec("ALTER TABLE users ADD COLUMN tour_dashboard_at TEXT");
+    const stamp = new Date().toISOString();
+    db.prepare("UPDATE users SET tour_app_at = ?, tour_dashboard_at = ?").run(stamp, stamp);
+    // Same for the server: one with groups or with more than the admin is set up already.
+    const used = db.prepare("SELECT 1 FROM user_groups LIMIT 1").get() || db.prepare("SELECT COUNT(*) AS n FROM users").get().n > 1;
+    if (used) db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('setup_done', ?)").run(stamp);
   }
   return db;
 }

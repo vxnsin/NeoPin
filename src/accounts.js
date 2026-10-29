@@ -98,6 +98,21 @@ export function hiddenUntilOf(row, now = Date.now()) {
   return isHidden(row, now) ? Number(row.hidden_until) : null;
 }
 
+// Whether the account went through the short tour of the app and of the dashboard.
+export const toursOf = (row) => ({ app: row.tour_app_at !== null, dashboard: row.tour_dashboard_at !== null });
+
+export function markTourSeen(userId, client) {
+  const column = client === "app" ? "tour_app_at" : "tour_dashboard_at";
+  getDb().prepare(`UPDATE users SET ${column} = COALESCE(${column}, ?) WHERE id = ?`).run(new Date().toISOString(), userId);
+}
+
+// A new server walks its admin through the first steps in the dashboard until they are done.
+export const setupDone = () => !!getDb().prepare("SELECT 1 FROM meta WHERE key = 'setup_done'").get();
+
+export function markSetupDone() {
+  getDb().prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('setup_done', ?)").run(new Date().toISOString());
+}
+
 // The device that stands for the account in lists, or null to let the clients pick.
 export function setPrimaryDevice(userId, deviceId) {
   getDb().prepare("UPDATE users SET primary_device_id = ? WHERE id = ?").run(deviceId, userId);

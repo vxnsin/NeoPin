@@ -55,7 +55,7 @@ The first start writes a `.env` with `PORT=3012`, creates the database and the a
 > [!IMPORTANT]
 > Copy that password now, it is not shown again. The dashboard asks you to change it after the first login. Set `ADMIN_PASSWORD` in `.env` before the first start if you want to choose it yourself.
 
-Then open **`http://<your-ip>:3012`**, log in as the admin and create an account for everyone who should use the app. In the app enter **`ws://<your-ip>:3012`** and log in with that account.
+Then open **`http://<your-ip>:3012`** and log in as the admin. A short setup asks for your own password, a first [group](#groups) and, if you like, a first account or invite code; after that a quick tour shows the dashboard. In the app enter **`ws://<your-ip>:3012`** and log in with that account.
 
 ### Docker
 
@@ -130,6 +130,12 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 
 Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device tokens and 120 profile picture requests per minute and IP.
 
+## Groups
+
+Groups decide who sees whom: a person sees everyone they share a group with, the admin sees everyone. A new server has no groups, and a new account is in none until it is invited, signs up with a code for a group, or the admin puts it into groups right away (`groupIds` on `POST /api/users`). Every group works the same: its owner or the admin renames and deletes it, members leave, the owner removes them. Servers from before had a fixed `Everyone` group; it stays with its members as a normal group. `fixed` in the group answer is always `false` and only there for older apps.
+
+The dashboard walks a new server's admin through a first setup (`setupNeeded` in `GET /api/me`) and ends it with `POST /api/setup/done`, which answers `409` while the admin is in no group. App and dashboard each show a short tour once; `tours` in `GET /api/me` says which were seen. Accounts and servers from before count as done.
+
 ## Invite codes
 
 Without an invite there is no sign-up: the admin creates accounts. With invite codes anybody who is signed in can bring a friend along.
@@ -137,7 +143,7 @@ Without an invite there is no sign-up: the admin creates accounts. With invite c
 - `POST /api/invite-codes` makes a code, optionally for one of your groups (`groupId`, the admin may pick any) with a `note` of up to 60 characters. It looks like `7K3QM-X9TV2`: 10 characters of Crockford base32 (no `I`, `L`, `O`, `U`). Typing it is forgiving: case, spaces and dashes do not matter, `O` is read as `0`, `I` and `L` as `1`.
 - A code works once and for `INVITE_TTL_DAYS` days. A non-admin holds at most `INVITE_MAX_OPEN` open codes (`429` beyond that), revoking, using or expiring one frees a slot. `GET /api/invite-codes` lists your codes with their status (`open`, `used`, `expired`, `revoked`), the admin sees all. `DELETE /api/invite-codes/:id` revokes an open one.
 - The sign-up page can ask `POST /api/invite-codes/check` (`{ "code" }`) who invited and to which group. It only says `valid: true` or `false`, never why.
-- `POST /api/register` (`{ "code", "username", "password", "displayName"? }`) creates the account in one step with the code: a normal, non-admin account that does not have to change its password. It joins the fixed groups like every new account, and the code's group on top of that, without a pending invite. Afterwards the client logs in as usual. Unknown, used, expired and revoked codes all answer the same `404`. A taken or invalid username answers `409` / `400` and the code stays unused.
+- `POST /api/register` (`{ "code", "username", "password", "displayName"? }`) creates the account in one step with the code: a normal, non-admin account that does not have to change its password. It joins the code's group, if it has one, without a pending invite, and no other. Afterwards the client logs in as usual. Unknown, used, expired and revoked codes all answer the same `404`. A taken or invalid username answers `409` / `400` and the code stays unused.
 - A code is shared as `https://your-server/invite/7K3QM-X9TV2`, a link every messenger makes clickable. The page says who invited, opens the app with the code and this server's address (`neopin://invite?code=…&server=your-server`, with `&secure=0` behind plain http; on Android with a fallback to the browser when the app is missing) and offers the sign-up in the browser (`/login?code=…`).
 - Wrong codes count against the same per-IP limit as wrong device tokens, and both routes share the login limit.
 - When a code is used, the admin accounts and the creator get a notification (`GET /api/notifications`, `POST /api/notifications/read`), a `{ "type": "notificationsChanged" }` message on their sockets and, where [push](#push-notifications) is set up, a push `New account`.
@@ -310,7 +316,9 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`, `arrived`, `left`) |
 | `GET` `PUT` | `/api/alerts` | ✓ | `{ "places", "recipients": { "users", "groups" } }`: which own places send [arrival alerts](#arrival-alerts) to whom. `400` for foreign places, people or groups |
 | `POST` | `/api/notifications/read` | ✓ | `{ "ids"? }` marks them read, all when omitted. `204` |
-| `GET` | `/api/me` | ✓ | The signed-in account |
+| `GET` | `/api/me` | ✓ | The signed-in account, with `tours: { app, dashboard }` (seen or not) and for the admin `setupNeeded` |
+| `POST` | `/api/me/tours` | ✓ | `{ "client": "app" \| "dashboard" }` marks that tour as seen. `204` |
+| `POST` | `/api/setup/done` | admin | Ends the first setup. `204`, `409` while the admin is in no group |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
 | `GET` | `/api/devices` | ✓ | The devices linked to the account |
 | `PUT` | `/api/me/primary-device` | ✓ | `{ "deviceId" }` picks the device that stands for you, `null` goes back to automatic |
@@ -325,7 +333,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/rides/answer` | ✓ | `{ rideId, answer: "yes" \| "no" }` answers a `rideQuestion`. `204`, `404` for an unknown ride or someone else's |
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
 | `PUT` | `/api/visits/dismissed` | ✓ | `{ deviceId, start, end, dismissed }` removes a stop that was none, a red light or a jam: its fixes count as on the way and the trips around it become one. `dismissed: false` brings it back. The timeline lists the day's dismissed stops in `dismissed` |
-| `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |
+| `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts. Creating takes `{ "username", "password", "displayName"?, "groupIds"? }` and puts the account straight into those groups, `400` for an unknown group |
 | `PUT` | `/api/avatar` | ✓ | Sets the account's profile picture: JPEG, PNG or WebP, at most 16 KB |
 | `DELETE` | `/api/avatar` | ✓ | Removes it again |
 | `GET` | `/avatars/:userId` | ✓ | The picture. Its URL changes with every new one, so it is cached for good |

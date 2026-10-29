@@ -185,6 +185,33 @@
       </div>
     </div>
 
+    <!-- First setup of a new server, for the admin. It has no close button on purpose. -->
+    <div class="setup" id="setup" hidden>
+      <div class="setup__card" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+        <div class="setup__head">
+          <span class="setup__steps" id="setupSteps"></span>
+          <strong id="setupTitle"></strong>
+        </div>
+        <div class="setup__body" id="setupBody"></div>
+      </div>
+    </div>
+
+    <!-- The short tour after the first sign-in. -->
+    <div class="tour" id="tour" hidden>
+      <svg class="tour__dim" aria-hidden="true"><path id="tourDim" fill-rule="evenodd" /></svg>
+      <div class="tour__spot" id="tourSpot"></div>
+      <div class="tour__card" id="tourCard" role="dialog" aria-modal="true" aria-labelledby="tourTitle" aria-describedby="tourText">
+        <span class="tour__count" id="tourCount"></span>
+        <strong class="tour__title" id="tourTitle"></strong>
+        <p class="tour__text" id="tourText"></p>
+        <div class="tour__actions">
+          <button class="btn btn--small btn--ghost tour__skip" id="tourSkip" type="button">Skip</button>
+          <button class="btn btn--small btn--ghost" id="tourBack" type="button">Back</button>
+          <button class="btn btn--small" id="tourNext" type="button">Next</button>
+        </div>
+      </div>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script
@@ -205,5 +232,6 @@
     <script src="/assets/scripts/invites.js"></script>
     <script src="/assets/scripts/sharing.js"></script>
     <script src="/assets/scripts/notifications.js"></script>
+    <script src="/assets/scripts/tour.js"></script>
   </body>
 </html>
