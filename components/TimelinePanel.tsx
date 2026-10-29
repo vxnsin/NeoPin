@@ -88,6 +88,12 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const queryUser = viewingOther ? accountId : undefined;
   const canEdit = canEditTimeline(viewingOther, admin);
   const viewedName = viewingOther ? people.find((p) => p.userId === accountId)?.displayName : undefined;
+  // The people list is asked again when a shared timeline is refused (its owner stopped sharing).
+  const [peopleReloads, setPeopleReloads] = useState(0);
+  // Said once the panel fell back to the own timeline because sharing was taken back.
+  const [revoked, setRevoked] = useState("");
+  // Only the newest pick may set the devices; an older answer would show another account's device.
+  const pickRun = useRef(0);
 
   const choices = useMemo(() => {
     if (viewingOther) return otherDevices;
@@ -200,18 +206,35 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     return () => {
       live = false;
     };
-  }, [creds, admin]);
+  }, [creds, admin, peopleReloads]);
+
+  // Back to the own timeline, for a pick of "Me" and when someone stopped sharing theirs.
+  const showOwn = () => {
+    pickRun.current += 1;
+    setAccountId(undefined);
+    setOtherDevices([]);
+    setDeviceId(creds.deviceId);
+  };
+
+  // A 403 on someone else's day: they no longer share it with me.
+  const sharingEnded = (e: any): boolean => {
+    if (!viewingOther || e?.status !== 403) return false;
+    setRevoked(viewedName ? `${viewedName} no longer shares this timeline with you.` : "This timeline is no longer shared with you.");
+    setPeopleReloads((n) => n + 1);
+    showOwn();
+    return true;
+  };
 
   useEffect(() => onSettingsChange((s) => setPreset(s.reporting)), []);
 
   const pickAccount = (person: TimelinePerson) => {
     setDaysOpen(false);
+    setRevoked("");
     if (person.userId === creds.user.id) {
-      setAccountId(undefined);
-      setOtherDevices([]);
-      setDeviceId(creds.deviceId);
+      showOwn();
       return;
     }
+    const mine = ++pickRun.current;
     setAccountId(person.userId);
     setOtherDevices([]);
     setTimeline(null);
@@ -223,12 +246,13 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
     }
     fetchUserDevices(creds, person.userId)
       .then((list) => {
+        if (mine !== pickRun.current) return;
         setOtherDevices(
           list.map((d) => ({ deviceId: d.deviceId, position: d.position, lastPing: d.lastPing, status: d.status, avatarUrl: person.avatarUrl, deviceType: d.deviceType }))
         );
         setDeviceId(list[0]?.deviceId ?? "");
       })
-      .catch((e: any) => setError(e?.message || "The devices could not be loaded."));
+      .catch((e: any) => mine === pickRun.current && setError(e?.message || "The devices could not be loaded."));
   };
 
   useEffect(() => {
@@ -269,6 +293,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
       })
       .catch((e: any) => {
         if (current !== run.current) return;
+        if (sharingEnded(e)) return;
         setTimeline(null);
         setError(e?.message || "The timeline could not be loaded.");
         shownRoute.current = [];
@@ -302,7 +327,10 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         }
       })
       // A failed try still counts, the next one is scheduled all the same.
-      .catch(() => fresh() && setRefreshFailures((n) => n + 1));
+      .catch((e: any) => {
+        if (!fresh()) return;
+        if (!sharingEnded(e)) setRefreshFailures((n) => n + 1);
+      });
   }, [creds, deviceId, day, queryUser, post]);
 
   // Only once the day itself has loaded: a retry that ran beside the first load could land
@@ -452,6 +480,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           })}
         </ScrollView>
       )}
+
+      {!!revoked && !viewingOther && <Text style={[styles.hint, { color: c.muted }]}>{revoked}</Text>}
 
       {!canEdit && (
         <Text style={[styles.hint, { color: c.muted }]}>
