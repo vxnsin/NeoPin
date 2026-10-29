@@ -647,3 +647,22 @@ export async function getAlerts(auth: DeviceAuth): Promise<AlertSettings | null>
 export async function setAlerts(auth: DeviceAuth, settings: AlertSettings): Promise<void> {
   await noContent(await request(api(auth, "/alerts"), jsonInit(auth, "PUT", settings)));
 }
+
+// The devices signed in to my account, also the ones that have been offline for a long time.
+export type LinkedDevice = {
+  deviceId: string;
+  linkedAt: string;
+  deviceType: DeviceType;
+  primary: boolean;
+  status: "online" | "offline";
+  lastPing: string | null;
+};
+
+export async function fetchLinkedDevices(auth: DeviceAuth): Promise<LinkedDevice[]> {
+  return json(await request(api(auth, "/devices"), { headers: deviceHeaders(auth) }));
+}
+
+// Signs the device out for good and takes it off every map. Its past positions stay in the timeline.
+export async function unlinkDevice(auth: DeviceAuth, deviceId: string): Promise<void> {
+  await noContent(await request(api(auth, `/devices/${encodeURIComponent(deviceId)}`), jsonInit(auth, "DELETE")));
+}
