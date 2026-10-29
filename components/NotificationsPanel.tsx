@@ -4,7 +4,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
 import type { AppNotification } from "@/lib/api";
-import { notificationDetail, notificationTitle } from "@/lib/notifications";
+import { isPlaceNotification, notificationDetail, notificationPerson, notificationTitle } from "@/lib/notifications";
 import { clockTime } from "@/lib/time";
 
 type Props = {
@@ -12,10 +12,14 @@ type Props = {
   // Ids that were unread when the sheet opened, they keep their highlight while it is open.
   fresh: number[];
   avatarFor: (url?: string | null) => string | null;
+  // The picture of an account the app already knows, for notifications that only name the person.
+  avatarOfUser: (userId: number) => string | null | undefined;
+  // An arrival or a departure opens the map at that person.
+  onOpenPerson: (userId: number) => void;
   onMarkAll: () => void;
 };
 
-export default function NotificationsPanel({ items, fresh, avatarFor, onMarkAll }: Props) {
+export default function NotificationsPanel({ items, fresh, avatarFor, avatarOfUser, onOpenPerson, onMarkAll }: Props) {
   const { colors: c } = useThemeManager();
 
   return (
@@ -27,16 +31,37 @@ export default function NotificationsPanel({ items, fresh, avatarFor, onMarkAll 
         </Pressable>
       )}
       {items.length === 0 && <Text style={[styles.meta, { color: c.muted }]}>Nothing new.</Text>}
-      {items.map((item) => (
-        <View key={item.id} style={[styles.card, { backgroundColor: c.subtle }]}>
-          <Avatar name={item.data.user.displayName} uri={avatarFor(item.data.user.avatarUrl)} state="offline" size={40} gapColor={c.subtle} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.title, { color: c.primary }]}>{notificationTitle(item)}</Text>
-            <Text style={[styles.meta, { color: c.muted }]}>{notificationDetail(item, clockTime)}</Text>
+      {items.map((item) => {
+        const person = notificationPerson(item);
+        const title = notificationTitle(item, clockTime);
+        const detail = notificationDetail(item, clockTime);
+        const content = (
+          <>
+            <Avatar name={person.name} uri={avatarFor(person.avatarUrl ?? avatarOfUser(person.userId))} state="offline" size={40} gapColor={c.subtle} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.title, { color: c.primary }]}>{title}</Text>
+              {!!detail && <Text style={[styles.meta, { color: c.muted }]}>{detail}</Text>}
+            </View>
+            {fresh.includes(item.id) && <View style={[styles.unread, { backgroundColor: c.secondary }]} />}
+          </>
+        );
+        // The card has a background and padding of its own, so it takes taps on Android too.
+        return isPlaceNotification(item) ? (
+          <Pressable
+            key={item.id}
+            style={({ pressed }) => [styles.card, { backgroundColor: c.subtle, opacity: pressed ? 0.7 : 1 }]}
+            onPress={() => onOpenPerson(item.data.userId)}
+            accessibilityRole="button"
+            accessibilityLabel={`${title}. Show ${person.name} on the map`}
+          >
+            {content}
+          </Pressable>
+        ) : (
+          <View key={item.id} style={[styles.card, { backgroundColor: c.subtle }]}>
+            {content}
           </View>
-          {fresh.includes(item.id) && <View style={[styles.unread, { backgroundColor: c.secondary }]} />}
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
