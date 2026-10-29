@@ -78,16 +78,30 @@ export function forgetBattery(userId, deviceId) {
   getDb().prepare("DELETE FROM device_battery WHERE user_id = ? AND device_id = ?").run(userId, deviceId);
 }
 
-// Local calendar days that have any data, newest first.
-export function daysWithData(userId, deviceId, tzOffsetMin, limit = 120) {
+// Local calendar days that have any data, newest first. `exceptHidden` leaves out the fixes
+// taken while the person was invisible, for anyone else looking at a shared timeline.
+export function daysWithData(userId, deviceId, tzOffsetMin, { limit = 120, exceptHidden = false } = {}) {
   const shiftSeconds = Math.round((-tzOffsetMin * 60_000) / 1000);
+  const hidden = exceptHidden
+    ? "AND NOT EXISTS (SELECT 1 FROM hidden_spans h WHERE h.user_id = positions.user_id AND positions.ts >= h.start AND positions.ts < h.end_ms)"
+    : "";
   return getDb()
     .prepare(
       `SELECT DISTINCT date(ts / 1000 + ?, 'unixepoch') AS day FROM positions
-       WHERE user_id = ? AND device_id = ? ORDER BY day DESC LIMIT ?`
+       WHERE user_id = ? AND device_id = ? ${hidden} ORDER BY day DESC LIMIT ?`
     )
     .all(shiftSeconds, userId, deviceId, limit)
     .map((r) => r.day);
+}
+
+// Whatever has a time (a fix's `ts`, a span's `start` and `end`) outside the spans.
+export function withoutSpans(items, spans) {
+  if (!spans.length) return items;
+  return items.filter((item) => {
+    const from = item.ts ?? item.start;
+    const to = item.ts ?? item.end;
+    return !spans.some((s) => from < s.end && to >= s.start);
+  });
 }
 
 // "That was no stop" (a red light, a jam): the fixes of that stretch count as on the way, so the
@@ -124,6 +138,7 @@ export function pruneHistory(now = Date.now()) {
   db.prepare("DELETE FROM trip_modes WHERE start < ?").run(cutoff);
   db.prepare("DELETE FROM dismissed_visits WHERE end_ms < ?").run(cutoff);
   db.prepare("DELETE FROM trip_paths WHERE start < ?").run(cutoff);
+  db.prepare("DELETE FROM hidden_spans WHERE end_ms < ?").run(cutoff);
   db.prepare("DELETE FROM transit_osm_cache WHERE fetched_at < ?").run(now - 30 * 86_400_000);
   return removed;
 }

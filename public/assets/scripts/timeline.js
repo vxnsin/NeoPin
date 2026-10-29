@@ -40,13 +40,19 @@ const tlNext = document.getElementById("tlNext");
 const tlBody = document.getElementById("tlBody");
 
 const tl = { on: false, userId: null, deviceId: null, date: null, days: [], data: null, active: null, loadId: 0, markers: [], retries: 0 };
+// Whose timelines this account may read, from the server: itself first, then whoever shares
+// theirs with it (the admin reads all), each with the devices to pick from.
+let tlPeople = [];
+
+// Somebody else's day is for reading only. The admin may still name places and correct trips.
+const readOnly = () => !!tl.userId && tl.userId !== me?.id && !me?.isAdmin;
 
 function localDay(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-// An admin looking at somebody else's account adds that account's id.
+// Looking at somebody else's timeline adds that account's id.
 const userQuery = () => (tl.userId && tl.userId !== me?.id ? `userId=${tl.userId}` : "");
 const tzQuery = () => [`tz=${new Date().getTimezoneOffset()}`, userQuery()].filter(Boolean).join("&");
 const withUser = (path) => (userQuery() ? `${path}${path.includes("?") ? "&" : "?"}${userQuery()}` : path);
@@ -323,10 +329,14 @@ function renderSegments(segments) {
             ${about}
           </span>
         </button>
-        <button class="seg__edit" type="button" data-edit="${index}" aria-label="Change the place" title="Change the place">
+        ${
+          readOnly()
+            ? ""
+            : `<button class="seg__edit" type="button" data-edit="${index}" aria-label="Change the place" title="Change the place">
           <svg class="icon"><use href="#i-edit" /></svg>
         </button>
-        <div class="place-picker" data-picker="${index}" hidden></div>
+        <div class="place-picker" data-picker="${index}" hidden></div>`
+        }
       </li>`;
   });
   return `<ol class="seg-list">${items.join("")}</ol>`;
@@ -334,7 +344,7 @@ function renderSegments(segments) {
 
 // What was removed stays in reach: each removed stop of the day, with a way back.
 function renderRemoved(spans) {
-  if (!spans?.length) return "";
+  if (!spans?.length || readOnly()) return "";
   const rows = spans
     .map((span, i) => {
       const times = `${formatTime(span.start)} – ${formatTime(span.end)}`;
@@ -613,13 +623,16 @@ async function loadDays({ pickLatest = false } = {}) {
 // Every device linked to the account, also those that are offline right now.
 async function loadDevices() {
   const own = !tl.userId || tl.userId === me?.id;
-  let ids = [];
-  try {
-    const list = await getJson(own ? "/api/devices" : `/api/users/${tl.userId}/devices`);
-    ids = list.map((d) => d.deviceId).sort((x, y) => x.localeCompare(y, undefined, { sensitivity: "base" }));
-  } catch {
-    ids = [];
+  let ids = tlPeople.find((p) => p.userId === tl.userId)?.devices ?? null;
+  // Without the people list there are still the own devices.
+  if (!ids && own) {
+    try {
+      ids = (await getJson("/api/devices")).map((d) => d.deviceId);
+    } catch {
+      ids = null;
+    }
   }
+  ids = [...(ids ?? [])].sort((x, y) => x.localeCompare(y, undefined, { sensitivity: "base" }));
   tlDevice.replaceChildren(
     ...ids.map((id) => {
       const option = document.createElement("option");
@@ -633,26 +646,24 @@ async function loadDevices() {
   if (tl.deviceId) tlDevice.value = tl.deviceId;
 }
 
-// Only the admin may look at other accounts, everybody else sees just their own devices.
+// The accounts whose timeline this one may read. The chooser shows once there is more than itself.
 async function loadAccounts() {
-  tlAccount.hidden = !me?.isAdmin;
-  if (!me?.isAdmin) return;
-  let users = [];
   try {
-    users = await getJson("/api/users");
+    tlPeople = await getJson("/api/timeline/people");
   } catch {
-    users = [me];
+    tlPeople = [];
   }
+  if (!tlPeople.some((p) => p.userId === tl.userId)) tl.userId = me?.id ?? null;
+  tlAccount.hidden = tlPeople.length < 2;
   tlAccount.replaceChildren(
-    ...users.map((user) => {
+    ...tlPeople.map((person) => {
       const option = document.createElement("option");
-      option.value = String(user.id);
-      option.textContent = user.id === me.id ? `${user.displayName || user.username} (you)` : user.displayName || user.username;
+      option.value = String(person.userId);
+      option.textContent = person.userId === me?.id ? `${person.displayName} (you)` : person.displayName;
       return option;
     })
   );
-  if (!users.some((u) => u.id === tl.userId)) tl.userId = me.id;
-  tlAccount.value = String(tl.userId);
+  if (tl.userId !== null) tlAccount.value = String(tl.userId);
 }
 
 // On a phone the sheet folds away while a segment is focused, so the map is visible.
@@ -744,7 +755,8 @@ tlBody.addEventListener("click", (event) => {
   const seg = event.target.closest(".seg");
   if (!seg) return;
   const index = Number(seg.dataset.index);
-  if (seg.classList.contains("seg--trip")) focusSegment(index, { fold: !toggleChooser(index) });
+  // A shared day has no "This was:" chooser.
+  if (seg.classList.contains("seg--trip")) focusSegment(index, { fold: readOnly() || !toggleChooser(index) });
   else focusSegment(index);
 });
 

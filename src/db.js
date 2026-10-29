@@ -191,6 +191,27 @@ const SCHEMA = `
     end_ms INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
   );
+  CREATE TABLE IF NOT EXISTS timeline_sharing (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    mode TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS timeline_share_users (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    viewer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, viewer_id)
+  );
+  CREATE TABLE IF NOT EXISTS timeline_share_groups (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+  );
+  CREATE TABLE IF NOT EXISTS hidden_spans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    start INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS hidden_spans_user ON hidden_spans(user_id, start);
   CREATE TABLE IF NOT EXISTS invite_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -223,7 +244,14 @@ export function initDb(file = config.dbPath) {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   const hadGroups = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_groups'").get();
+  const hadSpans = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'hidden_spans'").get();
   db.exec(SCHEMA);
+  // Servers from before the spans: whoever hides right now is hidden from now on, when it began is unknown.
+  const hasHidden = db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "hidden_until");
+  if (!hadSpans && hasHidden) {
+    const now = Date.now();
+    db.prepare("INSERT INTO hidden_spans (user_id, start, end_ms) SELECT id, ?, hidden_until FROM users WHERE hidden_until > ?").run(now, now);
+  }
   // A fixed group holds every account: nobody leaves it, nobody is removed, it is not deleted.
   const hadFixed = db.prepare("PRAGMA table_info(user_groups)").all().some((c) => c.name === "fixed");
   if (!hadFixed) {
