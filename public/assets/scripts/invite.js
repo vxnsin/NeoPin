@@ -15,7 +15,9 @@ const webLink = `/login?code=${encodeURIComponent(code)}`;
 // What the app's invite route reads. Android's intent link falls back to the sign-up here when
 // the app is not installed; other phones only know the scheme.
 function appLink() {
-  const query = `code=${encodeURIComponent(code)}&server=${encodeURIComponent(location.origin)}`;
+  // The server goes without its scheme: a "://" in the query kept the app from finding its route.
+  const secure = location.protocol === "https:" ? "" : "&secure=0";
+  const query = `code=${encodeURIComponent(code)}&server=${encodeURIComponent(location.host)}${secure}`;
   if (!/android/i.test(navigator.userAgent)) return `neopin://invite?${query}`;
   const fallback = encodeURIComponent(new URL(webLink, location.origin).href);
   return `intent://invite?${query}#Intent;scheme=neopin;package=${ANDROID_PACKAGE};S.browser_fallback_url=${fallback};end`;
