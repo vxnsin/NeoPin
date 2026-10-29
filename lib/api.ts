@@ -616,7 +616,18 @@ export type PlaceNotification = {
   data: { userId: number; name: string; placeId: number; placeName: string; kind: PlaceKind; at: number | string; avatarUrl?: string | null };
 };
 
-export type AppNotification = InviteUsedNotification | PlaceNotification;
+export type ReviewPeriod = "week" | "month";
+
+// "Your week: 84 km": the review of a finished week or month is ready. `from` and `to` are calendar days.
+export type ReviewNotification = {
+  id: number;
+  type: "review";
+  createdAt: string;
+  readAt: string | null;
+  data: { period: ReviewPeriod; from: string; to: string; distanceKm: number };
+};
+
+export type AppNotification = InviteUsedNotification | PlaceNotification | ReviewNotification;
 
 export async function fetchNotifications(auth: DeviceAuth): Promise<AppNotification[]> {
   return json(await request(api(auth, "/notifications"), jsonInit(auth, "GET")));
@@ -665,4 +676,57 @@ export async function fetchLinkedDevices(auth: DeviceAuth): Promise<LinkedDevice
 // Signs the device out for good and takes it off every map. Its past positions stay in the timeline.
 export async function unlinkDevice(auth: DeviceAuth, deviceId: string): Promise<void> {
   await noContent(await request(api(auth, `/devices/${encodeURIComponent(deviceId)}`), jsonInit(auth, "DELETE")));
+}
+
+// A week (Monday to Sunday) or a calendar month, built by the server from the own timeline.
+export type ReviewModeTotals = { km: number; minutes: number };
+
+export type ReviewLine = { kind: TransitKind; line: string; color: string | null; rides: number };
+
+export type ReviewPlace = { name: string; kind: PlaceKind; visits: number; minutes: number };
+
+export type ReviewDay = { date: string; km: number; movingMinutes: number };
+
+export type Review = {
+  period: ReviewPeriod;
+  from: string;
+  to: string;
+  distanceKm: number;
+  movingMinutes: number;
+  trips: number;
+  stops: number;
+  byMode: Record<TripMode, ReviewModeTotals>;
+  // The most ridden lines first.
+  transit: ReviewLine[];
+  // At most five, own places and suggestions.
+  topPlaces: ReviewPlace[];
+  // Places visited for the first time.
+  newPlaces: number;
+  days: ReviewDay[];
+  // One simplified line through all trips, [lat, lon].
+  path: [number, number][];
+  previous: { distanceKm: number; movingMinutes: number } | null;
+  empty: boolean;
+};
+
+// `date` is any day in the period; without one the server takes the last finished period. The answer
+// is raw JSON, lib/review reads it. null on servers from before reviews (404), the app then leaves them out.
+export async function fetchReview(auth: DeviceAuth, period: ReviewPeriod, date?: string | null): Promise<unknown | null> {
+  const query = [`period=${period}`, date ? `date=${date}` : "", `tz=${new Date().getTimezoneOffset()}`].filter(Boolean).join("&");
+  const response = await request(api(auth, `/review?${query}`), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
+}
+
+// The weekly review notification, on by default. null on servers without reviews (404).
+export async function getReviewNotifications(auth: DeviceAuth): Promise<boolean | null> {
+  const response = await request(api(auth, "/me/review-notifications"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  const body = await json<{ enabled?: unknown } | null>(response);
+  return body?.enabled !== false;
+}
+
+// Answers 200 with the setting or 204, both are fine.
+export async function setReviewNotifications(auth: DeviceAuth, enabled: boolean): Promise<void> {
+  await noContent(await request(api(auth, "/me/review-notifications"), jsonInit(auth, "PUT", { enabled })));
 }

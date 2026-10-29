@@ -1,4 +1,5 @@
 import {
+  isReviewNotification,
   knownNotifications,
   notificationDetail,
   notificationPerson,
@@ -6,7 +7,7 @@ import {
   unreadCount,
   unreadIds,
 } from "../lib/notifications";
-import type { AppNotification, PlaceNotification } from "../lib/api";
+import type { AppNotification, PlaceNotification, ReviewNotification } from "../lib/api";
 
 const item = (id: number, readAt: string | null, groupName: string | null = null): AppNotification => ({
   id,
@@ -65,4 +66,25 @@ test("the person of a notification is the one it is about", () => {
 test("kinds this app cannot draw are left out", () => {
   const unknown = { ...item(2, null), type: "somethingNew" } as unknown as AppNotification;
   expect(knownNotifications([item(1, null), unknown, place("left")]).map((n) => n.id)).toEqual([1, 9]);
+});
+
+const review = (data: Partial<ReviewNotification["data"]> = {}): ReviewNotification => ({
+  id: 12,
+  type: "review",
+  createdAt: "2026-10-26T08:00:00.000Z",
+  readAt: null,
+  data: { period: "week", from: "2026-10-19", to: "2026-10-25", distanceKm: 84.2, ...data },
+});
+
+test("a review reads with its distance and its days, and is nobody's", () => {
+  const now = new Date(2026, 9, 29);
+  expect(knownNotifications([review()]).map((n) => n.id)).toEqual([12]);
+  expect(isReviewNotification(review())).toBe(true);
+  expect(isReviewNotification(place("left"))).toBe(false);
+  expect(notificationTitle(review(), clock)).toBe("Your week: 84 km");
+  expect(notificationTitle(review({ period: "month", distanceKm: 312 }))).toBe("Your month: 312 km");
+  expect(notificationDetail(review(), clock, now)).toBe("19 – 25 Oct");
+  // Only `from`: the days come from the period around it.
+  expect(notificationDetail(review({ period: "month", from: "2026-09-01", to: "" }), clock, now)).toBe("1 – 30 Sep");
+  expect(notificationPerson(review())).toBeNull();
 });

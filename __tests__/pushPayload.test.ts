@@ -105,3 +105,13 @@ test("the data of a push is found with the short type key too", () => {
   // Other kinds keep their meaning: a message with only `t` is nothing parsePushAction knows.
   expect(parsePushAction({ data })).toBeNull();
 });
+
+test("a review push opens its period; FCM sends every value as a string", () => {
+  const data = { type: "review", period: "month", from: "2026-09-01", to: "2026-09-30", distanceKm: "312" };
+  expect(parsePushAction({ data })).toEqual({ type: "review", period: "month", date: "2026-09-01" });
+  expect(parsePushAction({ notification: { request: { content: { data: { type: "review", period: "week" } } } } })).toEqual({
+    type: "review",
+    period: "week",
+    date: null,
+  });
+});
