@@ -10,21 +10,17 @@ const groupsDialogOpen = () => !modal.hidden && modalTitle.textContent === "Grou
 
 // Chips on the people panel
 
-// A fixed group holds every account, so it shows exactly what All shows: no chip of its own,
-// it stays in the groups dialog. Same rule as the app.
-const chipGroups = () => groups.filter((g) => !g.fixed);
-const isChipGroup = (id) => chipGroups().some((g) => g.id === id);
+const isChipGroup = (id) => groups.some((g) => g.id === id);
 
-// Chips only when one would show something All does not: two groups, or one next to the fixed one.
+// Chips only when one would show something All does not: two groups or more. Same rule as the app.
 function renderChips() {
-  const own = chipGroups();
-  if (!(own.length >= 2 || (own.length === 1 && own.length < groups.length))) {
+  if (groups.length < 2) {
     chipsEl.hidden = true;
     return;
   }
   const chip = (id, label) =>
     `<button class="chip" type="button" data-group="${id ?? ""}" aria-pressed="${groupFilter === id}">${esc(label)}</button>`;
-  chipsEl.innerHTML = chip(null, "All") + own.map((g) => chip(g.id, g.name)).join("");
+  chipsEl.innerHTML = chip(null, "All") + groups.map((g) => chip(g.id, g.name)).join("");
   chipsEl.hidden = false;
 }
 
@@ -42,7 +38,7 @@ function restoreFilter() {
     saved = null;
   }
   const id = saved && saved !== "all" ? Number(saved) : null;
-  // A saved pick of the fixed group is All now.
+  // A saved pick of a group that is gone is All now.
   groupFilter = id !== null && isChipGroup(id) ? id : null;
   devices = filterDevices();
   render();
@@ -79,8 +75,7 @@ const roleTag = (role) => `<span class="tag">${role === "owner" ? "Owner" : "Mem
 const personName = (user) => esc(user.displayName || user.username);
 
 function memberRow(group, member) {
-  // A fixed group holds everyone for good, nobody is removed from it.
-  const removable = group.canManage && !group.fixed && member.role !== "owner" && member.id !== me?.id;
+  const removable = group.canManage && member.role !== "owner" && member.id !== me?.id;
   return `
     <li class="row" data-user="${member.id}">
       ${accountAvatarHtml(member, "sm")}
@@ -107,10 +102,7 @@ function pendingRow(invite) {
 function groupCard(group) {
   const members = group.members.map((m) => memberRow(group, m)).join("");
   const pending = (group.pendingInvites ?? []).map(pendingRow).join("");
-  // Everybody is in a fixed group already, there is nobody to invite.
-  const invites = group.fixed
-    ? ""
-    : `
+  const invites = `
       <form class="group__form" data-invite-form novalidate>
         <div class="combo">
           <input class="select" name="username" placeholder="Invite by username" autocomplete="off" autocapitalize="none" spellcheck="false"
@@ -129,11 +121,11 @@ function groupCard(group) {
   return `
     <section class="group" data-group="${group.id}">
       <div class="row group__head">
-        <span class="row__text"><strong>${esc(group.name)}${group.fixed ? '<span class="tag">Everyone, always</span>' : roleTag(group.role)}</strong><span>${group.members.length} ${group.members.length === 1 ? "person" : "people"}</span></span>
+        <span class="row__text"><strong>${esc(group.name)}${roleTag(group.role)}</strong><span>${group.members.length} ${group.members.length === 1 ? "person" : "people"}</span></span>
         <span class="row__actions">
           ${group.canManage ? '<button class="btn btn--small btn--ghost" type="button" data-rename>Rename</button>' : ""}
-          ${group.canManage && !group.fixed ? '<button class="btn btn--small btn--ghost" type="button" data-delete>Delete</button>' : ""}
-          ${group.role === "member" && !group.fixed ? '<button class="btn btn--small btn--ghost" type="button" data-leave>Leave</button>' : ""}
+          ${group.canManage ? '<button class="btn btn--small btn--ghost" type="button" data-delete>Delete</button>' : ""}
+          ${group.role === "member" ? '<button class="btn btn--small btn--ghost" type="button" data-leave>Leave</button>' : ""}
         </span>
       </div>
       <ul class="rows">${members}${pending}</ul>

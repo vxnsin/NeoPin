@@ -127,11 +127,27 @@ async function showDevices() {
 
 // Accounts (admin)
 
+// Chips for the groups a new account goes straight into. A click toggles one.
+function groupPickerHtml(list, selected = []) {
+  if (list.length === 0) return "";
+  const chips = list
+    .map((g) => `<button class="chip" type="button" data-pick-group="${g.id}" aria-pressed="${selected.includes(g.id)}">${esc(g.name)}</button>`)
+    .join("");
+  return `<div class="field-label">Groups (optional)<div class="chips chips--wrap chips--pick" role="group" aria-label="Groups">${chips}</div></div>`;
+}
+
+const pickedGroups = (root) => [...root.querySelectorAll("[data-pick-group][aria-pressed=true]")].map((b) => Number(b.dataset.pickGroup));
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-pick-group]");
+  if (chip) chip.setAttribute("aria-pressed", String(chip.getAttribute("aria-pressed") !== "true"));
+});
+
 async function showAccounts() {
   openModal("Accounts");
   note('<div class="spinner"></div>');
   try {
-    const users = await call("/api/users");
+    const [users, mine] = await Promise.all([call("/api/users"), call("/api/groups")]);
     const items = users
       .map(
         (user) => `
@@ -155,6 +171,8 @@ async function showAccounts() {
         <input class="select" name="username" placeholder="Username" autocomplete="off" autocapitalize="none" spellcheck="false" required />
         <input class="select" name="displayName" placeholder="Display name (optional)" autocomplete="off" maxlength="64" />
         <input class="select" name="password" type="password" placeholder="Password (8+ characters)" autocomplete="new-password" required />
+        ${groupPickerHtml(mine)}
+        <p class="hint">Without a group the account sees only itself until someone invites it.</p>
         <p class="form-error" id="newAccountError" role="alert"></p>
         <button class="btn" type="submit">Create account</button>
       </form>`;
@@ -188,6 +206,7 @@ async function showAccounts() {
             username: data.username.trim(),
             password: data.password,
             ...(data.displayName.trim() && { displayName: data.displayName.trim() }),
+            groupIds: pickedGroups(form),
           }),
         });
         toast("Account created.");
