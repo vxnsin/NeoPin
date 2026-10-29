@@ -100,7 +100,7 @@ export async function stopPush(auth: DeviceAuth | null) {
 // What a tap on a notification should open, or null when it is not one of ours.
 export type NotificationTarget = "map" | "connect";
 
-// An invitation goes to the groups sheet, a used invite code to the notifications. A find request goes to the map, where the dialog shows once the
+// An invitation goes to the groups sheet, a used invite code or an arrival to the notifications. A find request goes to the map, where the dialog shows once the
 // socket replays the request; without a connection the start screen has to connect first.
 export function openFromNotification(response: Notifications.NotificationResponse): NotificationTarget | null {
   // A ride question: Yes or No is answered without moving the app, a tap opens the question on the map.
@@ -111,7 +111,7 @@ export function openFromNotification(response: Notifications.NotificationRespons
     requestSheet("groups");
     return "map";
   }
-  if (action?.type === "inviteUsed") {
+  if (action?.type === "inviteUsed" || action?.type === "placeAlert") {
     requestSheet("notifications");
     return "map";
   }

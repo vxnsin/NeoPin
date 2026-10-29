@@ -4,6 +4,8 @@ export type PushAction =
   | { type: "requestLocation"; from: string; id: string | null }
   | { type: "groupInvite" }
   | { type: "inviteUsed" }
+  // Someone arrived at or left a place. FCM data values are strings, the id is read back as a number.
+  | { type: "placeAlert"; userId: number | null }
   | { type: "findRequest"; session: string; from: string };
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -45,6 +47,10 @@ export function parsePushAction(input: unknown): PushAction | null {
   if (!data) return null;
   if (data.type === "groupInvite") return { type: "groupInvite" };
   if (data.type === "inviteUsed") return { type: "inviteUsed" };
+  if (data.type === "arrived" || data.type === "left") {
+    const userId = Number(data.userId);
+    return { type: "placeAlert", userId: data.userId !== undefined && Number.isInteger(userId) ? userId : null };
+  }
   if (data.type === "findRequest") {
     const session = typeof data.session === "string" ? data.session : "";
     return { type: "findRequest", session, from: typeof data.from === "string" ? data.from : "" };

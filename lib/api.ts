@@ -308,7 +308,7 @@ export async function fetchUserDevices(auth: DeviceAuth, userId: number): Promis
   return json(await request(`${httpBase(auth.serverIp)}/api/users/${userId}/devices`, { headers: deviceHeaders(auth) }));
 }
 
-// userId is for admins who look at another account.
+// userId is for looking at another account: one that shares its timeline with you, or any for the admin.
 const timelineQuery = (deviceId: string, userId?: number) =>
   `deviceId=${encodeURIComponent(deviceId)}${userId === undefined ? "" : `&userId=${userId}`}&tz=${new Date().getTimezoneOffset()}`;
 
@@ -321,6 +321,30 @@ export async function fetchTimelineDays(auth: DeviceAuth, deviceId: string, user
   return json(
     await request(`${httpBase(auth.serverIp)}/api/timeline/days?${timelineQuery(deviceId, userId)}`, { headers: deviceHeaders(auth) })
   );
+}
+
+// Who sees my timeline: nobody, everyone I share a group with, or the people and groups picked here.
+export type TimelineSharing = { mode: "off" | "groups" | "selected"; users: number[]; groups: number[] };
+
+// null when the server cannot share timelines yet (404), so the app leaves the setting out.
+export async function getTimelineSharing(auth: DeviceAuth): Promise<TimelineSharing | null> {
+  const response = await request(api(auth, "/timeline/sharing"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
+}
+
+export async function setTimelineSharing(auth: DeviceAuth, sharing: TimelineSharing): Promise<void> {
+  await noContent(await request(api(auth, "/timeline/sharing"), jsonInit(auth, "PUT", sharing)));
+}
+
+// Everyone whose timeline I may open, myself first, with their devices.
+export type TimelinePerson = { userId: number; displayName: string; avatarUrl: string | null; devices: string[] };
+
+// null on servers from before shared timelines (404); the admin then falls back to the account list.
+export async function fetchTimelinePeople(auth: DeviceAuth): Promise<TimelinePerson[] | null> {
+  const response = await request(api(auth, "/timeline/people"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
 }
 
 const forUser = (userId?: number) => (userId === undefined ? "" : `userId=${userId}`);
@@ -557,7 +581,7 @@ export async function registerRequest(
   );
 }
 
-export type AppNotification = {
+export type InviteUsedNotification = {
   id: number;
   type: "inviteUsed";
   createdAt: string;
@@ -569,6 +593,17 @@ export type AppNotification = {
   };
 };
 
+// Someone arrived at or left one of their own places. `at` is when it was noticed, `kind` the place's kind.
+export type PlaceNotification = {
+  id: number;
+  type: "arrived" | "left";
+  createdAt: string;
+  readAt: string | null;
+  data: { userId: number; name: string; placeId: number; placeName: string; kind: PlaceKind; at: number | string; avatarUrl?: string | null };
+};
+
+export type AppNotification = InviteUsedNotification | PlaceNotification;
+
 export async function fetchNotifications(auth: DeviceAuth): Promise<AppNotification[]> {
   return json(await request(api(auth, "/notifications"), jsonInit(auth, "GET")));
 }
@@ -576,4 +611,25 @@ export async function fetchNotifications(auth: DeviceAuth): Promise<AppNotificat
 // Without ids everything is marked.
 export async function markNotificationsRead(auth: DeviceAuth, ids?: number[]): Promise<void> {
   await noContent(await request(api(auth, "/notifications/read"), jsonInit(auth, "POST", ids ? { ids } : {})));
+}
+
+export type OwnPlace = { id: number; name: string; kind: PlaceKind; lat: number; lon: number; radiusM: number; osmId: string | null };
+
+export async function fetchPlaces(auth: DeviceAuth): Promise<OwnPlace[]> {
+  return json(await request(api(auth, "/places"), jsonInit(auth, "GET")));
+}
+
+// Which own places tell others when you arrive or leave, and who hears about it.
+export type AlertSettings = { places: number[]; recipients: { users: number[]; groups: number[] } };
+
+// null when the server has no arrival alerts yet (404), so the app can leave the setting out.
+export async function getAlerts(auth: DeviceAuth): Promise<AlertSettings | null> {
+  const response = await request(api(auth, "/alerts"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
+}
+
+// The whole setting each time. Ids the server does not know, or people outside your groups, are a 400.
+export async function setAlerts(auth: DeviceAuth, settings: AlertSettings): Promise<void> {
+  await noContent(await request(api(auth, "/alerts"), jsonInit(auth, "PUT", settings)));
 }
