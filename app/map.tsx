@@ -164,6 +164,8 @@ export default function MapScreen() {
   );
   const [editingProfile, setEditingProfile] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
+  // Until the first answer groups is a placeholder, not "in no group".
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   // The ones that were unread when the sheet opened keep their dot while it stays open.
@@ -406,6 +408,7 @@ export default function MapScreen() {
     try {
       const [nextGroups, nextInvites] = await Promise.all([fetchGroups(auth), fetchInvites(auth)]);
       setGroups(nextGroups);
+      setGroupsLoaded(true);
       setInvites(nextInvites);
       setGroupFilter((current) => {
         const next = resolveGroupFilter(current, nextGroups);
@@ -1108,7 +1111,7 @@ export default function MapScreen() {
 
           {sheet === "alerts" && creds && (
             <ScrollView showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
-              <AlertsPanel auth={creds} userId={creds.user.id} groups={groups} avatarFor={avatarFor} />
+              <AlertsPanel auth={creds} userId={creds.user.id} groups={groups} groupsLoaded={groupsLoaded} avatarFor={avatarFor} />
             </ScrollView>
           )}
 

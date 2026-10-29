@@ -11,12 +11,14 @@ type Props = {
   auth: DeviceAuth;
   userId: number;
   groups: Group[];
+  // Whether groups has come from the server once; before that it is an empty placeholder.
+  groupsLoaded: boolean;
   avatarFor: (url?: string | null) => string | null;
 };
 
 // "Arrival alerts": which of my places tell others when I arrive or leave, and who hears about it.
 // Every change is saved right away; a failed save puts back what the server has.
-export default function AlertsPanel({ auth, userId, groups, avatarFor }: Props) {
+export default function AlertsPanel({ auth, userId, groups, groupsLoaded, avatarFor }: Props) {
   const { colors: c } = useThemeManager();
   const [places, setPlaces] = useState<OwnPlace[] | null>(null);
   const [settings, setSettings] = useState<AlertSettings | null>(null);
@@ -50,7 +52,7 @@ export default function AlertsPanel({ auth, userId, groups, avatarFor }: Props) 
   }, [auth.serverIp, auth.deviceId, auth.token, reloads]);
 
   const save = (next: AlertSettings) => {
-    const clean = { ...next, recipients: pruneRecipients(next.recipients, contacts, groups) };
+    const clean = { ...next, recipients: pruneRecipients(next.recipients, contacts, groups, groupsLoaded) };
     const mine = ++latest.current;
     setSettings(clean);
     setSaveError("");
@@ -63,6 +65,19 @@ export default function AlertsPanel({ auth, userId, groups, avatarFor }: Props) 
         if (mine !== latest.current) return;
         setSaveError(e?.message || "Could not save, try again.");
         setSettings(saved.current);
+        // A save that timed out may still have reached the server: show what it really has, so the
+        // next change does not undo it.
+        getAlerts(auth)
+          .then((server) => {
+            if (mine !== latest.current) return;
+            const value = server ?? { places: [], recipients: { users: [], groups: [] } };
+            saved.current = value;
+            setSettings(value);
+          })
+          .catch(() => {
+            if (mine !== latest.current) return;
+            setSaveError("Could not save, and the saved state could not be read. Reload to check.");
+          });
       });
   };
 
