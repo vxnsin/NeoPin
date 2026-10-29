@@ -213,6 +213,43 @@ const SCHEMA = `
     read_at TEXT
   );
   CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id, id);
+  CREATE TABLE IF NOT EXISTS alert_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS alert_places (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, place_id)
+  );
+  CREATE TABLE IF NOT EXISTS alert_users (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, recipient_id)
+  );
+  CREATE TABLE IF NOT EXISTS alert_groups (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+  );
+  CREATE TABLE IF NOT EXISTS place_presence (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    inside INTEGER,
+    last_inside INTEGER,
+    pending TEXT,
+    pending_at INTEGER,
+    seen_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, place_id, device_id)
+  );
+  CREATE TABLE IF NOT EXISTS place_alerts (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    place_id INTEGER NOT NULL REFERENCES places(id) ON DELETE CASCADE,
+    direction TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, place_id, direction)
+  );
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.

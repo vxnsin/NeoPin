@@ -60,7 +60,8 @@ import {
   renameGroup,
 } from "./groups.js";
 import { createInvite, getInviteCode, inviteSummary, inviteView, listInvites, registerWithCode, revokeInvite } from "./invites.js";
-import { markRead, notificationsFor } from "./notifications.js";
+import { addNotification, markRead, notificationsFor } from "./notifications.js";
+import { alertRecipients, alertSettings, observePresence, saveAlertSettings } from "./alerts.js";
 import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
 import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
@@ -475,6 +476,38 @@ export function createApp({ gracefulShutdown = true } = {}) {
     const message = { type: "notificationsChanged" };
     for (const device of onlineDevices()) if (ids.has(device.userId)) send(device.socket, message);
     for (const [viewer, userId] of viewers) if (ids.has(userId)) send(viewer, message);
+  }
+
+  // The Android devices of an account: iPhones have no push yet, they read the list in the app.
+  function pushToAndroid(userId, message) {
+    if (!fcmEnabled()) return;
+    for (const target of pushTokensOf(userId)) {
+      if (target.platform === "android") sendNotification(target, message).catch(() => {});
+    }
+  }
+
+  // Arrived at or left one of the person's alert places: a notification for everyone they chose,
+  // with a push to their Android phones. The time is the server's (TZ), the data carries `at`.
+  function checkPresence(userId, deviceId, fix) {
+    const alerts = observePresence(userId, deviceId, fix);
+    if (alerts.length === 0) return;
+    const recipients = alertRecipients(userId);
+    if (recipients.length === 0) return;
+    const name = getUser(userId).display_name;
+    for (const { direction, place, at } of alerts) {
+      const data = { userId, name, placeId: place.id, placeName: place.name, kind: place.kind, at };
+      const clock = new Date(at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      const arrived = direction === "arrived";
+      for (const id of recipients) {
+        addNotification(id, direction, data);
+        pushToAndroid(id, {
+          title: arrived ? `${name} arrived at ${place.name}` : `${name} left ${place.name}`,
+          body: `${arrived ? "Arrived" : "Left"} at ${clock}`,
+          data: { type: direction, userId, placeId: place.id, at },
+        });
+      }
+    }
+    notifyNotifications(recipients);
   }
 
   // Asks devices for a fresh fix and resolves once they answered or the wait is over.
@@ -1030,7 +1063,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
-      const Notification = t.object({
+      const InviteUsedNotification = t.object({
         id: t.number(),
         type: t.literal("inviteUsed"),
         createdAt: t.string(),
@@ -1041,6 +1074,22 @@ export function createApp({ gracefulShutdown = true } = {}) {
           groupName: t.string().nullable(),
         }),
       });
+      // Somebody arrived at or left one of their places; `at` is when (ms), `name` their name then.
+      const PresenceNotification = t.object({
+        id: t.number(),
+        type: t.enum(["arrived", "left"]),
+        createdAt: t.string(),
+        readAt: t.string().nullable(),
+        data: t.object({
+          userId: t.number(),
+          name: t.string(),
+          placeId: t.number(),
+          placeName: t.string(),
+          kind: t.enum(PLACE_KINDS),
+          at: t.number(),
+        }),
+      });
+      const Notification = t.union(InviteUsedNotification, PresenceNotification);
 
       api.get("/notifications", { response: { 200: t.array(Notification), 401: t.problem() } }, (ctx) =>
         notificationsFor(currentUser(ctx).user.id)
@@ -1057,6 +1106,28 @@ export function createApp({ gracefulShutdown = true } = {}) {
           markRead(user.id, ctx.body?.ids);
           notifyNotifications([user.id]);
           return reply(204);
+        }
+      );
+
+      // Arrival and departure alerts: which own places count, and who hears about them.
+      const AlertSettings = t.object({
+        places: t.array(t.int()).max(200),
+        recipients: t.object({ users: t.array(t.int()).max(200), groups: t.array(t.int()).max(200) }),
+      });
+
+      api.get("/alerts", { response: { 200: AlertSettings, 401: t.problem() } }, (ctx) => alertSettings(currentUser(ctx).user.id));
+
+      api.put(
+        "/alerts",
+        { body: AlertSettings, response: { 200: AlertSettings, 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          try {
+            return saveAlertSettings(user.id, ctx.body);
+          } catch (error) {
+            if (error.code === "invalid") throw problem(400, "invalid-alerts", error.message);
+            throw error;
+          }
         }
       );
 
@@ -1620,19 +1691,32 @@ export function createApp({ gracefulShutdown = true } = {}) {
             await requestLocation({ except: { userId: account, deviceId }, viewer: getUser(account) });
             send(socket, { type: "dataResponse", devices: serializeDevices(getUser(account)) });
             break;
-          case "updatePosition":
+          case "updatePosition": {
             if (role !== "device") return;
             updatePosition(account, deviceId, msg.latitude, msg.longitude);
             reported(account, deviceId);
             if (msg.battery) updateBattery(account, deviceId, msg.battery.level, msg.battery.charging);
-            recordPosition(account, deviceId, msg.latitude, msg.longitude, fixTime(msg.recordedAt), fixExtras(msg));
+            const at = fixTime(msg.recordedAt);
+            recordPosition(account, deviceId, msg.latitude, msg.longitude, at, fixExtras(msg));
             broadcastDevices();
+            checkPresence(account, deviceId, { lat: msg.latitude, lon: msg.longitude, ts: at, accuracy: msg.accuracy ?? null });
             break;
+          }
           case "positionBatch": {
             if (role !== "device") return;
             // Only the history: these fixes are older than what the map already shows.
             const points = [...msg.points].sort((a, b) => fixTime(a.recordedAt) - fixTime(b.recordedAt));
             for (const p of points) recordPosition(account, deviceId, p.latitude, p.longitude, fixTime(p.recordedAt), fixExtras(p));
+            // Where the phone was last tells whether it came or went while it had no connection.
+            const newest = points.at(-1);
+            if (newest) {
+              checkPresence(account, deviceId, {
+                lat: newest.latitude,
+                lon: newest.longitude,
+                ts: fixTime(newest.recordedAt),
+                accuracy: newest.accuracy ?? null,
+              });
+            }
             break;
           }
           case "updateBattery":
