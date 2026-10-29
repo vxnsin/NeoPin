@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-theme-locked>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>NeoPin · Invite</title>
+    <script src="/assets/scripts/theme.js"></script>
+    <link rel="stylesheet" href="/assets/styles/theme.css" />
+    <link rel="stylesheet" href="/assets/styles/login.css" />
+    <link rel="icon" type="image/x-icon" href="/assets/images/favicon.ico" />
+  </head>
+
+  <body>
+    <svg class="sprite" aria-hidden="true">
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
+    </svg>
+
+    <!-- The link an invite code is shared as. It opens the app with the code and this server, or the sign-up here. -->
+    <main class="login">
+      <div class="login__card">
+        <img class="login__logo" src="/assets/images/logo.png" width="76" height="76" alt="" />
+        <h1>NeoPin</h1>
+        <p class="login__lead" id="lead">You were invited to NeoPin.</p>
+
+        <p class="invite__code" id="code"></p>
+        <p class="login__error" id="message" role="alert" aria-live="polite"></p>
+
+        <div class="invite__actions" id="actions">
+          <a class="btn login__submit" id="openApp" href="#">
+            <span>Open in the app</span>
+            <svg class="icon"><use href="#i-arrow" /></svg>
+          </a>
+          <p class="login__switch">
+            <span>No app at hand?</span>
+            <a class="login__link" id="openWeb" href="/login">Sign up in the browser</a>
+          </p>
+        </div>
+      </div>
+      <p class="login__foot">Self-hosted. Your locations never leave your server.</p>
+    </main>
+
+    <script src="/assets/scripts/invitecode.js"></script>
+    <script src="/assets/scripts/invite.js"></script>
+  </body>
+</html>

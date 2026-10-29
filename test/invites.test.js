@@ -482,3 +482,12 @@ test("removing the creator removes the codes, removing the user keeps the code a
   assert.equal(rowOf(code.id), undefined);
   assert.equal(rowOf(gone.id), undefined);
 });
+
+test("an invite link is a page anyone can open, signed in or not", async () => {
+  const res = await fetch(s.baseUrl + "/invite/ABCDE-12345");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type"), /text\/html/);
+  const html = await res.text();
+  assert.match(html, /\/assets\/scripts\/invite\.js/);
+  assert.equal((await fetch(s.baseUrl + "/assets/scripts/invite.js")).status, 200);
+});
