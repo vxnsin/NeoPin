@@ -10,23 +10,15 @@ export function filterByGroup(devices: Device[], groupId: number | null, myUserI
   return devices.filter((d) => (myUserId !== undefined && d.userId === myUserId) || (d.groupIds ?? []).includes(groupId));
 }
 
-// The groups that get a chip next to All. A fixed group holds every account, so it shows
-// exactly what All shows and gets no chip of its own; it stays in the groups list.
-export function chipGroups<T extends Pick<Group, "fixed">>(groups: T[]): T[] {
-  return groups.filter((g) => !g.fixed);
+// A group that is gone falls back to All.
+export function resolveGroupFilter(selected: number | null, groups: Pick<Group, "id">[]): number | null {
+  return selected !== null && groups.some((g) => g.id === selected) ? selected : null;
 }
 
-// A group that is gone falls back to All, and so does the fixed one, which is the same as All.
-export function resolveGroupFilter(selected: number | null, groups: Pick<Group, "id" | "fixed">[]): number | null {
-  return selected !== null && chipGroups(groups).some((g) => g.id === selected) ? selected : null;
-}
-
-// Chips only when a chip would show something All does not: two groups to pick between, or
-// one next to a fixed group (then All is everybody and the group fewer). With a single group
-// and nothing else, All already is that group.
-export function showGroupChips(groups: Pick<Group, "fixed">[]): boolean {
-  const own = chipGroups(groups);
-  return own.length >= 2 || (own.length === 1 && own.length < groups.length);
+// Chips only with two groups to pick between; with a single one, All already is that group.
+// Every group counts the same, there is no fixed Everyone group any more.
+export function showGroupChips(groups: unknown[]): boolean {
+  return groups.length >= 2;
 }
 
 // What the badge counts: invitations waiting for an answer.

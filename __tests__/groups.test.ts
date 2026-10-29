@@ -1,6 +1,6 @@
 jest.mock("@react-native-async-storage/async-storage", () => require("@react-native-async-storage/async-storage/jest/async-storage-mock"));
 
-import { badgeText, chipGroups, filterByGroup, loadGroupFilter, pendingCount, resolveGroupFilter, saveGroupFilter, showGroupChips } from "../lib/groups";
+import { badgeText, filterByGroup, loadGroupFilter, pendingCount, resolveGroupFilter, saveGroupFilter, showGroupChips } from "../lib/groups";
 import { groupPeople, type Device } from "../lib/devices";
 
 const dev = (userId: number, deviceId: string, groupIds?: number[]): Device => ({
@@ -35,29 +35,21 @@ test("a vanished group falls back to All", () => {
   expect(resolveGroupFilter(null, [])).toBeNull();
 });
 
-test("the fixed group is All: no chip of its own, a saved pick of it falls back to All", () => {
-  const everyone = { id: 1, fixed: true };
+test("an Everyone group is a group like any other: its own chip, a saved pick of it stays", () => {
+  const everyone = { id: 1, fixed: false };
   const friends = { id: 2, fixed: false };
-  expect(chipGroups([everyone, friends])).toEqual([friends]);
-  expect(resolveGroupFilter(1, [everyone, friends])).toBeNull();
+  expect(resolveGroupFilter(1, [everyone, friends])).toBe(1);
   expect(resolveGroupFilter(2, [everyone, friends])).toBe(2);
+  expect(showGroupChips([everyone, friends])).toBe(true);
 });
 
-test("chips only when one would show something All does not", () => {
-  const everyone = { fixed: true };
-  const group = { fixed: false };
-  // Everyone alone, or Everyone next to nothing else: All says it all.
-  expect(showGroupChips([everyone])).toBe(false);
-  // A group next to Everyone shows fewer people than All.
-  expect(showGroupChips([everyone, group])).toBe(true);
-  // One group and no fixed one: All is that group.
-  expect(showGroupChips([group])).toBe(false);
-  // Two groups to pick between, with or without a fixed one.
-  expect(showGroupChips([group, group])).toBe(true);
-  expect(showGroupChips([everyone, group, group])).toBe(true);
-  // Older servers send no flag: every group counts as its own.
-  expect(showGroupChips([{ id: 1 } as any])).toBe(false);
-  expect(showGroupChips([{ id: 1 } as any, { id: 2 } as any])).toBe(true);
+test("chips only with two groups to pick between", () => {
+  expect(showGroupChips([])).toBe(false);
+  // One group: All is that group.
+  expect(showGroupChips([{ id: 1 }])).toBe(false);
+  expect(showGroupChips([{ id: 1 }, { id: 2 }])).toBe(true);
+  // An older server may still flag its Everyone group; it counts the same.
+  expect(showGroupChips([{ id: 1, fixed: true }, { id: 2 }])).toBe(true);
 });
 
 test("the badge counts open invitations", () => {
