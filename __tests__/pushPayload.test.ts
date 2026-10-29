@@ -83,6 +83,14 @@ test("a find request push is parsed in every payload shape", () => {
   expect(parsePushAction({ data: { type: "findRequest" } })).toEqual({ type: "findRequest", session: "", from: "" });
 });
 
+test("an arrival or a departure push names the person", () => {
+  expect(parsePushAction({ data: { type: "arrived", userId: "4", placeId: "3" } })).toEqual({ type: "placeAlert", userId: 4 });
+  expect(parsePushAction({ notification: { request: { content: { data: { type: "left" } } } } })).toEqual({
+    type: "placeAlert",
+    userId: null,
+  });
+});
+
 test("a used invite code is recognised in every payload shape", () => {
   expect(parsePushAction({ data: { type: "inviteUsed" } })).toEqual({ type: "inviteUsed" });
   expect(parsePushAction({ notification: { request: { content: { data: { type: "inviteUsed" } } } } })).toEqual({
