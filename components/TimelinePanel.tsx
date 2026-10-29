@@ -11,18 +11,20 @@ import PlacePicker from "@/components/PlacePicker";
 import {
   fetchTimeline,
   fetchTimelineDays,
+  fetchTimelinePeople,
   fetchUserDevices,
   fetchUsers,
   dismissVisit,
   setTripMode,
-  type AccountSummary,
   type Timeline,
+  type TimelinePerson,
   type Trip,
   type TripModeChoice,
 } from "@/lib/api";
 import type { StoredCredentials } from "@/lib/credentials";
 import { DEVICE_ICONS, freshness, typeOf, type Device } from "@/lib/devices";
 import { getReportingPreset, onSettingsChange } from "@/lib/settings";
+import { canEditTimeline, devicesOf, peopleFromAccounts } from "@/lib/timelinePeople";
 import { SNAP_SPRING, clampDrag, restAfterDrag, type Snaps } from "@/lib/sheetSnap";
 import {
   MODE_CHOICES,
@@ -75,12 +77,23 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const insets = useSafeAreaInsets();
 
   const admin = creds.user.isAdmin === true;
-  const [users, setUsers] = useState<AccountSummary[]>([]);
-  // Admins can look at another account, undefined is their own.
+  // Everyone whose timeline may be opened: people who share theirs, all accounts for the admin.
+  const [people, setPeople] = useState<TimelinePerson[]>([]);
+  // The admin's account list from servers without shared timelines; their devices are asked for on a pick.
+  const [legacyPeople, setLegacyPeople] = useState(false);
+  // Another account being looked at, undefined is the own one.
   const [accountId, setAccountId] = useState<number | undefined>(undefined);
   const [otherDevices, setOtherDevices] = useState<Device[]>([]);
   const viewingOther = accountId !== undefined && accountId !== creds.user.id;
   const queryUser = viewingOther ? accountId : undefined;
+  const canEdit = canEditTimeline(viewingOther, admin);
+  const viewedName = viewingOther ? people.find((p) => p.userId === accountId)?.displayName : undefined;
+  // The people list is asked again when a shared timeline is refused (its owner stopped sharing).
+  const [peopleReloads, setPeopleReloads] = useState(0);
+  // Said once the panel fell back to the own timeline because sharing was taken back.
+  const [revoked, setRevoked] = useState("");
+  // Only the newest pick may set the devices; an older answer would show another account's device.
+  const pickRun = useRef(0);
 
   const choices = useMemo(() => {
     if (viewingOther) return otherDevices;
@@ -171,33 +184,75 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   }, [bottomPadding, post]);
 
   useEffect(() => {
-    if (!admin) return;
-    fetchUsers(creds)
-      .then(setUsers)
-      .catch(() => setUsers([]));
-  }, [creds, admin]);
+    let live = true;
+    fetchTimelinePeople(creds)
+      .then(async (list) => {
+        if (list !== null) {
+          if (live) {
+            setPeople(list);
+            setLegacyPeople(false);
+          }
+          return;
+        }
+        // A server from before shared timelines: only the admin can look at others, as before.
+        if (!admin) return;
+        const accounts = await fetchUsers(creds);
+        if (live) {
+          setPeople(peopleFromAccounts(accounts));
+          setLegacyPeople(true);
+        }
+      })
+      .catch(() => live && setPeople([]));
+    return () => {
+      live = false;
+    };
+  }, [creds, admin, peopleReloads]);
+
+  // Back to the own timeline, for a pick of "Me" and when someone stopped sharing theirs.
+  const showOwn = () => {
+    pickRun.current += 1;
+    setAccountId(undefined);
+    setOtherDevices([]);
+    setDeviceId(creds.deviceId);
+  };
+
+  // A 403 on someone else's day: they no longer share it with me.
+  const sharingEnded = (e: any): boolean => {
+    if (!viewingOther || e?.status !== 403) return false;
+    setRevoked(viewedName ? `${viewedName} no longer shares this timeline with you.` : "This timeline is no longer shared with you.");
+    setPeopleReloads((n) => n + 1);
+    showOwn();
+    return true;
+  };
 
   useEffect(() => onSettingsChange((s) => setPreset(s.reporting)), []);
 
-  const pickAccount = (user: AccountSummary) => {
+  const pickAccount = (person: TimelinePerson) => {
     setDaysOpen(false);
-    if (user.id === creds.user.id) {
-      setAccountId(undefined);
-      setOtherDevices([]);
-      setDeviceId(creds.deviceId);
+    setRevoked("");
+    if (person.userId === creds.user.id) {
+      showOwn();
       return;
     }
-    setAccountId(user.id);
+    const mine = ++pickRun.current;
+    setAccountId(person.userId);
     setOtherDevices([]);
     setTimeline(null);
-    fetchUserDevices(creds, user.id)
+    if (!legacyPeople) {
+      const list = devicesOf(person, devices);
+      setOtherDevices(list);
+      setDeviceId(list[0]?.deviceId ?? "");
+      return;
+    }
+    fetchUserDevices(creds, person.userId)
       .then((list) => {
+        if (mine !== pickRun.current) return;
         setOtherDevices(
-          list.map((d) => ({ deviceId: d.deviceId, position: d.position, lastPing: d.lastPing, status: d.status, avatarUrl: user.avatarUrl, deviceType: d.deviceType }))
+          list.map((d) => ({ deviceId: d.deviceId, position: d.position, lastPing: d.lastPing, status: d.status, avatarUrl: person.avatarUrl, deviceType: d.deviceType }))
         );
         setDeviceId(list[0]?.deviceId ?? "");
       })
-      .catch((e: any) => setError(e?.message || "The devices could not be loaded."));
+      .catch((e: any) => mine === pickRun.current && setError(e?.message || "The devices could not be loaded."));
   };
 
   useEffect(() => {
@@ -238,6 +293,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
       })
       .catch((e: any) => {
         if (current !== run.current) return;
+        if (sharingEnded(e)) return;
         setTimeline(null);
         setError(e?.message || "The timeline could not be loaded.");
         shownRoute.current = [];
@@ -271,7 +327,10 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         }
       })
       // A failed try still counts, the next one is scheduled all the same.
-      .catch(() => fresh() && setRefreshFailures((n) => n + 1));
+      .catch((e: any) => {
+        if (!fresh()) return;
+        if (!sharingEnded(e)) setRefreshFailures((n) => n + 1);
+      });
   }, [creds, deviceId, day, queryUser, post]);
 
   // Only once the day itself has loaded: a retry that ran beside the first load could land
@@ -335,7 +394,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
   const summary = timeline?.summary;
 
   // What was removed stays in reach: each removed stop of the day, with a way back.
-  const dismissedSpans = timeline?.dismissed ?? [];
+  // Only whoever may change the day can bring a stop back.
+  const dismissedSpans = canEdit ? (timeline?.dismissed ?? []) : [];
   const removedStops =
     dismissedSpans.length > 0 ? (
       <View style={styles.removed}>
@@ -399,26 +459,34 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
         <Text style={[styles.hint, { color: c.muted }]}>Bus and train lines need Balanced or Precise position updates.</Text>
       )}
 
-      {admin && users.length > 1 && (
+      {people.length > 1 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
-          {users.map((user) => {
-            const active = user.id === (accountId ?? creds.user.id);
+          {people.map((person) => {
+            const active = person.userId === (accountId ?? creds.user.id);
             return (
               <Pressable
-                key={user.id}
-                onPress={() => pickAccount(user)}
+                key={person.userId}
+                onPress={() => pickAccount(person)}
                 style={[styles.deviceChip, chip(active)]}
-                accessibilityLabel={`Show the account ${user.displayName}`}
+                accessibilityLabel={`Show the timeline of ${person.userId === creds.user.id ? "your account" : person.displayName}`}
                 accessibilityState={{ selected: active }}
               >
                 <MaterialIcons name="person" size={18} color={active ? c.onSecondary : c.muted} />
                 <Text style={[styles.chipLabel, chipText(active)]} numberOfLines={1}>
-                  {user.id === creds.user.id ? "Me" : user.displayName}
+                  {person.userId === creds.user.id ? "Me" : person.displayName}
                 </Text>
               </Pressable>
             );
           })}
         </ScrollView>
+      )}
+
+      {!!revoked && !viewingOther && <Text style={[styles.hint, { color: c.muted }]}>{revoked}</Text>}
+
+      {!canEdit && (
+        <Text style={[styles.hint, { color: c.muted }]}>
+          {viewedName ? `${viewedName} shares this timeline with you. It can only be read.` : "Shared with you. It can only be read."}
+        </Text>
       )}
 
       {choices.length > 1 && (
@@ -588,7 +656,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                         )}
                       </View>
                       {/* Servers from before place names have no place field and nothing to save to. */}
-                      {segment.place !== undefined && (
+                      {segment.place !== undefined && canEdit && (
                         <Pressable
                           style={[styles.editButton, { backgroundColor: picking === index ? c.primary : c.subtle }]}
                           onPress={() => setPicking(picking === index ? null : index)}
@@ -668,7 +736,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                     {!!modeError && <Text style={[styles.note, { color: c.secondary }]}>{modeError}</Text>}
                   </View>
                 )}
-                {picking === index && segment.type === "visit" && (
+                {picking === index && segment.type === "visit" && canEdit && (
                   <>
                     <PlacePicker
                       creds={creds}

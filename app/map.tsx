@@ -31,6 +31,7 @@ import { useWebSocketContext } from "@/context/WebSocket";
 import Avatar from "@/components/Avatar";
 import StartScreen from "@/components/StartScreen";
 import TimelinePanel from "@/components/TimelinePanel";
+import TimelineSharingPanel from "@/components/TimelineSharingPanel";
 import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
@@ -73,6 +74,7 @@ import {
   fetchGroups,
   fetchInvites,
   fetchMe,
+  getTimelineSharing,
   fetchNotifications,
   markNotificationsRead,
   fetchServerStatus,
@@ -116,7 +118,7 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "alerts" | null;
+type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "timelineSharing" | "alerts" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
@@ -177,6 +179,8 @@ export default function MapScreen() {
   const [groupFilter, setGroupFilter] = useState<number | null>(null);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  // Only servers that can share timelines get the entry; an older one answers 404.
+  const [sharingEnabled, setSharingEnabled] = useState(false);
   const [panelRest, setPanelRest] = useState<number | null>(null);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
@@ -235,6 +239,9 @@ export default function MapScreen() {
 
   useEffect(() => {
     if (sheet !== "settings" || !creds) return;
+    getTimelineSharing(creds)
+      .then((sharing) => setSharingEnabled(sharing !== null))
+      .catch(() => {});
     fetchServerStatus(creds.serverIp)
       .then((status) => {
         setServerLabel(["Server v" + status.version, status.commit?.slice(0, 7)].filter(Boolean).join(" · "));
@@ -1000,7 +1007,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : sheet === "alerts" ? "Arrival alerts" : "People"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : sheet === "timelineSharing" ? "Share my timeline" : sheet === "alerts" ? "Arrival alerts" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -1093,6 +1100,12 @@ export default function MapScreen() {
           {sheet === "inviteCodes" && creds && (
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
               <InviteCodesPanel auth={creds} isAdmin={creds.user.isAdmin === true} groups={groups} />
+            </ScrollView>
+          )}
+
+          {sheet === "timelineSharing" && creds && (
+            <ScrollView showsVerticalScrollIndicator={false} onScroll={trackListTop} scrollEventThrottle={16}>
+              <TimelineSharingPanel auth={creds} userId={creds.user.id} groups={groups} groupsLoaded={groupsLoaded} avatarFor={avatarFor} />
             </ScrollView>
           )}
 
@@ -1276,6 +1289,18 @@ export default function MapScreen() {
                   updateStoredUser(fresh).catch(() => {});
                 }}
               />
+
+              {sharingEnabled && (
+                <Pressable
+                  style={[styles.groupsEntry, { backgroundColor: c.subtle }]}
+                  onPress={() => setSheet("timelineSharing")}
+                  accessibilityLabel="Share my timeline"
+                >
+                  <MaterialIcons name="timeline" size={20} color={c.primary} />
+                  <Text style={[styles.groupsEntryText, { color: c.primary }]}>Share my timeline</Text>
+                  <MaterialIcons name="chevron-right" size={22} color={c.muted} />
+                </Pressable>
+              )}
 
               <PasswordForm auth={creds} onChanged={passwordChanged} />
 

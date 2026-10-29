@@ -308,7 +308,7 @@ export async function fetchUserDevices(auth: DeviceAuth, userId: number): Promis
   return json(await request(`${httpBase(auth.serverIp)}/api/users/${userId}/devices`, { headers: deviceHeaders(auth) }));
 }
 
-// userId is for admins who look at another account.
+// userId is for looking at another account: one that shares its timeline with you, or any for the admin.
 const timelineQuery = (deviceId: string, userId?: number) =>
   `deviceId=${encodeURIComponent(deviceId)}${userId === undefined ? "" : `&userId=${userId}`}&tz=${new Date().getTimezoneOffset()}`;
 
@@ -321,6 +321,30 @@ export async function fetchTimelineDays(auth: DeviceAuth, deviceId: string, user
   return json(
     await request(`${httpBase(auth.serverIp)}/api/timeline/days?${timelineQuery(deviceId, userId)}`, { headers: deviceHeaders(auth) })
   );
+}
+
+// Who sees my timeline: nobody, everyone I share a group with, or the people and groups picked here.
+export type TimelineSharing = { mode: "off" | "groups" | "selected"; users: number[]; groups: number[] };
+
+// null when the server cannot share timelines yet (404), so the app leaves the setting out.
+export async function getTimelineSharing(auth: DeviceAuth): Promise<TimelineSharing | null> {
+  const response = await request(api(auth, "/timeline/sharing"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
+}
+
+export async function setTimelineSharing(auth: DeviceAuth, sharing: TimelineSharing): Promise<void> {
+  await noContent(await request(api(auth, "/timeline/sharing"), jsonInit(auth, "PUT", sharing)));
+}
+
+// Everyone whose timeline I may open, myself first, with their devices.
+export type TimelinePerson = { userId: number; displayName: string; avatarUrl: string | null; devices: string[] };
+
+// null on servers from before shared timelines (404); the admin then falls back to the account list.
+export async function fetchTimelinePeople(auth: DeviceAuth): Promise<TimelinePerson[] | null> {
+  const response = await request(api(auth, "/timeline/people"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
 }
 
 const forUser = (userId?: number) => (userId === undefined ? "" : `userId=${userId}`);
