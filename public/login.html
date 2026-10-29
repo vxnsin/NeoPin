@@ -18,6 +18,7 @@
       <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" /><path d="M10.73 5.08A10.4 10.4 0 0 1 12 5c7 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.68" /><path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.7 9.7 0 0 0 5.39-1.61" /><path d="M2 2l20 20" /></symbol>
       <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></symbol>
       <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M16 7l3 3M14 9l2 2" /></symbol>
+      <symbol id="i-fingerprint" viewBox="0 0 24 24"><path d="M12 11v3a8 8 0 0 1-1.5 4.7" /><path d="M8.5 13.5a20 20 0 0 1-1.2 5" /><path d="M15.5 12.5v1.5a12 12 0 0 1-.9 4.6" /><path d="M5 15.5A12 12 0 0 0 5.5 11a6.5 6.5 0 0 1 11.6-4" /><path d="M8.6 9A3.5 3.5 0 0 1 15.5 11" /><path d="M18.8 10a14 14 0 0 1 .2 3.5" /></symbol>
       <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" /></symbol>
     </svg>
 
@@ -86,6 +87,14 @@
           </button>
         </form>
 
+        <div class="login__passkey" id="passkeyRow" hidden>
+          <span class="login__or">or</span>
+          <button class="btn btn--ghost login__passkey-btn" type="button" id="passkeyButton">
+            <svg class="icon"><use href="#i-fingerprint" /></svg>
+            <span>Sign in with a passkey</span>
+          </button>
+        </div>
+
         <p class="login__switch" id="switchRow" hidden>
           <span id="switchText">Have an invite code?</span>
           <button class="login__link" type="button" id="switchMode">Create account</button>
@@ -96,6 +105,7 @@
     </main>
 
     <script src="/assets/scripts/invitecode.js"></script>
+    <script src="/assets/scripts/webauthn.js"></script>
     <script src="/assets/scripts/login.js"></script>
   </body>
 </html>

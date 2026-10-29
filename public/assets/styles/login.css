@@ -421,3 +421,40 @@ form {
 .invite__actions .login__submit {
   text-decoration: none;
 }
+
+/* "or" and the passkey sign-in below the password form. */
+.login__passkey {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.login__passkey[hidden] {
+  display: none;
+}
+
+.login__or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.login__or::before,
+.login__or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.login__passkey-btn {
+  width: 100%;
+  height: 48px;
+}
+
+.login__passkey-btn .icon {
+  width: 18px;
+  height: 18px;
+}

@@ -93,12 +93,13 @@ neopin.example.com {
 }
 ```
 
-Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
+Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 
 | Variable | Value | What it does |
 |:--|:--|:--|
 | `TRUST_PROXY` | `true` | Reads the client IP and `https` from the proxy, so rate limits hit the right address |
 | `SECURE_COOKIES` | `true` | The dashboard cookie only travels over HTTPS |
+| `PUBLIC_URL` | `https://neopin.example.com` | The address the dashboard is opened at, see [Passkeys](#passkeys) |
 
 ## Configuration
 
@@ -127,8 +128,11 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `INVITE_MAX_OPEN` | `5` | Open codes a non-admin account may hold at once, the admin has no limit |
 | `TRUST_PROXY` | `false` | See [On the internet](#on-the-internet) |
 | `SECURE_COOKIES` | `false` | See [On the internet](#on-the-internet) |
+| `PUBLIC_URL` | unset | The dashboard's address, e.g. `https://neopin.example.com`. Passkeys belong to its host name, see [Passkeys](#passkeys). Unset, the `Host` of each request counts |
+| `BACKUPS` | on | A copy of the database every night at 03:30 server time, see [Backups](#backups). `off` turns it off, the download in the dashboard still works |
+| `BACKUP_KEEP` | `7` | How many of the nightly backups stay |
 
-Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 wrong device tokens and 120 profile picture requests per minute and IP.
+Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 passkey requests (a sign-in takes two), 10 wrong device tokens and 120 profile picture requests per minute and IP.
 
 ## Groups
 
@@ -223,6 +227,20 @@ A timeline is private until its owner shares it. `PUT /api/timeline/sharing` tak
 
 The server keeps every stretch of being invisible, from switching it on until it runs out or is switched off. Fixes inside those stretches, and stops dismissed there, are left out of a timeline read by anyone but the owner and the admin, and a day spent invisible does not appear in their `days`. Trips next to such a stretch show their own fixes only, no road path or line. Nobody knows who was invisible before the server kept these stretches, so for others a shared timeline starts at the update that began keeping them (a new server shows everything).
 
+## Backups
+
+The admin finds them in the account menu under Backups. **Download backup now** answers with a fresh copy of the database (`neopin-YYYY-MM-DD.db`), made with SQLite's `VACUUM INTO` so it is consistent while the server keeps writing. It holds accounts, password hashes, passkeys, groups, places and the whole history, so keep it as safe as the server. The timetables are left out, the server imports them again by itself.
+
+Every night at 03:30, and after a start when the newest one is older than a day, the same copy goes to `backups/` next to the database (`/app/data/backups` in Docker, inside the volume). The newest `BACKUP_KEEP` stay. For a copy that survives the disk, sync that folder somewhere else.
+
+**Restore from file** uploads a backup. The server checks that it is a sound NeoPin database, keeps it as `neopin.db.restore` and answers `202`; nothing changes until the next start, which puts it in place and keeps the old database as `neopin.db.before-restore`. Restart the container or the process to finish. Uploads go up to 1 GB, a reverse proxy in front may need its body limit raised for that (`client_max_body_size` in nginx).
+
+## Passkeys
+
+Every account can add passkeys in the account menu (Passkeys) and then sign in to the dashboard with **Sign in with a passkey**, without a username or password. The password login stays, and the app keeps signing in with the password and its device token.
+
+Browsers only allow passkeys on HTTPS pages and on `localhost`, never for an IP address, so the dashboard only offers them there (`passkeys` in `GET /api/status`). A passkey belongs to a host name: the one in `PUBLIC_URL`, or the one the dashboard was opened at. Set `PUBLIC_URL` behind a reverse proxy, and keep the host name, or the passkeys stop working. Adding one needs the dashboard session, not a device token.
+
 ## Console
 
 Type into the running server. It only starts when a terminal is attached; without one (Docker without `-it`) it stays off and the dashboard does the same jobs.
@@ -308,7 +326,9 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/login` | | `{ "username", "password" }`, sets the cookie. `401` when wrong, `429` after 5 tries a minute |
 | `POST` | `/api/auth/login` | | `{ "username", "password", "deviceId", "deviceType"? }`, answers with the device `token` |
 | `GET` | `/logout` | | Ends the session |
-| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push", "invites" }`, used by the login screens and the Docker health check |
+| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push", "invites", "passkeys" }`, used by the login screens and the Docker health check. `passkeys` says whether this address can use them |
+| `POST` | `/login/passkey/options` | | WebAuthn request options with a fresh challenge (valid 5 min, once), no username. `404` where [passkeys](#passkeys) do not work. 10 passkey requests a minute per IP |
+| `POST` | `/login/passkey` | | `{ "credential" }`, what `navigator.credentials.get` answered as JSON. Sets the cookie like `/login`, `401` when the passkey is unknown or does not check out |
 | `POST` | `/api/register` | | `{ "code", "username", "password", "displayName"? }` signs up with an [invite code](#invite-codes), `201` with the account. `404` for any invalid code, `409` username taken |
 | `POST` | `/api/invite-codes/check` | | `{ "code" }` answers `{ "valid", "invitedBy"?, "groupName"? }` |
 | `POST` `GET` | `/api/invite-codes` | ✓ | Create a code (`{ "groupId"?, "note"? }`, `201`) and list your own, the admin gets all |
@@ -320,6 +340,10 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/me/tours` | ✓ | `{ "client": "app" \| "dashboard" }` marks that tour as seen. `204` |
 | `POST` | `/api/setup/done` | admin | Ends the first setup. `204`, `409` while the admin is in no group |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
+| `POST` | `/api/passkeys/register/options` | session | WebAuthn creation options for the signed-in account, its passkeys excluded. 10 passkey requests a minute per IP |
+| `POST` | `/api/passkeys/register` | session | `{ "name", "credential" }` with what `navigator.credentials.create` answered. `201` with `{ id, name, createdAt, lastUsedAt }`, `400` when it does not check out |
+| `GET` | `/api/passkeys` | ✓ | The account's passkeys, `[{ id, name, createdAt, lastUsedAt }]` |
+| `DELETE` | `/api/passkeys/:id` | ✓ | Deletes one of your passkeys. `204`, `404` for anyone else's |
 | `GET` | `/api/devices` | ✓ | The devices linked to the account |
 | `PUT` | `/api/me/primary-device` | ✓ | `{ "deviceId" }` picks the device that stands for you, `null` goes back to automatic |
 | `PUT` | `/api/users/:id/primary-device` | admin | The same for another account |
@@ -334,6 +358,10 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
 | `PUT` | `/api/visits/dismissed` | ✓ | `{ deviceId, start, end, dismissed }` removes a stop that was none, a red light or a jam: its fixes count as on the way and the trips around it become one. `dismissed: false` brings it back. The timeline lists the day's dismissed stops in `dismissed` |
 | `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts. Creating takes `{ "username", "password", "displayName"?, "groupIds"? }` and puts the account straight into those groups, `400` for an unknown group |
+| `GET` | `/api/admin/backup` | admin | A fresh [backup](#backups) of the database as `neopin-YYYY-MM-DD.db` (`application/octet-stream`) |
+| `GET` | `/api/admin/backups` | admin | The nightly backups, newest first: `[{ name, size, createdAt }]` |
+| `GET` | `/api/admin/backups/:name` | admin | Downloads one of them. `404` for any name that is not exactly one of the list |
+| `POST` | `/api/admin/restore` | admin | The backup file as the body (`application/octet-stream`, at most 1 GB). `202` once it is checked and staged, applied on the next start. `400` for anything but a NeoPin database |
 | `PUT` | `/api/avatar` | ✓ | Sets the account's profile picture: JPEG, PNG or WebP, at most 16 KB |
 | `DELETE` | `/api/avatar` | ✓ | Removes it again |
 | `GET` | `/avatars/:userId` | ✓ | The picture. Its URL changes with every new one, so it is cached for good |

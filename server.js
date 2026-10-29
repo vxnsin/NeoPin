@@ -7,6 +7,7 @@ import { pruneHistory } from "./src/history.js";
 import { createApp } from "./src/app.js";
 import { startConsole } from "./src/console.js";
 import { startTransit } from "./src/transit.js";
+import { applyStagedRestore, beforeRestoreFile, startBackups } from "./src/backups.js";
 
 function networkIp() {
   for (const interfaces of Object.values(os.networkInterfaces())) {
@@ -31,10 +32,15 @@ function banner() {
       console.log(chalk.yellow(`Generated password: ${chalk.whiteBright(adminCreated.password)}  (shown once, change it after logging in)`));
     }
   }
+  if (restored) {
+    console.log(chalk.yellow(`Backup restored. The previous database is kept as ${chalk.whiteBright(beforeRestoreFile())}`));
+  }
   console.log(chalk.whiteBright(`Type '${chalk.red.bold("help")}' to see available commands`));
 }
 
 // inkan closes every socket and the server itself on SIGINT and SIGTERM.
+// A backup uploaded in the dashboard takes the place of the database before it is opened.
+const restored = applyStagedRestore();
 initDb();
 const adminCreated = ensureAdmin();
 pruneHistory();
@@ -42,4 +48,5 @@ const server = createApp();
 await server.app.listen(config.port);
 banner();
 startTransit();
+startBackups();
 startConsole(server);

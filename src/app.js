@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import { createReadStream } from "fs";
 import path from "path";
 import chalk from "chalk";
 import { inkan, problem, rateLimit, reply, serveStatic, t } from "@vxnsin/inkan";
@@ -101,6 +102,17 @@ import {
   savePlaceAt,
   updatePlace,
 } from "./places.js";
+import { RESTORE_MAX_BYTES, backupFile, downloadableBackup, listBackups, stageRestore } from "./backups.js";
+import {
+  PASSKEY_NAME_MAX,
+  deletePasskey,
+  listPasskeys,
+  loginOptions,
+  registerPasskey,
+  registrationOptions,
+  relyingParty,
+  verifyPasskeyLogin,
+} from "./passkeys.js";
 
 const CLOSE_POLICY = 4000;
 const CLOSE_REPLACED = 4001;
@@ -257,6 +269,11 @@ const Timeline = t.object({
 });
 
 const Message = t.object({ message: t.string() });
+
+const Passkey = t.object({ id: t.number(), name: t.string(), createdAt: t.string(), lastUsedAt: t.string().nullable() });
+// What the browser's navigator.credentials hands back, as JSON. @simplewebauthn checks it.
+const Credential = t.record(t.any());
+const Backup = t.object({ name: t.string(), size: t.number(), createdAt: t.string() });
 
 const bare = (type) => t.object({ type: t.literal(type) });
 
@@ -626,6 +643,21 @@ export function createApp({ gracefulShutdown = true } = {}) {
     return user;
   }
 
+  // The account signed in to the dashboard, a device token does not count.
+  function dashboardUser(ctx) {
+    const id = sessionUserId(ctx.session);
+    const user = id === null ? null : getUser(id);
+    if (!user) throw problem(401, "unauthorized", "Sign in to the dashboard first");
+    return user;
+  }
+
+  const passkeyParty = (ctx) => relyingParty({ host: ctx.headers.host, secure: ctx.secure });
+  function requireParty(ctx) {
+    const rp = passkeyParty(ctx);
+    if (!rp) throw problem(404, "passkeys-unavailable", "Passkeys need HTTPS, or localhost");
+    return rp;
+  }
+
   // Whose data a request is about: the signed-in account, or for the admin any account.
   function targetUserId(ctx, requested) {
     const { user } = currentUser(ctx);
@@ -743,10 +775,19 @@ export function createApp({ gracefulShutdown = true } = {}) {
           push: t.boolean(),
           // Whether people can sign up with an invite code.
           invites: t.boolean(),
+          // Whether this address can use passkeys (HTTPS or localhost), see passkeys.js.
+          passkeys: t.boolean(),
         }),
       },
     },
-    () => ({ version: config.version, commit: config.commit, builtAt: config.builtAt, push: fcmEnabled(), invites: config.invites })
+    (ctx) => ({
+      version: config.version,
+      commit: config.commit,
+      builtAt: config.builtAt,
+      push: fcmEnabled(),
+      invites: config.invites,
+      passkeys: passkeyParty(ctx) !== null,
+    })
   );
 
   // Everything that takes a password shares one limit per IP.
@@ -888,6 +929,74 @@ export function createApp({ gracefulShutdown = true } = {}) {
           if (device.id !== deviceId) device.socket.close(CLOSE_POLICY, "Password changed");
         }
         return { message: "Password changed", ...(deviceId ? { token: issueToken(user.id, deviceId) } : {}) };
+      }
+    );
+  });
+
+  // Passkey routes have a limit of their own, like the login's but twice as high: every
+  // try is two requests, options and answer.
+  app.register((passkeys) => {
+    passkeys.register(rateLimit({ max: config.passkeyRateLimit.max, window: config.passkeyRateLimit.windowMs }));
+
+    // Dashboard login with a passkey: options with a fresh challenge, then the signed answer.
+    // No username, the browser offers every passkey it has for this server.
+    passkeys.post(
+      "/login/passkey/options",
+      { response: { 200: t.any(), 404: t.problem(), 429: t.problem() } },
+      (ctx) => loginOptions(requireParty(ctx))
+    );
+
+    passkeys.post(
+      "/login/passkey",
+      {
+        body: t.object({ credential: Credential }),
+        response: { 200: t.object({ message: t.string(), user: User }), 401: t.problem(), 404: t.problem(), 429: t.problem() },
+      },
+      async (ctx) => {
+        const rp = requireParty(ctx);
+        let userId;
+        try {
+          userId = await verifyPasskeyLogin(rp, ctx.body.credential);
+        } catch (error) {
+          if (error.code === "passkey-failed") throw problem(401, "invalid-passkey", "This passkey did not work");
+          throw error;
+        }
+        const user = getUser(userId);
+        if (!user) throw problem(401, "invalid-passkey", "This passkey did not work");
+        signIn(ctx.session, user.id);
+        return { message: "Login successful", user: publicUser(user) };
+      }
+    );
+
+    // Adding a passkey needs the dashboard's session: a device token alone must not be
+    // enough for a login that outlives a password change.
+    passkeys.post(
+      "/api/passkeys/register/options",
+      { response: { 200: t.any(), 401: t.problem(), 404: t.problem(), 429: t.problem() } },
+      (ctx) => {
+        const user = dashboardUser(ctx);
+        return registrationOptions(user, requireParty(ctx));
+      }
+    );
+
+    passkeys.post(
+      "/api/passkeys/register",
+      {
+        body: t.object({ name: t.string().max(200), credential: Credential }),
+        response: { 201: Passkey, 400: t.problem(), 401: t.problem(), 404: t.problem(), 429: t.problem() },
+      },
+      async (ctx) => {
+        const user = dashboardUser(ctx);
+        const rp = requireParty(ctx);
+        const name = ctx.body.name.trim().slice(0, PASSKEY_NAME_MAX) || "Passkey";
+        try {
+          const passkey = await registerPasskey(user, rp, ctx.body.credential, name);
+          console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} added the passkey ${chalk.whiteBright(name)}.`));
+          return reply(201, passkey);
+        } catch (error) {
+          if (error.code === "passkey-failed") throw problem(400, "invalid-passkey", error.message);
+          throw error;
+        }
       }
     );
   });
@@ -1778,6 +1887,65 @@ export function createApp({ gracefulShutdown = true } = {}) {
       });
     });
   });
+
+  // The account's passkeys, see passkeys.js. Adding one is in the rate-limited scope above.
+  app.get("/api/passkeys", { response: { 200: t.array(Passkey), 401: t.problem() } }, (ctx) =>
+    listPasskeys(currentUser(ctx).user.id)
+  );
+
+  app.delete("/api/passkeys/:id", { response: { 204: t.empty(), 401: t.problem(), 404: t.problem() } }, (ctx) => {
+    const { user } = currentUser(ctx);
+    if (!deletePasskey(user.id, Number(ctx.params.id))) throw problem(404, "unknown-passkey", "No such passkey");
+    return reply(204);
+  });
+
+  // Backups, for the admin (see backups.js). Every download is a fresh, consistent copy.
+  const attachment = (name, size) => ({
+    "content-type": "application/octet-stream",
+    "content-disposition": `attachment; filename="${name}"`,
+    "content-length": String(size),
+    "cache-control": "no-store",
+  });
+
+  app.get("/api/admin/backup", { response: { 401: t.problem(), 403: t.problem() } }, async (ctx) => {
+    const admin = requireAdmin(ctx);
+    const backup = await downloadableBackup();
+    console.log(chalk.cyan(`[i] ${chalk.whiteBright(admin.username)} downloaded a backup.`));
+    return reply(200, backup.chunks, attachment(backup.name, backup.size));
+  });
+
+  app.get("/api/admin/backups", { response: { 200: t.array(Backup), 401: t.problem(), 403: t.problem() } }, (ctx) => {
+    requireAdmin(ctx);
+    return listBackups();
+  });
+
+  app.get("/api/admin/backups/:name", { response: { 401: t.problem(), 403: t.problem(), 404: t.problem() } }, async (ctx) => {
+    requireAdmin(ctx);
+    const file = backupFile(ctx.params.name);
+    if (!file) throw problem(404, "unknown-backup", "No such backup");
+    const { size } = await fs.stat(file);
+    return reply(200, createReadStream(file), attachment(ctx.params.name, size));
+  });
+
+  // The upload is checked and kept next to the database; the next start swaps it in.
+  app.post(
+    "/api/admin/restore",
+    {
+      body: t.stream().max(RESTORE_MAX_BYTES).accept("application/octet-stream"),
+      response: { 202: Message, 400: t.problem(), 401: t.problem(), 403: t.problem(), 413: t.problem(), 415: t.problem() },
+    },
+    async (ctx) => {
+      const admin = requireAdmin(ctx);
+      try {
+        await stageRestore(ctx.body);
+      } catch (error) {
+        if (error.code === "invalid-backup") throw problem(400, "invalid-backup", error.message);
+        throw error;
+      }
+      console.log(chalk.yellow(`[!] ${chalk.whiteBright(admin.username)} uploaded a backup. It replaces the database on the next start.`));
+      return reply(202, { message: "Restart the server to finish." });
+    }
+  );
 
   app.ws(
     "/",

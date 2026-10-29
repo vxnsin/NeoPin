@@ -34,6 +34,8 @@ test("sign-up needs an invite code, see invites.test.js", async () => {
     builtAt: config.builtAt,
     push: false,
     invites: true,
+    // Plain http on an IP address, see passkeys.test.js.
+    passkeys: false,
   });
 });
 
