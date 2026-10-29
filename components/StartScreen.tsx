@@ -11,14 +11,40 @@ const LOGO = 120;
 const SLOW_AFTER_MS = 2500;
 const TRACK = 120;
 
-// Once per app window: a later screen (index → map) starts at rest instead of landing again.
-let landed = false;
+// One landing per app window, shared by every start screen: the index screen begins it and the
+// map's start screen, which replaces it mid-way, carries on with the same values instead of
+// jumping to the end.
+type Landing = { land: Animated.Value; ring: Animated.Value; word: Animated.Value; started: boolean };
+const freshLanding = (): Landing => ({ land: new Animated.Value(0), ring: new Animated.Value(0), word: new Animated.Value(0), started: false });
+let landing = freshLanding();
 
 // A new app window lands again. On Android the location service keeps the JS running after the
 // app is swiped away, so "once per process" would mean the animation never shows a second time.
 export function resetLanding() {
-  landed = false;
+  landing = freshLanding();
 }
+
+// Starts once the logo is really drawn: before that the splash stays, so there is never a pulse
+// around an empty spot. The logo lands first; the pulse leaves it as it settles, then the name.
+function startLanding() {
+  if (landing.started) return;
+  landing.started = true;
+  SplashScreen.hideAsync().catch(() => {});
+  Animated.parallel([
+    Animated.timing(landing.land, { toValue: 1, duration: 650, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true }),
+    Animated.sequence([
+      Animated.delay(520),
+      Animated.timing(landing.ring, { toValue: 1, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+    ]),
+    Animated.sequence([
+      Animated.delay(600),
+      Animated.timing(landing.word, { toValue: 1, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]),
+  ]).start();
+}
+
+// If the image never reports that it is drawn, the landing starts anyway.
+const LOAD_FALLBACK_MS = 800;
 
 type Props = {
   // What the screen waits for is drawn underneath.
@@ -32,37 +58,18 @@ type Props = {
 
 export default function StartScreen({ ready, leave = "dock", tagline, onHidden }: Props) {
   const { colors } = useThemeManager();
-  const land = useRef(new Animated.Value(landed ? 1 : 0)).current;
-  const ring = useRef(new Animated.Value(0)).current;
-  const word = useRef(new Animated.Value(landed ? 1 : 0)).current;
+  const { land, ring, word } = useRef(landing).current;
   const out = useRef(new Animated.Value(0)).current;
   const thumb = useRef(new Animated.Value(0)).current;
   const [slow, setSlow] = useState(false);
   const hidden = useRef(onHidden);
   hidden.current = onHidden;
 
-  // The splash goes the moment this screen is on, with the logo where the splash left it.
+  // The splash goes when the logo is drawn (startLanding), at the size the splash left it.
   useEffect(() => {
-    SplashScreen.hideAsync().catch(() => {});
+    const timer = setTimeout(startLanding, LOAD_FALLBACK_MS);
+    return () => clearTimeout(timer);
   }, []);
-
-  useEffect(() => {
-    if (landed) return;
-    landed = true;
-    const show = Animated.parallel([
-      Animated.timing(land, { toValue: 1, duration: 700, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true }),
-      Animated.sequence([
-        Animated.delay(350),
-        Animated.timing(ring, { toValue: 1, duration: 1200, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-      ]),
-      Animated.sequence([
-        Animated.delay(500),
-        Animated.timing(word, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]),
-    ]);
-    show.start();
-    return () => show.stop();
-  }, [land, ring, word]);
 
   // A bar appears only when the wait gets long, and slides until the wait is over.
   useEffect(() => {
@@ -111,6 +118,8 @@ export default function StartScreen({ ready, leave = "dock", tagline, onHidden }
         />
         <Animated.Image
           source={require("@/assets/images/logo.png")}
+          onLoad={startLanding}
+          fadeDuration={0}
           style={[styles.logo, { transform: [{ translateY: dockY }, { scale: Animated.multiply(landScale, dockScale) }] }]}
         />
       </View>
