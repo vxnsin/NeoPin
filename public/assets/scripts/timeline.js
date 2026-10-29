@@ -44,8 +44,10 @@ const tl = { on: false, userId: null, deviceId: null, date: null, days: [], data
 // theirs with it (the admin reads all), each with the devices to pick from.
 let tlPeople = [];
 
-// Somebody else's day is for reading only. The admin may still name places and correct trips.
-const readOnly = () => !!tl.userId && tl.userId !== me?.id && !me?.isAdmin;
+// Somebody else's day is for reading only. The admin may still name places and remove stops;
+// how a trip was made is for its owner to say, so nobody else gets the "This was:" chooser.
+const othersDay = () => !!tl.userId && tl.userId !== me?.id;
+const readOnly = () => othersDay() && !me?.isAdmin;
 
 function localDay(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -755,8 +757,8 @@ tlBody.addEventListener("click", (event) => {
   const seg = event.target.closest(".seg");
   if (!seg) return;
   const index = Number(seg.dataset.index);
-  // A shared day has no "This was:" chooser.
-  if (seg.classList.contains("seg--trip")) focusSegment(index, { fold: readOnly() || !toggleChooser(index) });
+  // Somebody else's day has no "This was:" chooser, not even for the admin (as in the app).
+  if (seg.classList.contains("seg--trip")) focusSegment(index, { fold: othersDay() || !toggleChooser(index) });
   else focusSegment(index);
 });
 
