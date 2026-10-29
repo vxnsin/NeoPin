@@ -28,6 +28,10 @@ import {
   spansKeptSince,
   isHidden,
   setHiddenUntil,
+  markSetupDone,
+  markTourSeen,
+  setupDone,
+  toursOf,
 } from "./accounts.js";
 import {
   allDevices,
@@ -43,6 +47,7 @@ import {
 } from "./devices.js";
 import {
   acceptInvite,
+  addMember,
   audience,
   cancelInvite,
   canManage,
@@ -54,9 +59,7 @@ import {
   groupsFor,
   invite,
   invitesFor,
-  isFixed,
   isMember,
-  joinFixedGroups,
   removeMember,
   renameGroup,
 } from "./groups.js";
@@ -144,9 +147,19 @@ const User = t.object({
   primaryDeviceId: t.string().nullable(),
 });
 
-// The account itself, with what only it sees: until when it hides (ms), null when visible.
-const Me = User.extend({ hiddenUntil: t.number().nullable() });
-const meOf = (user) => ({ ...publicUser(user), hiddenUntil: hiddenUntilOf(user) });
+// The account itself, with what only it sees: until when it hides (ms), null when visible, which
+// tours it went through, and for the admin whether the server still waits for its first setup.
+const Me = User.extend({
+  hiddenUntil: t.number().nullable(),
+  tours: t.object({ app: t.boolean(), dashboard: t.boolean() }),
+  setupNeeded: t.boolean().optional(),
+});
+const meOf = (user) => ({
+  ...publicUser(user),
+  hiddenUntil: hiddenUntilOf(user),
+  tours: toursOf(user),
+  ...(user.is_admin === 1 ? { setupNeeded: !setupDone() } : {}),
+});
 
 const LinkedDevice = t.object({
   deviceId: t.string(),
@@ -888,6 +901,25 @@ export function createApp({ gracefulShutdown = true } = {}) {
     (api) => {
       api.get("/me", { response: { 200: Me, 401: t.problem() } }, (ctx) => meOf(currentUser(ctx).user));
 
+      // The app and the dashboard each show a short tour once and say here when it was seen or skipped.
+      api.post(
+        "/me/tours",
+        { body: t.object({ client: t.enum(["app", "dashboard"]) }), response: { 204: t.empty(), 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          markTourSeen(currentUser(ctx).user.id, ctx.body.client);
+          return reply(204);
+        }
+      );
+
+      // The end of the dashboard's first setup. Without a group the admin's people would see
+      // nobody, so the setup only ends once the admin is in one.
+      api.post("/setup/done", { response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 409: t.problem() } }, (ctx) => {
+        const admin = requireAdmin(ctx);
+        if (groupsFor(admin).length === 0) throw problem(409, "no-group", "Create a group first");
+        markSetupDone();
+        return reply(204);
+      });
+
       // Hiding: gone from everyone else's map for a while (minutes) or until turned off (no minutes).
       // The own devices keep reporting, so the own map and timeline go on.
       api.put(
@@ -1002,14 +1034,21 @@ export function createApp({ gracefulShutdown = true } = {}) {
             username: t.string().max(64),
             password: t.string().max(256),
             displayName: t.string().max(64).optional(),
+            // Groups the account is in right away, without an invite. None: invite it later.
+            groupIds: t.array(t.int()).max(100).optional(),
           }),
           response: { 201: User, 400: t.problem(), 401: t.problem(), 403: t.problem(), 409: t.problem() },
         },
         (ctx) => {
           requireAdmin(ctx);
+          const { groupIds = [], ...account } = ctx.body;
+          // Checked first, so a wrong id does not leave an account behind.
+          const groups = [...new Set(groupIds)].map((id) => getGroup(id));
+          if (groups.some((g) => !g)) throw problem(400, "unknown-group", "No such group");
           try {
-            const user = createUser(ctx.body);
-            joinFixedGroups(user.id);
+            const user = createUser(account);
+            for (const group of groups) addMember(group.id, user.id);
+            if (groups.length) notifyGroups(groups.flatMap((g) => audience(g.id)));
             console.log(chalk.cyan(`[i] Account ${chalk.whiteBright(user.username)} created in the dashboard.`));
             return reply(201, publicUser(user));
           } catch (error) {
@@ -1207,7 +1246,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         ownerId: t.number(),
         role: t.enum(["owner", "member"]),
         canManage: t.boolean(),
-        // Everybody is in it for good: no leaving, no removing, no deleting.
+        // Always false: groups were fixed once, older apps still read it.
         fixed: t.boolean(),
         members: t.array(Member),
         pendingInvites: t.array(t.object({ id: t.number(), user: User })),
@@ -1270,7 +1309,6 @@ export function createApp({ gracefulShutdown = true } = {}) {
         { response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
         (ctx) => {
           const { group } = groupFor(ctx, { manage: true });
-          if (isFixed(group)) throw problem(403, "fixed-group", `${group.name} holds everyone and cannot be deleted`);
           const people = deleteGroup(group.id);
           notifyGroups(people);
           return reply(204);
@@ -1324,7 +1362,6 @@ export function createApp({ gracefulShutdown = true } = {}) {
           const { user, group } = groupFor(ctx);
           const target = Number(ctx.params.userId);
           if (!isMember(group.id, target)) throw problem(404, "unknown-member", "Not in this group");
-          if (isFixed(group)) throw problem(403, "fixed-group", `Everybody stays in ${group.name}`);
           if (target === group.owner_id) throw problem(400, "owner", "The owner stays in the group, delete the group instead");
           if (target !== user.id && !canManage(group, user)) throw problem(403, "forbidden", "Only the owner can remove people");
           const people = audience(group.id);

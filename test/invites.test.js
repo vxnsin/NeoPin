@@ -251,12 +251,10 @@ test("registering creates the account, uses the code and joins the group", async
   assert.equal(login.status, 200);
 });
 
-test("a code without a group lands in the fixed groups only, a code with one adds it", async () => {
-  const admin = await s.account("boss");
+test("a code without a group lands in no group, a code with one adds just that one", async () => {
+  await s.account("boss");
   const luis = await s.account("luis");
-  const everyone = getDb().prepare("INSERT INTO user_groups (name, owner_id, fixed, created_at) VALUES ('Everyone', ?, 1, ?)").run(admin.user.id, new Date().toISOString());
-  const fixedId = Number(everyone.lastInsertRowid);
-  getDb().prepare("INSERT INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)").run(fixedId, luis.user.id, new Date().toISOString());
+  const other = await (await call("POST", "/api/groups", { name: "Everyone" }, luis)).json();
   const groupsOf = (username) =>
     getDb()
       .prepare("SELECT m.group_id AS id FROM group_members m JOIN users u ON u.id = m.user_id WHERE u.username = ? ORDER BY m.group_id")
@@ -264,12 +262,12 @@ test("a code without a group lands in the fixed groups only, a code with one add
       .map((r) => r.id);
 
   assert.equal((await register((await make(luis)).code)).status, 201);
-  assert.deepEqual(groupsOf("newbie"), [fixedId]);
+  assert.deepEqual(groupsOf("newbie"), []);
 
   const family = await (await call("POST", "/api/groups", { name: "Family" }, luis)).json();
   const code = await make(luis, { groupId: family.id });
   assert.equal((await register(code.code, { username: "second" })).status, 201);
-  assert.deepEqual(groupsOf("second"), [fixedId, family.id]);
+  assert.deepEqual(groupsOf("second"), [family.id], `not ${other.name}`);
 });
 
 test("every invalid code gets the same answer", async () => {

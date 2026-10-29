@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { config } from "./config.js";
 import { getDb } from "./db.js";
 import { createUser, getUser, publicUser } from "./accounts.js";
-import { getGroup, isMember, joinFixedGroups } from "./groups.js";
+import { getGroup, isMember } from "./groups.js";
 import { addNotification } from "./notifications.js";
 
 // Invite codes let somebody without an account sign up. Single use, short lived, and the
@@ -158,7 +158,6 @@ export function registerWithCode(input, { username, password, displayName }, now
     const invite = openInviteByCode(input, now);
     if (!invite) throw fail("invalid-code", "This invite code is not valid");
     const user = createUser({ username, password, displayName });
-    joinFixedGroups(user.id);
     const stamp = new Date(now).toISOString();
     const used = db
       .prepare(`UPDATE invite_codes SET used_by = ?, used_at = ? WHERE id = ? AND ${OPEN}`)

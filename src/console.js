@@ -1,7 +1,6 @@
 import readline from "readline";
 import chalk from "chalk";
 import { createUser, getUserByName, listUsers, setPassword } from "./accounts.js";
-import { joinFixedGroups } from "./groups.js";
 import { allDevices, onlineDevices, statusOf, timeAgo } from "./devices.js";
 import { destroyAllSessions } from "./sessions.js";
 
@@ -36,7 +35,6 @@ export function startConsole(sockets) {
       if (!name || !password) return console.log(chalk.red("Usage: createUser <name> <password>"));
       try {
         const user = createUser({ username: name, password });
-        joinFixedGroups(user.id);
         console.log(chalk.green(`Account ${user.username} created.`));
       } catch (error) {
         console.log(chalk.red(error.message));
