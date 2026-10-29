@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import useThemeManager from "@/hooks/useThemeManager";
 import { MaterialIcons } from "@expo/vector-icons";
+import Footer from "@/components/Footer";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useWebSocketContext } from "@/context/WebSocket";
 import { readCredentials, socket } from "@/lib/socket";
@@ -116,12 +117,13 @@ export default function ErrorScreen() {
           Check that the phone is online and the server is running. Logging out lets you pick another server.
         </Text>
       </View>
+      <Footer inline />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 110 },
+  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32 },
   badge: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center", marginBottom: 20 },
   title: { fontSize: 26, fontWeight: "800", letterSpacing: -0.4, textAlign: "center" },
   lead: { fontSize: 15, marginTop: 8, marginBottom: 28, textAlign: "center", maxWidth: 420 },

@@ -127,7 +127,8 @@ export default function RootLayout() {
               animation: "fade",
             }}
           />
-          {pathname !== "/map" && <Footer />}
+          {/* Pinned only on the start screen; the login, error and invite screens end with it. */}
+          {pathname === "/" && <Footer />}
         </View>
       </WebSocketProvider>
     </GestureHandlerRootView>
