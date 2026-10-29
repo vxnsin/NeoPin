@@ -36,6 +36,7 @@ import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
 import FindSheet from "@/components/FindSheet";
+import RideSheet from "@/components/RideSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
 import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby";
 import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
@@ -50,6 +51,9 @@ import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
+import { onRide, takeRide } from "@/lib/rideInbox";
+import { sendRideAnswer } from "@/lib/ridePush";
+import { isStaleRide, type RideQuestion } from "@/lib/rides";
 import { timeAgo } from "@/lib/time";
 import { pinKinds } from "@/lib/mapPins";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
@@ -118,7 +122,7 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "timelineSharing" | "alerts" | null;
+type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "ride" | "timelineSharing" | "alerts" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
@@ -150,6 +154,37 @@ export default function MapScreen() {
     setFind((current) => reduceFind(current, waiting));
     setSheet("find");
   }, []);
+  // "Are you on Bus 10?": from the socket, a push or a tapped notification, also one that came before
+  // this screen was mounted. It waits while another sheet is open (a search, the settings) and shows
+  // once that one closes, unless it is too old by then. A newer question takes the place of a waiting one.
+  const [ride, setRide] = useState<RideQuestion | null>(null);
+  const [pendingRide, setPendingRide] = useState<RideQuestion | null>(null);
+  useEffect(() => {
+    const queue = (question: RideQuestion) => {
+      takeRide();
+      setPendingRide(question);
+    };
+    const waiting = takeRide();
+    if (waiting) setPendingRide(waiting);
+    return onRide(queue);
+  }, []);
+  useEffect(() => {
+    if (sheet !== null || !pendingRide) return;
+    setPendingRide(null);
+    if (isStaleRide(pendingRide, Date.now())) return;
+    setRide(pendingRide);
+    setSheet("ride");
+  }, [sheet, pendingRide]);
+  // Another sheet that takes over from an unanswered question (a find request) hands it back to wait;
+  // a question swiped away is gone.
+  const previousSheet = useRef<Sheet>(null);
+  useEffect(() => {
+    const before = previousSheet.current;
+    previousSheet.current = sheet;
+    if (before !== "ride" || sheet === "ride") return;
+    if (sheet !== null && ride) setPendingRide((current) => current ?? ride);
+    setRide(null);
+  }, [sheet, ride]);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
   const [serverLabel, setServerLabel] = useState<string | null>(null);
@@ -1007,7 +1042,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : sheet === "timelineSharing" ? "Share my timeline" : sheet === "alerts" ? "Arrival alerts" : "People"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : sheet === "ride" ? "Your ride" : sheet === "timelineSharing" ? "Share my timeline" : sheet === "alerts" ? "Arrival alerts" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -1018,7 +1053,7 @@ export default function MapScreen() {
                   <MaterialIcons name="refresh" size={20} color={c.primary} />
                 </Pressable>
               )}
-              {sheet !== "find" && (
+              {sheet !== "find" && sheet !== "ride" && (
               <Pressable
                 style={[styles.headerButton, { backgroundColor: c.subtle }]}
                 onPress={() => setSheet(sheet === "devices" ? "settings" : sheet === "settings" ? "devices" : "settings")}
@@ -1047,6 +1082,18 @@ export default function MapScreen() {
               onStop={stopFind}
               onClose={() => {
                 setFind(null);
+                closeSheet();
+              }}
+            />
+          )}
+
+          {sheet === "ride" && ride && (
+            <RideSheet
+              key={ride.rideId}
+              question={ride}
+              onAnswer={(answer) => sendRideAnswer(ride, answer)}
+              onDone={() => {
+                setRide(null);
                 closeSheet();
               }}
             />

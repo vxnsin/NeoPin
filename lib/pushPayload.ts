@@ -23,8 +23,12 @@ function parseJson(value: unknown): Record<string, unknown> | null {
 
 // The data of a push shows up in different places. FCM data keys arrive flat in `data` (Android task and
 // notification content), the Expo style keeps a JSON string in `dataString`, and the task payload of a
-// tapped notification wraps the same content in notification.request.content.
-function dataOf(input: unknown): Record<string, unknown> | null {
+// tapped notification wraps the same content in notification.request.content. Newer messages may name
+// their type with the short key `t`.
+const typed = (value: Record<string, unknown> | null | undefined): boolean =>
+  !!value && (typeof value.type === "string" || typeof value.t === "string");
+
+export function dataOf(input: unknown): Record<string, unknown> | null {
   const root = asObject(input);
   if (!root) return null;
 
@@ -32,10 +36,10 @@ function dataOf(input: unknown): Record<string, unknown> | null {
   const holder = content ?? root;
 
   const flat = asObject(holder.data);
-  if (flat && typeof flat.type === "string") return flat;
+  if (flat && typed(flat)) return flat;
   const fromString = parseJson(holder.dataString) ?? parseJson(flat?.dataString) ?? parseJson(flat?.body);
-  if (fromString && typeof fromString.type === "string") return fromString;
-  return typeof holder.type === "string" ? holder : null;
+  if (fromString && typed(fromString)) return fromString;
+  return typed(holder) ? holder : null;
 }
 
 export function parsePushAction(input: unknown): PushAction | null {

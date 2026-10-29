@@ -2,7 +2,9 @@ import * as Notifications from "expo-notifications";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import { fetchServerStatus, registerPushToken, removePushToken, type DeviceAuth } from "@/lib/api";
-import { needsRegistration, parsePushAction, type StoredPush } from "@/lib/pushPayload";
+import { dataOf, needsRegistration, parsePushAction, type StoredPush } from "@/lib/pushPayload";
+import { openRideResponse } from "@/lib/ridePush";
+import { parseRideQuestion } from "@/lib/rides";
 import { requestSheet } from "@/lib/sheetRequest";
 import { socket } from "@/lib/socket";
 import { handlePush } from "@/tasks/PushTask";
@@ -15,6 +17,10 @@ Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     // With the socket up the request already arrives as a dialog, a banner would say it twice.
     if (parsePushAction(notification)?.type === "findRequest" && socket.connected) {
+      return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
+    }
+    // A ride question in front is the sheet on the map, not a banner.
+    if (parseRideQuestion(dataOf(notification))) {
       return { shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
     }
     const show = !!notification.request.content.title || !!notification.request.content.body;
@@ -97,6 +103,9 @@ export type NotificationTarget = "map" | "connect";
 // An invitation goes to the groups sheet, a used invite code or an arrival to the notifications. A find request goes to the map, where the dialog shows once the
 // socket replays the request; without a connection the start screen has to connect first.
 export function openFromNotification(response: Notifications.NotificationResponse): NotificationTarget | null {
+  // A ride question: Yes or No is answered without moving the app, a tap opens the question on the map.
+  const ride = openRideResponse(response);
+  if (ride) return ride === "shown" ? "map" : null;
   const action = parsePushAction(response);
   if (action?.type === "groupInvite") {
     requestSheet("groups");

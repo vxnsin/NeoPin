@@ -1,4 +1,4 @@
-import { createDedupe, needsRegistration, parsePushAction } from "../lib/pushPayload";
+import { createDedupe, dataOf, needsRegistration, parsePushAction } from "../lib/pushPayload";
 
 const wake = { type: "requestLocation", from: "Anna", id: "abc" };
 
@@ -96,4 +96,12 @@ test("a used invite code is recognised in every payload shape", () => {
   expect(parsePushAction({ notification: { request: { content: { data: { type: "inviteUsed" } } } } })).toEqual({
     type: "inviteUsed",
   });
+});
+
+test("the data of a push is found with the short type key too", () => {
+  const data = { t: "rideQuestion", rideId: "r1" };
+  expect(dataOf({ data, notification: null })).toEqual(data);
+  expect(dataOf({ request: { content: { dataString: JSON.stringify(data) } } })).toEqual(data);
+  // Other kinds keep their meaning: a message with only `t` is nothing parsePushAction knows.
+  expect(parsePushAction({ data })).toBeNull();
 });

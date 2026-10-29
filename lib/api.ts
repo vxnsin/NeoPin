@@ -413,6 +413,18 @@ export async function dismissVisit(
   );
 }
 
+// "Are you on Bus 10?" answered during the ride. The server puts the line on the trip (yes) or keeps
+// it off (no) when it builds the timeline. 204 on success.
+export async function answerRide(auth: DeviceAuth, rideId: string, answer: "yes" | "no"): Promise<void> {
+  await noContent(
+    await request(`${httpBase(auth.serverIp)}/api/rides/answer`, {
+      method: "POST",
+      headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+      body: JSON.stringify({ rideId, answer }),
+    })
+  );
+}
+
 export type GroupMember = { id: number; username: string; displayName: string; avatarUrl: string | null; role: "owner" | "member" };
 
 export type Group = {

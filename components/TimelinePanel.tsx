@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
 import PlacePicker from "@/components/PlacePicker";
+import LineBadge from "@/components/LineBadge";
 import {
   fetchTimeline,
   fetchTimelineDays,
@@ -670,19 +671,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                   ) : ride ? (
                     <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
                       <View style={styles.rideLine}>
-                        {!!ride.badge && (
-                          <View
-                            style={[
-                              styles.badge,
-                              // Lines without colours of their own get a quiet badge on the panel's surface.
-                              { backgroundColor: ride.color ?? c.raised, borderColor: ride.color ?? c.subtle },
-                            ]}
-                          >
-                            <Text style={[styles.badgeText, { color: ride.textColor ?? c.primary }]} numberOfLines={1}>
-                              {ride.badge}
-                            </Text>
-                          </View>
-                        )}
+                        {!!ride.badge && <LineBadge line={ride.badge} color={ride.color} textColor={ride.textColor} />}
                         <Text style={[styles.tripTitle, styles.rideTitle, { color: c.primary }]} numberOfLines={1}>
                           {ride.label} · {ride.stops}
                         </Text>
@@ -854,8 +843,6 @@ const styles = StyleSheet.create({
   tripTitle: { fontSize: 14, fontWeight: "600" },
   rideLine: { flexDirection: "row", alignItems: "center", gap: 8 },
   rideTitle: { flex: 1 },
-  badge: { minWidth: 30, height: 22, paddingHorizontal: 7, borderRadius: 7, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  badgeText: { fontSize: 12.5, fontWeight: "800" },
   hint: { fontSize: 12.5, marginTop: -4, marginBottom: 10 },
   chooser: { marginLeft: 40, marginBottom: 8, padding: 10, borderRadius: 16, gap: 8 },
   chooserLabel: { fontSize: 12.5, fontWeight: "600" },
