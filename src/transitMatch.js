@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { getDb } from "./db.js";
 import { distanceM } from "./history.js";
 import { LOOKUP_TIMEOUT_MS, askOverpass, overpassEnabled } from "./overpass.js";
+import { rideAnswersBetween } from "./rideAnswers.js";
 import { MIN_TRIP_M, tripSegment } from "./timeline.js";
 
 // Which bus, tram or train a trip of the timeline was. A trip is a candidate when it starts
@@ -184,7 +185,7 @@ export function meanShapeDistance(fixes, shape) {
 
 // The stops a spot is at: bus and tram stops within NEAR_STOP_M, stations served by trains,
 // subways or ferries within NEAR_STATION_M. Nearest first.
-function stopsNear(lat, lon) {
+export function stopsNear(lat, lon) {
   const dLat = NEAR_STATION_M / (KM_PER_DEG * 1000);
   const dLon = dLat / Math.max(0.1, Math.cos((lat * Math.PI) / 180));
   return getDb()
@@ -273,12 +274,36 @@ function timetablesKnow(trip) {
   return stopsNear(fixes[0].lat, fixes[0].lon).length > 0 && stopsNear(fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon).length > 0;
 }
 
-// The line of a trip according to the timetables, or null.
-export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
+// The stops of a timetable trip after the boarding one, in order.
+function stopsAfter(feedId, tripId, fromSeq) {
+  return getDb()
+    .prepare(
+      `SELECT st.seq, s.id, s.name, s.lat, s.lon FROM transit_stop_times st JOIN transit_stops s ON s.feed_id = st.feed_id AND s.id = st.stop_id
+       WHERE st.feed_id = ? AND st.trip_id = ? AND st.seq > ? ORDER BY st.seq`
+    )
+    .all(feedId, tripId, fromSeq);
+}
+
+// The stops the fixes went past: close to their way, a station a little further.
+function passedStops(fixes, stops, kind) {
+  const project = projector(fixes[0].lat, fixes[0].lon);
+  const way = fixes.map((f) => project(f.lat, f.lon));
+  const radius = kind in NO_HALT_MIN_KMH ? STATION_PASS_M : STOP_PASS_M;
+  return stops.filter((stop) => distanceToWay(project, way, stop) <= radius);
+}
+
+// A ride that is still going counts once it went past this many stops after boarding.
+export const LIVE_MIN_STOPS = 2;
+
+// The line of a trip according to the timetables, or null. `live` is for a ride that is still
+// going: it has no alighting stop yet, so the furthest stop of the line it went past stands in for
+// it (at least LIVE_MIN_STOPS of them), and there is no arrival to check. Where the line came from
+// in the timetables rides along with the result as `timetable`, outside of what the API sends.
+export function matchGtfs(trip, profile = rideProfile(trip.fixes), { live = false } = {}) {
   const fixes = trip.fixes;
   const from = stopsNear(fixes[0].lat, fixes[0].lon);
-  const to = stopsNear(fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon);
-  if (!from.length || !to.length) return null;
+  const to = live ? [] : stopsNear(fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon);
+  if (!from.length || (!live && !to.length)) return null;
   const db = getDb();
   const shapeCache = new Map();
   const shapeFits = (feedId, shapeId) => {
@@ -318,25 +343,35 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
   };
 
   const candidates = [];
+  const marks = (ids) => ids.map(() => "?").join(",");
+  const columns = `t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, a.seq AS from_seq, a.departure,
+                   r.short_name, r.long_name, r.type, r.color, r.text_color, r.agency, r.timezone`;
   for (const feedId of new Set(from.map((s) => s.feed_id))) {
     const fromIds = from.filter((s) => s.feed_id === feedId).map((s) => s.id);
     const toIds = to.filter((s) => s.feed_id === feedId).map((s) => s.id);
-    if (!toIds.length) continue;
-    const marks = (ids) => ids.map(() => "?").join(",");
+    if (!live && !toIds.length) continue;
     // Every trip of the feed that calls at one of the boarding stops and later at one of the
     // alighting stops. Not the same stop twice: a loop line does not explain a ride that came back.
-    const rows = db
-      .prepare(
-        `SELECT t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, b.stop_id AS to_id, a.seq AS from_seq, b.seq AS to_seq,
-                a.departure, b.departure AS arrival,
-                r.short_name, r.long_name, r.type, r.color, r.text_color, r.agency, r.timezone
-         FROM transit_stop_times a
-         JOIN transit_stop_times b ON b.feed_id = a.feed_id AND b.trip_id = a.trip_id AND b.seq > a.seq AND b.stop_id <> a.stop_id
-         JOIN transit_trips t ON t.feed_id = a.feed_id AND t.id = a.trip_id
-         JOIN transit_routes r ON r.feed_id = t.feed_id AND r.id = t.route_id
-         WHERE a.feed_id = ? AND a.stop_id IN (${marks(fromIds)}) AND b.stop_id IN (${marks(toIds)})`
-      )
-      .all(feedId, ...fromIds, ...toIds);
+    // A ride still going: every trip that calls at a boarding stop, the way decides the rest.
+    const rows = live
+      ? db
+          .prepare(
+            `SELECT ${columns} FROM transit_stop_times a
+             JOIN transit_trips t ON t.feed_id = a.feed_id AND t.id = a.trip_id
+             JOIN transit_routes r ON r.feed_id = t.feed_id AND r.id = t.route_id
+             WHERE a.feed_id = ? AND a.stop_id IN (${marks(fromIds)})`
+          )
+          .all(feedId, ...fromIds)
+      : db
+          .prepare(
+            `SELECT ${columns}, b.stop_id AS to_id, b.seq AS to_seq, b.departure AS arrival
+             FROM transit_stop_times a
+             JOIN transit_stop_times b ON b.feed_id = a.feed_id AND b.trip_id = a.trip_id AND b.seq > a.seq AND b.stop_id <> a.stop_id
+             JOIN transit_trips t ON t.feed_id = a.feed_id AND t.id = a.trip_id
+             JOIN transit_routes r ON r.feed_id = t.feed_id AND r.id = t.route_id
+             WHERE a.feed_id = ? AND a.stop_id IN (${marks(fromIds)}) AND b.stop_id IN (${marks(toIds)})`
+          )
+          .all(feedId, ...fromIds, ...toIds);
     for (const row of rows) {
       const kind = kindOf(row.type);
       if (!fitsKind(kind, profile)) continue;
@@ -345,11 +380,17 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
       if (!delayFits(delay)) continue;
       // Nothing on the way says "train", so the timetable has to say it at both ends, with a
       // delay that stayed about the same.
-      if (kind in NO_HALT_MIN_KMH) {
+      if (!live && kind in NO_HALT_MIN_KMH) {
         const arrival = delayOf(row.arrival, observedIn(row.timezone, trip.end));
         if (!delayFits(arrival) || Math.abs(arrival - delay) > DELAY_DRIFT_S) continue;
       }
       if (!shapeFits(feedId, row.shape_id)) continue;
+      if (live) {
+        const passed = passedStops(fixes, stopsAfter(feedId, row.trip_id, row.from_seq), kind);
+        if (passed.length < LIVE_MIN_STOPS) continue;
+        const reached = passed[passed.length - 1];
+        Object.assign(row, { to_id: reached.id, to_seq: reached.seq, reached });
+      }
       candidates.push({ row, kind, feedId, score: delayScore(delay) });
     }
   }
@@ -359,7 +400,7 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
   if (!best) return null;
   const { row } = best;
   const fromStop = from.find((s) => s.feed_id === best.feedId && s.id === row.from_id);
-  const toStop = to.find((s) => s.feed_id === best.feedId && s.id === row.to_id);
+  const toStop = live ? row.reached : to.find((s) => s.feed_id === best.feedId && s.id === row.to_id);
   const transit = {
     kind: kindOf(row.type),
     line: row.short_name || row.long_name || row.route_id,
@@ -371,6 +412,10 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
     to: place(toStop),
     source: "gtfs",
   };
+  Object.defineProperty(transit, "timetable", {
+    value: { feedId: best.feedId, tripId: row.trip_id, fromSeq: Number(row.from_seq) },
+    enumerable: false,
+  });
   return withLinePath(transit, lineBetween(best.feedId, row.shape_id, fromStop, toStop));
 }
 
@@ -547,12 +592,12 @@ const SAME_SPOT_M = 10;
 // The fix around `at` closest to a stop, within NEAR_STOP_M, or -1. Of fixes equally close
 // (a wait at the stop), boarding takes the last one (the ride starts when the wait ends) and
 // alighting the first.
-function stopIndexAround(fixes, at, last) {
+function stopIndexAround(fixes, at, last, nearest = nearestStopM) {
   const from = Math.max(0, at - LOOK_AROUND);
   const to = Math.min(fixes.length - 1, at + LOOK_AROUND);
   let best = null;
   for (let i = from; i <= to; i++) {
-    const d = nearestStopM(fixes[i].lat, fixes[i].lon);
+    const d = nearest(fixes[i].lat, fixes[i].lon);
     if (d > NEAR_STOP_M) continue;
     if (!best || d < best.d - SAME_SPOT_M || (last && d <= best.d + SAME_SPOT_M)) best = { i, d: Math.min(d, best?.d ?? d) };
   }
@@ -581,6 +626,75 @@ export function splitAtStops(trip) {
   parts.push(tripSegment(fixes.slice(start, end + 1)));
   if (end < lastIndex) parts.push(tripSegment(fixes.slice(end)));
   return parts;
+}
+
+// ---- a ride that is still going ----
+
+// Asked about once it went this long faster than a walk.
+export const LIVE_MIN_RIDE_MS = 3 * 60_000;
+
+// The timetables only: OpenStreetMap is not asked on every check of a ride.
+function nearestGtfsStopM(lat, lon) {
+  const near = stopsNear(lat, lon)[0];
+  return near ? Math.min(near.distance, NEAR_STOP_M) : Infinity;
+}
+
+// The first fix from which the phone covered WINDOW_M faster than a walk, or -1. Unlike in a
+// finished trip, the first fix is a real one here: the last of the stay before.
+function firstFastLive(fixes, dist) {
+  for (let i = 0; i < fixes.length - 1; i++) {
+    let k = i + 1;
+    while (k < fixes.length - 1 && dist[k] - dist[i] < WINDOW_M) k++;
+    if (dist[k] - dist[i] >= WINDOW_M && speedOver(fixes, dist, i, k) >= RIDE_MS) return i;
+  }
+  return -1;
+}
+
+// The line of a ride in progress, from the fixes since the last stay: it was boarded where the
+// phone first went faster than a walk next to a stop. After LIVE_MIN_RIDE_MS from there, fast
+// enough for a vehicle and past LIVE_MIN_STOPS stops of a line, the timetables answer as for a
+// finished trip, without the arrival. { boardedAt, transit } or null.
+export function matchLive(fixes) {
+  if (fixes.length < 3) return null;
+  const dist = cumulativeM(fixes);
+  const fast = firstFastLive(fixes, dist);
+  if (fast < 0) return null;
+  const board = stopIndexAround(fixes, fast, true, nearestGtfsStopM);
+  if (board < 0) return null;
+  const ride = fixes.slice(board);
+  const start = ride[0].ts;
+  const end = ride[ride.length - 1].ts;
+  if (ride.length < 3 || end - start < LIVE_MIN_RIDE_MS) return null;
+  const profile = rideProfile(ride);
+  if (!mightBeRide(profile)) return null;
+  const transit = matchGtfs({ fixes: ride, start, end }, profile, { live: true });
+  return transit ? { boardedAt: start, transit } : null;
+}
+
+// The line a rider confirmed while riding, for the finished trip: what the timetables found when
+// it is that line, otherwise the asked line up to the last of its stops the trip went past.
+function confirmedTransit(answer, trip) {
+  const asked = answer.transit;
+  if (trip.transit && trip.transit.kind === asked.kind && trip.transit.line === asked.line) return trip.transit;
+  const timetable = answer.timetable;
+  if (!timetable || !trip.fixes?.length) return asked;
+  const passed = passedStops(trip.fixes, stopsAfter(timetable.feedId, timetable.tripId, timetable.fromSeq), asked.kind);
+  const to = passed.length ? place(passed[passed.length - 1]) : asked.to;
+  const shapeId = getDb().prepare("SELECT shape_id FROM transit_trips WHERE feed_id = ? AND id = ?").get(timetable.feedId, timetable.tripId)?.shape_id;
+  return withLinePath({ ...asked, to }, lineBetween(timetable.feedId, shapeId, asked.from, to));
+}
+
+// The boarding may be a fix before or after where the finished trip starts.
+const BOARDING_SLACK_MS = 2 * 60_000;
+
+// The trip a ride boarded at `at` became: the one that contains it and starts closest to it.
+function tripBoardedAt(trips, at) {
+  let best = null;
+  for (const trip of trips) {
+    if (trip.gap || at < trip.start - BOARDING_SLACK_MS || at > trip.end) continue;
+    if (!best || Math.abs(trip.start - at) < Math.abs(best.start - at)) best = trip;
+  }
+  return best;
 }
 
 // ---- stored results and corrections ----
@@ -697,6 +811,16 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
       if (!known) continue;
       trip.transit = matchOsm(trip);
       storeResult(userId, deviceId, trip, trip.transit, stamp);
+    }
+  }
+
+  // What the rider said while riding: "yes" gives the trip that line, "no" takes any line away
+  // and leaves the mode its speed gave it. A correction by hand still wins, below.
+  if (allTrips.length) {
+    const answers = rideAnswersBetween(userId, deviceId, allTrips[0].start - BOARDING_SLACK_MS, allTrips[allTrips.length - 1].end);
+    for (const answer of answers) {
+      const trip = tripBoardedAt(allTrips, answer.boardedAt);
+      if (trip) trip.transit = answer.answer === "yes" ? confirmedTransit(answer, trip) : null;
     }
   }
 

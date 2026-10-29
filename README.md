@@ -193,6 +193,8 @@ Germany is covered by the nationwide feed from [gtfs.de](https://gtfs.de) (data 
 
 A short wait at a stop leaves no visit, so the walk to the stop, the ride and the walk from it arrive as one trip. The server cuts such a trip where the phone speeds up next to a stop and where it slows down next to one, and the timeline shows the walks and the ride separately. With the data in place, a trip in the timeline that starts and ends at a stop (a station counts up to 200 m away, its platforms are long) is matched against the lines serving both stops in that order. A bus or tram ride has to halt every few hundred metres; a train, subway or ferry calls every few kilometres or not at all, so instead its departure and its arrival both have to be within ten minutes of the timetable and a train has to have averaged 25 km/h. The line's shape has to follow the fixes, and of several lines the one with a departure closest to the observed one wins. Such a trip comes back with `mode: "transit"` and a `transit` object (kind, line, headsign, colours, agency, the stops boarded and left, `source: "gtfs"`). Where no timetable covers a ride with bus-like halts but OpenStreetMap has route relations at both stops (asked through `PLACE_LOOKUP_URL`, cached like the place names), at least the line number comes back with `source: "osm"`. Results are stored per account, device and trip, and a correction sent with `PUT /api/trips/mode` wins over all of it. The battery profile of the app sends too few fixes for any of this.
 
+**Confirming a ride while riding.** The server also watches a ride while it is on. Per device it keeps the stored fixes since the last stay (at most 90 minutes) and looks at them at most every 30 seconds of the ride: when the phone first went faster than a walk next to a timetable stop, has been on its way for 3 minutes since, fast enough for a vehicle, and went past at least two further stops of a line, the timetables are asked as for a finished trip, without the arrival. A match is asked about once per ride: `{ "type": "rideQuestion", "rideId", "transit": { kind, line, headsign, color, from }, "at" }` (`at` is when the ride was boarded, in ms) to the rider's open sockets, and on Android phones with [push](#push-notifications) a data-only push with the same fields plus `"t": "rideQuestion"`, `transit` as a JSON string (FCM data are strings); the app builds the notification with Yes and No from it. `POST /api/rides/answer` (`{ "rideId", "answer": "yes" | "no" }`) answers `204`, `404` for an unknown ride or someone else's. In the timeline the trip that contains the boarding then gets that line on "yes" (up to the last of its stops the trip went past, when the timetables alone would not match it) and no line, its speed's mode, on "no". A correction with `PUT /api/trips/mode` still wins. Without an answer nothing changes. With `TRANSIT=off` nothing is asked; without push only the sockets are.
+
 **Licenses.** The catalog is published by MobilityData under [Apache 2.0](https://github.com/MobilityData/mobility-database-catalogs/blob/main/LICENSE). Every feed comes under its own license, listed in the catalog and shown in `GET /api/transit`. Many feeds, the gtfs.de one included, are **CC BY 4.0**: if you show the lines to others (a public dashboard, screenshots), name the source, e.g. "Timetable data: gtfs.de / DELFI e.V., CC BY 4.0". Some feeds in the catalog need a login or an API key; those are skipped.
 
 ## Smoother paths
@@ -231,7 +233,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 
 | Message | Answer |
 |:--|:--|
-| `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true }`, then a `dataResponse` |
+| `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true, "features": ["positionBatch", "find", "rideQuestion"] }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
 | `{ "type": "updatePosition", "latitude", "longitude", "battery"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }` |
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
@@ -257,6 +259,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "findPending" | "findStarted", "session", "peer", "expiresAt" }` | Your request is waiting, or both sides share positions now, for up to half an hour |
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
 | `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |
+| `{ "type": "rideQuestion", "rideId", "transit", "at" }` | The server thinks you are riding this line right now, answer with `POST /api/rides/answer`, see [Transit data](#transit-data) |
 | `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `battery` is `null` until the device reported one, and stays the last reading (with its `updatedAt`) while the device is offline |
 
 </details>
@@ -308,6 +311,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
 | `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). The admin may pass `userId` |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
+| `POST` | `/api/rides/answer` | ✓ | `{ rideId, answer: "yes" \| "no" }` answers a `rideQuestion`. `204`, `404` for an unknown ride or someone else's |
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
 | `PUT` | `/api/visits/dismissed` | ✓ | `{ deviceId, start, end, dismissed }` removes a stop that was none, a red light or a jam: its fixes count as on the way and the trips around it become one. `dismissed: false` brings it back. The timeline lists the day's dismissed stops in `dismissed` |
 | `GET` `POST` `PATCH` `DELETE` | `/api/users` | admin | List, create, edit and remove accounts |
