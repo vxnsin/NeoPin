@@ -64,7 +64,9 @@ import { addNotification, markRead, notificationsFor } from "./notifications.js"
 import { alertRecipients, alertSettings, observePresence, saveAlertSettings } from "./alerts.js";
 import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
-import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
+import { fcmEnabled, sendData, sendNotification, sendWakeUp } from "./fcm.js";
+import { RIDE_ANSWERS, answerRide } from "./rideAnswers.js";
+import { BUFFER_MS, createRideWatch } from "./rides.js";
 import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToken } from "./push.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
@@ -433,6 +435,27 @@ export function createApp({ gracefulShutdown = true } = {}) {
     broadcastDevices();
   }, config.statusSweepMs);
   sweep.unref?.();
+
+  const rideWatch = createRideWatch();
+  const rideSweep = setInterval(() => rideWatch.sweep(), BUFFER_MS);
+  rideSweep.unref?.();
+
+  // "Are you on bus 10 to Hauptbahnhof?" while the ride is on, once the timetables know the line:
+  // over the rider's open sockets, and to their Android phones as a data-only push, from which the
+  // app builds a notification with Yes and No. FCM data are strings, so `transit` is JSON there.
+  function askAboutRide(userId, deviceId, fix) {
+    if (!config.transit) return;
+    const question = rideWatch.observe(userId, deviceId, fix);
+    if (!question) return;
+    const { kind, line, headsign, color, from } = question.transit;
+    const message = { type: "rideQuestion", rideId: question.rideId, transit: { kind, line, headsign, color, from }, at: question.at };
+    for (const device of onlineDevices(userId)) send(device.socket, message);
+    if (!fcmEnabled()) return;
+    for (const target of pushTokensOf(userId)) {
+      if (target.platform !== "android") continue;
+      sendData(target, { ...message, t: "rideQuestion", transit: JSON.stringify(message.transit) }).catch(() => {});
+    }
+  }
 
   // Everybody gets the devices of the people they share a group with, so the payload differs
   // per account. Sent to every device and dashboard, at most twice a second.
@@ -1131,6 +1154,20 @@ export function createApp({ gracefulShutdown = true } = {}) {
         }
       );
 
+      // "Yes, I am on that bus" or "no": the answer to a rideQuestion, for the finished trip.
+      api.post(
+        "/rides/answer",
+        {
+          body: t.object({ rideId: t.string().min(1).max(64), answer: t.enum(RIDE_ANSWERS) }),
+          response: { 204: t.empty(), 400: t.problem(), 401: t.problem(), 404: t.problem() },
+        },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          if (!answerRide(user.id, ctx.body.rideId, ctx.body.answer)) throw problem(404, "unknown-ride", "No such ride");
+          return reply(204);
+        }
+      );
+
       // Groups decide who sees whom.
       const Member = User.extend({ role: t.enum(["owner", "member"]) });
       const Group = t.object({
@@ -1674,7 +1711,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           console.log(chalk.greenBright(`[+] Device ${label} connected.`));
         }
         // What this server understands beyond the basics, so newer apps know what they may send.
-        send(socket, { successful: true, features: ["positionBatch", "find"] });
+        send(socket, { successful: true, features: ["positionBatch", "find", "rideQuestion"] });
         if (finder.pendingFor(account).length > 0) replayFinds.add(`${account}:${deviceId}`);
         broadcastDevices();
       };
@@ -1697,9 +1734,11 @@ export function createApp({ gracefulShutdown = true } = {}) {
             reported(account, deviceId);
             if (msg.battery) updateBattery(account, deviceId, msg.battery.level, msg.battery.charging);
             const at = fixTime(msg.recordedAt);
-            recordPosition(account, deviceId, msg.latitude, msg.longitude, at, fixExtras(msg));
+            const stored = recordPosition(account, deviceId, msg.latitude, msg.longitude, at, fixExtras(msg));
             broadcastDevices();
             checkPresence(account, deviceId, { lat: msg.latitude, lon: msg.longitude, ts: at, accuracy: msg.accuracy ?? null });
+            // The ride watch sees what the timeline will see: the stored fixes.
+            if (stored) askAboutRide(account, deviceId, { ts: at, lat: msg.latitude, lon: msg.longitude });
             break;
           }
           case "positionBatch": {
@@ -1823,6 +1862,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
     stop() {
       clearTimeout(broadcastTimer);
       clearInterval(sweep);
+      clearInterval(rideSweep);
       broadcastTimer = null;
     },
   };

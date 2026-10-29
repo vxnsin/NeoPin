@@ -184,6 +184,21 @@ const SCHEMA = `
     mode TEXT NOT NULL,
     PRIMARY KEY (user_id, device_id, start)
   );
+  CREATE TABLE IF NOT EXISTS ride_answers (
+    ride_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    boarded_at INTEGER NOT NULL,
+    line TEXT NOT NULL,
+    transit TEXT NOT NULL,
+    feed_id INTEGER,
+    trip_id TEXT,
+    from_seq INTEGER,
+    asked_at INTEGER NOT NULL,
+    answer TEXT,
+    answered_at INTEGER,
+    UNIQUE (user_id, device_id, boarded_at)
+  );
   CREATE TABLE IF NOT EXISTS dismissed_visits (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id TEXT NOT NULL,
