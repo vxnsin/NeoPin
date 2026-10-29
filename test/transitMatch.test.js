@@ -10,7 +10,7 @@ import { distanceM, recordPosition } from "../src/history.js";
 import { refreshTransit, resetTransit } from "../src/transit.js";
 import { kindOf, localSeconds, looksLikeRide, meanShapeDistance, rideProfile, toOsmTransit } from "../src/transitMatch.js";
 import { deviceHeaders, startServer } from "./helpers.js";
-import { STOPS, fakeTransitHost, gtfsZip } from "./gtfsFixture.js";
+import { STOPS, fakeTransitHost, gtfsText, gtfsZip } from "./gtfsFixture.js";
 
 const MIN = 60_000;
 // 2025-06-10 in Berlin is UTC+2: a ride at 06:08 UTC leaves at 08:08 on the timetable.
@@ -142,7 +142,9 @@ afterEach(async () => {
 const record = (fixes) => fixes.forEach((f) => recordPosition(luis.user.id, "phone", f.lat, f.lon, Math.round(f.ts)));
 
 // Imports the test feed for the Würzburg region: a few fixes there today make it a region.
-async function withTimetables() {
+// `text` replaces the feed, for one without shapes.txt like the nationwide German feed.
+async function withTimetables(text) {
+  if (text) host.setFeed(gtfsZip({ text }));
   const now = Date.now();
   for (let i = 0; i < 8; i++) recordPosition(luis.user.id, "phone", 49.79 + i * 0.001, 9.93, now - (8 - i) * 10 * MIN);
   const result = await refreshTransit({ now, preferred: [] });
@@ -216,6 +218,33 @@ test("a ride along the line with halts at the stops is Bus 10", async () => {
   const again = await theTrip();
   assert.deepEqual(again.transit, BUS_10);
   assert.deepEqual(again.path, trip.path);
+});
+
+// The nationwide German feed (gtfs.de) has no shapes.txt: only the stops tell the line's way.
+function withoutShapes() {
+  const text = gtfsText();
+  delete text["shapes.txt"];
+  return text;
+}
+
+test("without line shapes, the ride along the stops with halts at them is still Bus 10", async () => {
+  await withTimetables(withoutShapes());
+  aTrip([A, B, C, D], 8, 30);
+  const trip = await theTrip();
+  assert.equal(trip.mode, "transit");
+  assert.equal(trip.transit.line, "10");
+  assert.notEqual(trip.pathSource, "line", "without a shape there is no line course to draw");
+});
+
+test("without line shapes, a drive from stop to stop on streets 300 m away, halting at lights there, is no bus", async () => {
+  await withTimetables(withoutShapes());
+  // The same start and end as bus 10 and tram 3, but it passes neither B nor C, and it halts
+  // at two red lights that are no stop of either line.
+  const east = (p) => ({ lat: p.lat, lon: p.lon + 0.0042 });
+  aTrip([A, east(B), east(C), D], 8, 30);
+  const trip = await theTrip();
+  assert.notEqual(trip.mode, "transit");
+  assert.equal(trip.transit, undefined);
 });
 
 test("a drive past the same stops without halts stays a drive", async () => {

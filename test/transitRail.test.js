@@ -69,7 +69,8 @@ const record = (fixes) => fixes.forEach((f) => recordPosition(luis.user.id, "pho
 
 // Waiting on the platform 150 m from the station's point, the ride to a platform 150 m before
 // the other station's point, then a stay there. `bow` bends the way off the line in the middle.
-function aRide({ startMinute = 6 * 60 + 20, minutes = 7, bow = 0 } = {}) {
+// `halts` stops the way that many times for 40 s at even spacing, the way a car halts at lights.
+function aRide({ startMinute = 6 * 60 + 20, minutes = 7, bow = 0, halts = 0 } = {}) {
   const length = distanceM(HBF.lat, HBF.lon, VEI.lat, VEI.lon);
   const from = 150 / length;
   const to = 1 - 150 / length;
@@ -80,10 +81,17 @@ function aRide({ startMinute = 6 * 60 + 20, minutes = 7, bow = 0 } = {}) {
     { ts: start - 20_000, ...board },
   ]);
   const steps = Math.round((minutes * 60) / 5);
+  const haltAt = Array.from({ length: halts }, (_, k) => Math.round((steps * (k + 1)) / (halts + 1)));
   const fixes = [];
+  let waited = 0;
   for (let i = 1; i <= steps; i++) {
     const f = i / steps;
-    fixes.push({ ts: start + i * 5000, ...between(from + (to - from) * f, bow * Math.sin(Math.PI * f)) });
+    const point = between(from + (to - from) * f, bow * Math.sin(Math.PI * f));
+    fixes.push({ ts: start + i * 5000 + waited, ...point });
+    if (haltAt.includes(i)) {
+      waited += 40_000;
+      fixes.push({ ts: start + i * 5000 + waited, ...point });
+    }
   }
   record(fixes);
   const end = fixes[fixes.length - 1];
@@ -121,6 +129,30 @@ test("a drive between the two stations at the train's time, on roads away from t
   aRide({ bow: 400 });
   const trip = await theTrip();
   assert.equal(trip.mode, "driving");
+  assert.equal(trip.transit, undefined);
+});
+
+test("a train twenty minutes late is still RB 53", async () => {
+  aRide({ startMinute: 6 * 60 + 40 });
+  const trip = await theTrip();
+  assert.equal(trip.mode, "transit");
+  assert.equal(trip.transit.line, "RB 53");
+});
+
+test("three quarters of an hour late it is no train", async () => {
+  aRide({ startMinute: 6 * 60 + 65 });
+  assert.notEqual((await theTrip()).mode, "transit");
+});
+
+test("ten minutes before the train it is no train", async () => {
+  aRide({ startMinute: 6 * 60 + 10 });
+  assert.notEqual((await theTrip()).mode, "transit");
+});
+
+test("a drive along the line at the train's time that halts at three lights is no train", async () => {
+  aRide({ halts: 3 });
+  const trip = await theTrip();
+  assert.notEqual(trip.mode, "transit");
   assert.equal(trip.transit, undefined);
 });
 
