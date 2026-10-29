@@ -11,6 +11,10 @@ export type User = {
   hiddenUntil?: number | null;
   // The device picked to stand for the account, null for automatic. Older logins have none stored.
   primaryDeviceId?: string | null;
+  // Only from GET /api/me on servers with tours: which first-login tours the account has seen.
+  tours?: { app: boolean; dashboard: boolean };
+  // Admin only: the server has not been set up in the dashboard yet.
+  setupNeeded?: boolean;
 };
 
 export type DeviceAuth = { serverIp: string; deviceId: string; token: string };
@@ -175,6 +179,18 @@ export async function pingDeviceRequest(auth: DeviceAuth, deviceId: string, user
 
 export async function fetchMe(auth: DeviceAuth): Promise<User> {
   return json(await request(`${httpBase(auth.serverIp)}/api/me`, { headers: deviceHeaders(auth) }));
+}
+
+// The tour was seen (done or skipped). False on servers without tours (404), the device keeps it then.
+export async function markTourSeen(auth: DeviceAuth, client: "app" | "dashboard"): Promise<boolean> {
+  const response = await request(`${httpBase(auth.serverIp)}/api/me/tours`, {
+    method: "POST",
+    headers: { ...deviceHeaders(auth), "Content-Type": "application/json" },
+    body: JSON.stringify({ client }),
+  });
+  if (response.status === 404) return false;
+  if (!response.ok) throw new ApiError(await problemText(response, defaultProblem(response.status)), response.status);
+  return true;
 }
 
 // Gone from everyone else's map for this many minutes, or until turned off (null).
@@ -433,8 +449,6 @@ export type Group = {
   ownerId: number;
   role: "owner" | "member";
   canManage: boolean;
-  // Holds everyone for good: no leaving, removing, inviting or deleting. Older servers leave it out.
-  fixed?: boolean;
   members: GroupMember[];
   // Only managers get these.
   pendingInvites?: { id: number; user: { id: number; username: string; displayName: string } }[];

@@ -16,6 +16,7 @@ import {
   Text,
   View,
   useWindowDimensions,
+  type HostInstance,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -91,9 +92,11 @@ import {
   type User,
 } from "@/lib/api";
 import { knownNotifications, notificationPerson, unreadCount, unreadIds } from "@/lib/notifications";
+import TourOverlay, { type TourRect } from "@/components/TourOverlay";
+import SetupBanner from "@/components/SetupBanner";
+import { accountKey, dashboardUrl, finishTour, loadLocalTour, showSetupBanner, tourMayOpen, tourSeen, tourSteps, type TourTarget } from "@/lib/tour";
 import {
   badgeText,
-  chipGroups,
   filterByGroup,
   loadGroupFilter,
   pendingCount,
@@ -168,13 +171,18 @@ export default function MapScreen() {
     if (waiting) setPendingRide(waiting);
     return onRide(queue);
   }, []);
+  // The first-login tour: wanted once the server's account says it was not seen yet, open while
+  // nothing else is in front of the map. A ride question waits for it like for a sheet.
+  const [tourWanted, setTourWanted] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [setupDismissed, setSetupDismissed] = useState(false);
   useEffect(() => {
-    if (sheet !== null || !pendingRide) return;
+    if (sheet !== null || tourOpen || !pendingRide) return;
     setPendingRide(null);
     if (isStaleRide(pendingRide, Date.now())) return;
     setRide(pendingRide);
     setSheet("ride");
-  }, [sheet, pendingRide]);
+  }, [sheet, tourOpen, pendingRide]);
   // Another sheet that takes over from an unanswered question (a find request) hands it back to wait;
   // a question swiped away is gone.
   const previousSheet = useRef<Sheet>(null);
@@ -261,9 +269,11 @@ export default function MapScreen() {
       // The picture or name may have changed on the dashboard.
       if (stored) {
         fetchMe(stored)
-          .then((fresh) => {
+          .then(async (fresh) => {
             setCreds((current) => (current ? { ...current, user: fresh } : current));
             updateStoredUser(fresh).catch(() => {});
+            // Only the server's fresh answer knows the tours; offline it waits for the next start.
+            if (!tourSeen(fresh, await loadLocalTour(), accountKey(stored, fresh.id))) setTourWanted(true);
           })
           .catch(() => {});
       }
@@ -487,6 +497,13 @@ export default function MapScreen() {
       if (state === "active") {
         loadGroups();
         loadNotifications();
+        // Back from the dashboard in the browser: the setup may be done now.
+        const auth = credsRef.current;
+        if (auth?.user.setupNeeded) {
+          fetchMe(auth)
+            .then((fresh) => setCreds((current) => (current ? { ...current, user: fresh } : current)))
+            .catch(() => {});
+        }
       }
     });
     return () => subscription.remove();
@@ -646,6 +663,48 @@ export default function MapScreen() {
   const showLoader = !webViewLoaded || !minLoadingTimeFinished;
   const [startGone, setStartGone] = useState(false);
   const hideStart = useCallback(() => setStartGone(true), []);
+
+  // A moment after the map is free, so the tour does not jump in with the start screen or right
+  // after a sheet closed. Anything that comes in front meanwhile puts it off again.
+  const tourFree = tourMayOpen({ mapReady: startGone, sheetOpen: sheet !== null, cropOpen: cropPhoto !== null, timelineOpen });
+  useEffect(() => {
+    if (!tourWanted || !tourFree) return;
+    const timer = setTimeout(() => {
+      setTourWanted(false);
+      setTourOpen(true);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [tourWanted, tourFree]);
+
+  // Done or skipped both count as seen, so it comes once.
+  const endTour = useCallback(() => {
+    setTourOpen(false);
+    const auth = credsRef.current;
+    if (auth) finishTour(auth, auth.user.id).catch(() => {});
+  }, []);
+  const isAdmin = creds?.user.isAdmin === true;
+  const steps = useMemo(() => tourSteps(isAdmin), [isAdmin]);
+
+  // What the steps point at, measured against this screen, which the overlay covers.
+  const rootRef = useRef<HostInstance>(null);
+  const barRef = useRef<HostInstance>(null);
+  const timelineButtonRef = useRef<HostInstance>(null);
+  const settingsButtonRef = useRef<HostInstance>(null);
+  const measureTarget = useCallback(
+    (target: TourTarget) =>
+      new Promise<TourRect | null>((resolve) => {
+        const node = target === "people" ? barRef.current : target === "timeline" ? timelineButtonRef.current : target === "settings" ? settingsButtonRef.current : null;
+        const root = rootRef.current;
+        if (!node || !root) return resolve(null);
+        root.measureInWindow((rootX, rootY) =>
+          node.measureInWindow((x, y, width, height) =>
+            // The bar has its own corners, the buttons are round.
+            resolve(width > 0 ? { x: x - rootX, y: y - rootY, width, height, radius: target === "people" ? 22 : height / 2 } : null)
+          )
+        );
+      }),
+    []
+  );
 
   const refresh = () => emit({ type: "pingDevices" });
 
@@ -950,7 +1009,7 @@ export default function MapScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: c.surface }]}>
+    <View ref={rootRef} style={[styles.container, { backgroundColor: c.surface }]}>
       {startGone ? null : <StartScreen ready={!showLoader} onHidden={hideStart} />}
 
       <WebView
@@ -974,6 +1033,7 @@ export default function MapScreen() {
       {/* The device bar, like the one at the bottom of Apple's Find My. */}
       {!timelineOpen && (
       <Pressable
+        ref={barRef}
         style={[styles.bar, { bottom: insets.bottom + 12, backgroundColor: c.raised }]}
         onPress={() => setSheet("devices")}
         accessibilityLabel={`People, ${summary}`}
@@ -993,6 +1053,7 @@ export default function MapScreen() {
           ))}
         </View>
         <Pressable
+          ref={timelineButtonRef}
           style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setTimelineOpen(true)}
           hitSlop={6}
@@ -1001,6 +1062,7 @@ export default function MapScreen() {
           <MaterialIcons name="timeline" size={20} color={c.primary} />
         </Pressable>
         <Pressable
+          ref={settingsButtonRef}
           style={[styles.gear, { backgroundColor: c.subtle }]}
           onPress={() => setSheet("settings")}
           hitSlop={6}
@@ -1023,6 +1085,19 @@ export default function MapScreen() {
           onHeightChange={setPanelRest}
           mapTap={mapTap}
           onClose={() => setTimelineOpen(false)}
+        />
+      )}
+
+      {startGone && creds && !tourOpen && showSetupBanner(creds.user, setupDismissed) && (
+        <SetupBanner top={insets.top + 10} dashboard={dashboardUrl(creds.serverIp)} onDismiss={() => setSetupDismissed(true)} />
+      )}
+
+      {tourOpen && creds && (
+        <TourOverlay
+          steps={steps}
+          measure={measureTarget}
+          dashboard={dashboardUrl(creds.serverIp)}
+          onFinish={endTour}
         />
       )}
 
@@ -1103,7 +1178,7 @@ export default function MapScreen() {
             <>
               {showGroupChips(groups) && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chips}>
-                  {[{ id: null as number | null, name: "All" }, ...chipGroups(groups)].map((group) => {
+                  {[{ id: null as number | null, name: "All" }, ...groups].map((group) => {
                     const active = group.id === groupFilter;
                     return (
                       <Pressable
