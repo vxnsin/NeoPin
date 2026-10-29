@@ -113,12 +113,19 @@ export function savePlaceAt(userId, { lat, lon, name, kind = "place", radiusM, o
   return getPlace(userId, Number(result.lastInsertRowid));
 }
 
+// A place that grew or shrank: inside and outside of the arrival alerts start over, the old
+// edge would turn the next fix into an arrival or a departure that never happened.
+function forgetPresence(placeId) {
+  getDb().prepare("DELETE FROM place_presence WHERE place_id = ?").run(placeId);
+}
+
 export function updatePlace(userId, id, { name, kind, radiusM }) {
   const place = getPlace(userId, id);
   if (!place) return null;
   getDb()
     .prepare("UPDATE places SET name = ?, kind = ?, radius_m = ? WHERE id = ?")
     .run(name ?? place.name, kind ?? place.kind, radiusM ?? place.radiusM, id);
+  if ((radiusM ?? place.radiusM) !== place.radiusM) forgetPresence(id);
   return getPlace(userId, id);
 }
 
@@ -131,12 +138,16 @@ export function claimSpot(userId, id, lat, lon) {
   const db = getDb();
   const d = distanceM(lat, lon, place.lat, place.lon);
   const reach = Math.min(MAX_RADIUS_M, Math.ceil(d + CLAIM_MARGIN_M));
-  if (reach > place.radiusM) db.prepare("UPDATE places SET radius_m = ? WHERE id = ?").run(reach, id);
+  if (reach > place.radiusM) {
+    db.prepare("UPDATE places SET radius_m = ? WHERE id = ?").run(reach, id);
+    forgetPresence(id);
+  }
   for (const other of listPlaces(userId)) {
     if (other.id === id) continue;
     const od = distanceM(lat, lon, other.lat, other.lon);
     if (od <= other.radiusM && od < d) {
       db.prepare("UPDATE places SET radius_m = ? WHERE id = ?").run(Math.max(MIN_RADIUS_M, Math.floor(od) - 1), other.id);
+      forgetPresence(other.id);
     }
   }
   return getPlace(userId, id);

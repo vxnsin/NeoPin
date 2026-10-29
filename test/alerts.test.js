@@ -1,7 +1,8 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createGroup, removeMember } from "../src/groups.js";
-import { savePlaceAt } from "../src/places.js";
+import { getDb } from "../src/db.js";
+import { savePlaceAt, updatePlace } from "../src/places.js";
 import { setPushToken } from "../src/push.js";
 import { sentCount, startFakeFcm } from "./fakeFcm.js";
 import { shareGroup, startServer } from "./helpers.js";
@@ -211,4 +212,48 @@ test("a removed place stops counting", async () => {
   const phone = await s.device("luis", "phone");
   await report(phone, [[AWAY, 0], [AWAY, 1], [HOME, 10], [HOME, 12]]);
   assert.deepEqual(await notifications(anna), []);
+});
+
+test("a place switched on again, or one that grew or shrank, first learns where the device is", async () => {
+  const luis = await s.account("luis");
+  const anna = await s.account("anna");
+  shareGroup("Family", luis.user, anna.user);
+  const home = homeOf(luis);
+  const to = (places) => call("PUT", "/api/alerts", { places, recipients: { users: [anna.user.id], groups: [] } }, luis);
+  await to([home.id]);
+  const phone = await s.device("luis", "phone");
+  await report(phone, [[HOME, 0], [HOME, 3]]);
+
+  // Home off, out for a walk, home on again while still out: that walk is no news.
+  await to([]);
+  await report(phone, [[AWAY, 10], [AWAY, 14]]);
+  await to([home.id]);
+  await report(phone, [[AWAY, 60], [AWAY, 65]]);
+  assert.deepEqual(await notifications(anna), []);
+  await report(phone, [[HOME, 80], [HOME, 83]]);
+  assert.deepEqual((await notifications(anna)).map((n) => n.type), ["arrived"]);
+
+  // 150 m from the middle: inside a 200 m home, outside once it shrinks to 60 m.
+  const near = { lat: HOME.lat + 150 / 111_195, lon: HOME.lon };
+  updatePlace(luis.user.id, home.id, { radiusM: 200 });
+  await report(phone, [[near, 100], [near, 103]]);
+  updatePlace(luis.user.id, home.id, { radiusM: 60 });
+  await report(phone, [[near, 110], [near, 115]]);
+  assert.deepEqual((await notifications(anna)).map((n) => n.type), ["arrived"], "no departure from a smaller home");
+});
+
+test("fixes taken while invisible send nothing, even when they come in after", async () => {
+  const luis = await s.account("luis");
+  const anna = await s.account("anna");
+  shareGroup("Family", luis.user, anna.user);
+  const home = homeOf(luis);
+  await call("PUT", "/api/alerts", { places: [home.id], recipients: { users: [anna.user.id], groups: [] } }, luis);
+  const phone = await s.device("luis", "phone");
+  await report(phone, [[AWAY, 0], [AWAY, 1]]);
+  // Invisible from minute 10 to 20, visible again now: the phone sends what it saw back then.
+  getDb().prepare("INSERT INTO hidden_spans (user_id, start, end_ms) VALUES (?, ?, ?)").run(luis.user.id, t0 + 10 * MIN, t0 + 20 * MIN);
+  await report(phone, [[HOME, 12], [HOME, 15]]);
+  assert.deepEqual(await notifications(anna), []);
+  await report(phone, [[AWAY, 40], [AWAY, 44]]);
+  assert.deepEqual((await notifications(anna)).map((n) => n.type), ["left"]);
 });

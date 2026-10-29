@@ -1,6 +1,7 @@
 import { getDb } from "./db.js";
-import { getUser, linkedDevices, listUsers, publicUser } from "./accounts.js";
+import { getUser, hiddenSpans, linkedDevices, listUsers, publicUser, spansKeptSince } from "./accounts.js";
 import { isMember, sharedGroupIds, visibleUserIds } from "./groups.js";
+import { GAP_MS } from "./timeline.js";
 
 // Who may read whose timeline. Nobody shares by default. A person can share with everyone they
 // share a group with, or with chosen people and groups. Everybody reads their own, and the admin
@@ -21,6 +22,22 @@ export function withoutSpans(items, spans) {
     const to = item.ts ?? item.end;
     return !spans.some((s) => from < s.end && to >= s.start);
   });
+}
+
+// What others reading the person's timeline do not get between `from` and `to`: the spans of
+// hiding, and everything from before the server kept them (see spansKeptSince).
+export function hiddenFromOthers(userId, from, to) {
+  const since = spansKeptSince();
+  const spans = hiddenSpans(userId, from, to);
+  return since > from ? [{ start: 0, end: since }, ...spans] : spans;
+}
+
+// The trips that border on such a span: without the fixes in it they start or end elsewhere, or
+// run across it. What the server stored about the owner's trips (paths, lines) came from all
+// fixes, so these get none of it, and nothing about them is stored.
+export function bordersOnSpans(spans) {
+  if (!spans.length) return () => false;
+  return (trip) => spans.some((s) => trip.start < s.end + GAP_MS && trip.end > s.start - GAP_MS);
 }
 
 export function timelineSharing(userId) {

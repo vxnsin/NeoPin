@@ -24,8 +24,8 @@ import {
   userForToken,
   verifyLogin,
   HIDDEN_FOREVER,
-  hiddenSpans,
   hiddenUntilOf,
+  spansKeptSince,
   isHidden,
   setHiddenUntil,
 } from "./accounts.js";
@@ -72,7 +72,16 @@ import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToke
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
-import { SHARING_MODES, canSeeTimeline, saveTimelineSharing, timelinePeople, timelineSharing, withoutSpans } from "./sharing.js";
+import {
+  SHARING_MODES,
+  bordersOnSpans,
+  canSeeTimeline,
+  hiddenFromOthers,
+  saveTimelineSharing,
+  timelinePeople,
+  timelineSharing,
+  withoutSpans,
+} from "./sharing.js";
 import { transitStatus } from "./transit.js";
 import { TRANSIT_KINDS, TRIP_MODES, matchTransit, setTripMode } from "./transitMatch.js";
 import { smoothPaths } from "./paths.js";
@@ -443,18 +452,25 @@ export function createApp({ gracefulShutdown = true } = {}) {
   rideSweep.unref?.();
 
   // "Are you on bus 10 to Hauptbahnhof?" while the ride is on, once the timetables know the line:
-  // over the rider's open sockets, and to their Android phones as a data-only push, from which the
-  // app builds a notification with Yes and No. FCM data are strings, so `transit` is JSON there.
+  // to the device on that ride only (the tablet at home was not on the bus), over its socket and,
+  // on Android, as a data-only push, from which the app builds a notification with Yes and No.
+  // FCM data are strings, so `transit` is JSON there.
   function askAboutRide(userId, deviceId, fix) {
     if (!config.transit) return;
     const question = rideWatch.observe(userId, deviceId, fix);
     if (!question) return;
-    const { kind, line, headsign, color, from } = question.transit;
-    const message = { type: "rideQuestion", rideId: question.rideId, transit: { kind, line, headsign, color, from }, at: question.at };
-    for (const device of onlineDevices(userId)) send(device.socket, message);
+    const { kind, line, headsign, color, textColor, from } = question.transit;
+    const message = {
+      type: "rideQuestion",
+      rideId: question.rideId,
+      transit: { kind, line, headsign, color, textColor, from },
+      at: question.at,
+    };
+    const socket = getDevice(userId, deviceId)?.socket;
+    if (socket) send(socket, message);
     if (!fcmEnabled()) return;
-    for (const target of pushTokensOf(userId)) {
-      if (target.platform !== "android") continue;
+    const target = pushTokenOf(userId, deviceId);
+    if (target?.platform === "android") {
       sendData(target, { ...message, t: "rideQuestion", transit: JSON.stringify(message.transit) }).catch(() => {});
     }
   }
@@ -1438,15 +1454,18 @@ export function createApp({ gracefulShutdown = true } = {}) {
           const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           // The fixes and dismissed stops from while the owner was invisible are not for others.
-          const spans = full ? [] : hiddenSpans(userId, range.from, range.to);
+          const spans = full ? [] : hiddenFromOthers(userId, range.from, range.to);
           const points = withoutSpans(positionsBetween(userId, ctx.query.deviceId, range.from, range.to), spans);
-          const dismissed = withoutSpans(dismissedVisits(userId, ctx.query.deviceId, range.from, range.to), spans);
-          const timeline = buildTimeline(points, { dismissed });
+          // All dismissed stops still shape the stays; the answer leaves out those of the spans.
+          const allDismissed = dismissedVisits(userId, ctx.query.deviceId, range.from, range.to);
+          const dismissed = withoutSpans(allDismissed, spans);
+          const timeline = buildTimeline(points, { dismissed: allDismissed });
+          const withheld = bordersOnSpans(spans);
           // The paths need the final mode of every trip, corrections included, so they come after the lines.
           const [places, paths] = await Promise.all([
             namePlaces(userId, timeline.segments, { tzOffsetMin: ctx.query.tz ?? 0 }),
-            matchTransit(userId, ctx.query.deviceId, timeline.segments).then(() =>
-              smoothPaths(userId, ctx.query.deviceId, timeline.segments)
+            matchTransit(userId, ctx.query.deviceId, timeline.segments, { withheld }).then(() =>
+              smoothPaths(userId, ctx.query.deviceId, timeline.segments, { withheld })
             ),
           ]);
           return {
@@ -1511,7 +1530,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         },
         (ctx) => {
           const { ownerId, full } = timelineReader(ctx, ctx.query.userId);
-          return daysWithData(ownerId, ctx.query.deviceId, ctx.query.tz ?? 0, { exceptHidden: !full });
+          return daysWithData(ownerId, ctx.query.deviceId, ctx.query.tz ?? 0, { exceptHidden: !full, since: spansKeptSince() });
         }
       );
 
@@ -1804,7 +1823,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
             if (role !== "device") return;
             // Only the history: these fixes are older than what the map already shows.
             const points = [...msg.points].sort((a, b) => fixTime(a.recordedAt) - fixTime(b.recordedAt));
-            for (const p of points) recordPosition(account, deviceId, p.latitude, p.longitude, fixTime(p.recordedAt), fixExtras(p));
+            for (const p of points) {
+              const ts = fixTime(p.recordedAt);
+              // The ride watch takes them in order and skips what is older than it knows.
+              if (recordPosition(account, deviceId, p.latitude, p.longitude, ts, fixExtras(p))) {
+                askAboutRide(account, deviceId, { ts, lat: p.latitude, lon: p.longitude });
+              }
+            }
             // Where the phone was last tells whether it came or went while it had no connection.
             const newest = points.at(-1);
             if (newest) {

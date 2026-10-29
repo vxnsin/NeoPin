@@ -1,5 +1,5 @@
 import { getDb } from "./db.js";
-import { getUser, isHidden } from "./accounts.js";
+import { getUser, hiddenAt, isHidden } from "./accounts.js";
 import { isMember, membersOf, sharedGroupIds } from "./groups.js";
 import { MAX_ACCURACY_M, distanceM } from "./history.js";
 import { listPlaces } from "./places.js";
@@ -68,6 +68,9 @@ export function saveAlertSettings(userId, { places, recipients }) {
     for (const id of userIds) user.run(userId, id);
     const group = db.prepare("INSERT INTO alert_groups (user_id, group_id) VALUES (?, ?)");
     for (const id of groupIds) group.run(userId, id);
+    // What a device knew about a place that no longer counts goes stale: switched on again, it
+    // has to learn where the device is first, or a walk long ago would come out as news.
+    db.prepare("DELETE FROM place_presence WHERE user_id = ? AND place_id NOT IN (SELECT place_id FROM alert_places WHERE user_id = ?)").run(userId, userId);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -98,7 +101,8 @@ export function observePresence(userId, deviceId, { lat, lon, ts, accuracy = nul
   const chosen = new Set(alertSettings(userId).places);
   if (chosen.size === 0) return [];
   const db = getDb();
-  const hidden = isHidden(getUser(userId));
+  // Hidden when the fix was taken (a batch from back then comes later), or hidden now.
+  const hidden = isHidden(getUser(userId)) || hiddenAt(userId, ts);
   const alerts = [];
   for (const place of listPlaces(userId).filter((p) => chosen.has(p.id))) {
     const row = db

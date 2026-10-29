@@ -227,6 +227,10 @@ const SCHEMA = `
     end_ms INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS hidden_spans_user ON hidden_spans(user_id, start);
+  CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS invite_codes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT NOT NULL UNIQUE,
@@ -303,6 +307,12 @@ export function initDb(file = config.dbPath) {
   if (!hadSpans && hasHidden) {
     const now = Date.now();
     db.prepare("INSERT INTO hidden_spans (user_id, start, end_ms) SELECT id, ?, hidden_until FROM users WHERE hidden_until > ?").run(now, now);
+  }
+  // Nobody knows who was invisible before the spans were kept, so whatever was recorded until then
+  // stays with the owner and the admin. A database without any fixes yet has nothing to hide.
+  if (!db.prepare("SELECT 1 FROM meta WHERE key = 'hidden_spans_since'").get()) {
+    const recorded = !!db.prepare("SELECT 1 FROM positions LIMIT 1").get();
+    db.prepare("INSERT INTO meta (key, value) VALUES ('hidden_spans_since', ?)").run(String(recorded ? Date.now() : 0));
   }
   // A fixed group holds every account: nobody leaves it, nobody is removed, it is not deleted.
   const hadFixed = db.prepare("PRAGMA table_info(user_groups)").all().some((c) => c.name === "fixed");

@@ -305,13 +305,15 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes), { live = fals
   const to = live ? [] : stopsNear(fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon);
   if (!from.length || (!live && !to.length)) return null;
   const db = getDb();
+  // A long ride still going is checked again and again: its shape fit looks at a sample only.
+  const shapeFixes = live ? sampled(fixes, LIVE_SHAPE_FIXES) : fixes;
   const shapeCache = new Map();
   const shapeFits = (feedId, shapeId) => {
     if (!shapeId) return true;
     const key = `${feedId}:${shapeId}`;
     if (!shapeCache.has(key)) {
       const shape = db.prepare("SELECT lat, lon FROM transit_shapes WHERE feed_id = ? AND id = ? ORDER BY seq").all(feedId, shapeId);
-      shapeCache.set(key, shape.length < 2 || meanShapeDistance(fixes, shape) <= MAX_SHAPE_DISTANCE_M);
+      shapeCache.set(key, shape.length < 2 || meanShapeDistance(shapeFixes, shape) <= MAX_SHAPE_DISTANCE_M);
     }
     return shapeCache.get(key);
   };
@@ -650,11 +652,19 @@ function firstFastLive(fixes, dist) {
   return -1;
 }
 
-// The line of a ride in progress, from the fixes since the last stay: it was boarded where the
-// phone first went faster than a walk next to a stop. After LIVE_MIN_RIDE_MS from there, fast
-// enough for a vehicle and past LIVE_MIN_STOPS stops of a line, the timetables answer as for a
-// finished trip, without the arrival. { boardedAt, transit } or null.
-export function matchLive(fixes) {
+// At most this many fixes of a ride in progress go into the shape fit, evenly spread.
+export const LIVE_SHAPE_FIXES = 120;
+
+function sampled(fixes, max) {
+  if (fixes.length <= max) return fixes;
+  const step = (fixes.length - 1) / (max - 1);
+  return Array.from({ length: max }, (_, i) => fixes[Math.round(i * step)]);
+}
+
+// A ride in progress, from the fixes since the last stay: boarded where the phone first went
+// faster than a walk next to a stop, at least LIVE_MIN_RIDE_MS ago, and fast enough for a
+// vehicle. { ride, profile } with the fixes from boarding on, or null. Asks no timetable.
+export function liveRide(fixes) {
   if (fixes.length < 3) return null;
   const dist = cumulativeM(fixes);
   const fast = firstFastLive(fixes, dist);
@@ -666,8 +676,16 @@ export function matchLive(fixes) {
   const end = ride[ride.length - 1].ts;
   if (ride.length < 3 || end - start < LIVE_MIN_RIDE_MS) return null;
   const profile = rideProfile(ride);
-  if (!mightBeRide(profile)) return null;
-  const transit = matchGtfs({ fixes: ride, start, end }, profile, { live: true });
+  return mightBeRide(profile) ? { ride, profile } : null;
+}
+
+// The line of a ride in progress: past LIVE_MIN_STOPS stops of a line, the timetables answer as
+// for a finished trip, without the arrival. { boardedAt, transit } or null.
+export function matchLive(fixes, found = liveRide(fixes)) {
+  if (!found) return null;
+  const { ride, profile } = found;
+  const start = ride[0].ts;
+  const transit = matchGtfs({ fixes: ride, start, end: ride[ride.length - 1].ts }, profile, { live: true });
   return transit ? { boardedAt: start, transit } : null;
 }
 
@@ -747,8 +765,10 @@ function corrections(userId, deviceId, from, to) {
 
 // Gives the trips of a timeline their line. Stored results come first, then the timetables,
 // then OpenStreetMap; lookups that are not cached yet get up to waitMs, the rest is there on
-// the next load. A correction wins over everything.
-export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 } = {}) {
+// the next load. A correction wins over everything. `withheld` names trips of a shared timeline
+// that border on a stretch the owner was invisible: they get no line, and the stored results
+// (made from all of the owner's fixes) are neither read nor written for them.
+export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000, withheld = () => false } = {}) {
   if (config.transit) {
     // Rides that began or ended on foot are cut at the stops first, in place. A corrected trip
     // stays as the person saw it when they corrected it: cut later, the correction would stay
@@ -757,7 +777,7 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
     const pinned = tripsBefore.length ? corrections(userId, deviceId, tripsBefore[0].start, tripsBefore[tripsBefore.length - 1].start) : new Map();
     for (let i = 0; i < segments.length; i++) {
       const segment = segments[i];
-      if (segment.type !== "trip" || segment.gap || !segment.fixes || pinned.has(segment.start)) continue;
+      if (segment.type !== "trip" || segment.gap || !segment.fixes || pinned.has(segment.start) || withheld(segment)) continue;
       const parts = splitAtStops(segment);
       if (parts.length !== 1 || parts[0] !== segment) segments.splice(i, 1, ...parts);
       i += parts.length - 1;
@@ -770,6 +790,10 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
   if (config.transit) {
     const stamp = dataStamp();
     for (const trip of trips) {
+      if (withheld(trip)) {
+        trip.transit = null;
+        continue;
+      }
       const stored = storedResult(userId, deviceId, trip, stamp);
       if (stored !== undefined) {
         trip.transit = stored;
@@ -820,7 +844,7 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
     const answers = rideAnswersBetween(userId, deviceId, allTrips[0].start - BOARDING_SLACK_MS, allTrips[allTrips.length - 1].end);
     for (const answer of answers) {
       const trip = tripBoardedAt(allTrips, answer.boardedAt);
-      if (trip) trip.transit = answer.answer === "yes" ? confirmedTransit(answer, trip) : null;
+      if (trip && !withheld(trip)) trip.transit = answer.answer === "yes" ? confirmedTransit(answer, trip) : null;
     }
   }
 

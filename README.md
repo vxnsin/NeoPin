@@ -215,7 +215,7 @@ A timeline is private until its owner shares it. `PUT /api/timeline/sharing` tak
 
 `GET /api/timeline/people` lists whose timelines you may read, yourself first, with their linked devices, and `GET /api/timeline` / `/api/timeline/days` take their `userId`; anything else answers `403`. A shared timeline is for reading: naming places, correcting trips and dismissing stops stay with the owner and the admin.
 
-The server keeps every stretch of being invisible, from switching it on until it runs out or is switched off. Fixes inside those stretches, and stops dismissed there, are left out of a timeline read by anyone but the owner and the admin, and a day spent invisible does not appear in their `days`.
+The server keeps every stretch of being invisible, from switching it on until it runs out or is switched off. Fixes inside those stretches, and stops dismissed there, are left out of a timeline read by anyone but the owner and the admin, and a day spent invisible does not appear in their `days`. Trips next to such a stretch show their own fixes only, no road path or line. Nobody knows who was invisible before the server kept these stretches, so for others a shared timeline starts at the update that began keeping them (a new server shows everything).
 
 ## Console
 
