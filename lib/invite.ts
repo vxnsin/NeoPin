@@ -1,6 +1,6 @@
 import { DISPLAY_NAME_MAX, usernameProblem } from "@/lib/profile";
 import { PASSWORD_MIN } from "@/lib/password";
-import type { InviteCode } from "@/lib/api";
+import { httpBase, type InviteCode } from "@/lib/api";
 
 export const CODE_LENGTH = 10;
 export const INVITE_SCHEME = "neopin://invite";
@@ -20,12 +20,20 @@ export function formatCode(input: string): string {
   return code.length > 5 ? `${code.slice(0, 5)}-${code.slice(5)}` : code;
 }
 
-export function inviteLink(code: string): string {
-  return `${INVITE_SCHEME}?code=${encodeURIComponent(formatCode(code))}`;
+// The server's invite page: a link every messenger makes clickable, which opens the app with
+// the code and the server, or the sign-up in the browser.
+export function inviteLink(code: string, serverIp: string): string {
+  return `${httpBase(serverIp)}/invite/${encodeURIComponent(formatCode(code))}`;
 }
 
-export function shareText(code: string): string {
-  return `Join me on NeoPin with this invite code: ${formatCode(code)}\n${inviteLink(code)}`;
+export function shareText(code: string, serverIp: string): string {
+  return `Join me on NeoPin with this invite code: ${formatCode(code)}\n${inviteLink(code, serverIp)}`;
+}
+
+// The server a neopin://invite link came with, as the address field takes it, or "" without one.
+export function serverFromLink(value: string | string[] | null | undefined): string {
+  const server = (Array.isArray(value) ? value[0] : value ?? "").trim();
+  return /^(https?|wss?):\/\/[^\s/]+/i.test(server) ? server.replace(/\/+$/, "") : "";
 }
 
 // The code of a neopin://invite?code=... link, or null when the link is something else.
