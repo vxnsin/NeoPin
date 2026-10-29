@@ -32,28 +32,89 @@ function dropJumps(points) {
   return out;
 }
 
+const median = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
 // Slower than this between two fixes is standing still: a red light, a jam, a level crossing.
 const STILL_MS = 0.5;
+// A standing phone stores hardly a fix, so a halt shows as one slow leg (20 m in half a minute)
+// between fast ones. Slower than this share of the trip's usual leg speed counts as standing too.
+const STILL_SHARE = 0.3;
+
+// m/s of each leg between two fixes, null where no time passed.
+function legSpeeds(points) {
+  const speeds = [];
+  for (let i = 1; i < points.length; i++) {
+    const dt = points[i].ts - points[i - 1].ts;
+    speeds.push(dt > 0 ? distanceM(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon) / (dt / 1000) : null);
+  }
+  return speeds;
+}
+
+// The speed below which a leg of this trip is standing rather than going.
+function stillBelow(speeds) {
+  const known = speeds.filter((s) => s !== null);
+  return known.length ? Math.max(STILL_MS, median(known) * STILL_SHARE) : STILL_MS;
+}
 
 // The time spent actually moving. Waiting at a light would drag the average of a drive down to a
 // walk, most of all once a dismissed stop folds its minutes into the trip. Without any leg fast
 // enough (two fixes only, or a crawl), the whole duration counts.
 function movingMsOf(points) {
+  const speeds = legSpeeds(points);
+  const still = stillBelow(speeds);
   let moving = 0;
-  for (let i = 1; i < points.length; i++) {
-    const dt = points[i].ts - points[i - 1].ts;
-    if (dt <= 0) continue;
-    const metres = distanceM(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
-    if (metres / (dt / 1000) >= STILL_MS) moving += dt;
-  }
+  speeds.forEach((s, i) => {
+    if (s !== null && s >= still) moving += points[i + 1].ts - points[i].ts;
+  });
   return moving || points[points.length - 1].ts - points[0].ts;
 }
 
-// From the speed while moving, not the average over the whole trip.
-function modeFor(distance, durationMs) {
-  const kmh = durationMs > 0 ? distance / 1000 / (durationMs / 3_600_000) : 0;
-  if (kmh < 7) return "walking";
-  if (kmh < 22) return "cycling";
+// A brisk walk reaches 7 to 8 km/h; a bike rarely goes slower than 10.
+const WALK_MAX_KMH = 8.5;
+const CYCLE_MAX_KMH = 24;
+// Progress is measured over about a minute: the few metres a fix jumps sideways barely count
+// against what was covered in that time, but they add up when every leg is summed.
+const PROGRESS_WINDOW_MS = 60_000;
+
+// How fast the trip went while it moved, in km/h. The phone's own speed comes first: it is
+// measured from the satellites' Doppler shift and does not wobble with the position. Without
+// it, the ground actually covered in each minute, over the time of that minute spent moving:
+// a halt at a light does not slow the minute down, a fix jumping sideways does not speed it up.
+// Too few fixes for either: distance over the time spent moving.
+function movingKmh(points, distance) {
+  const reported = points.map((p) => p.speed).filter((s) => typeof s === "number" && s >= 0);
+  if (reported.length >= Math.max(3, points.length * 0.6)) {
+    const moving = reported.filter((s) => s >= STILL_MS);
+    if (moving.length) return median(moving) * 3.6;
+  }
+  // movingBefore[k]: ms spent moving between the first fix and fix k.
+  const speeds = legSpeeds(points);
+  const still = stillBelow(speeds);
+  const movingBefore = [0];
+  speeds.forEach((s, k) => {
+    movingBefore.push(movingBefore[k] + (s !== null && s >= still ? points[k + 1].ts - points[k].ts : 0));
+  });
+  const progress = [];
+  let j = 0;
+  for (let i = 0; i < points.length; i++) {
+    while (j < points.length && points[j].ts - points[i].ts < PROGRESS_WINDOW_MS) j++;
+    if (j >= points.length) break;
+    const seconds = (movingBefore[j] - movingBefore[i]) / 1000;
+    if (seconds <= 0) continue;
+    progress.push(distanceM(points[i].lat, points[i].lon, points[j].lat, points[j].lon) / seconds);
+  }
+  if (progress.length >= 2) return median(progress) * 3.6;
+  const ms = movingMsOf(points);
+  return ms > 0 ? distance / 1000 / (ms / 3_600_000) : 0;
+}
+
+function modeFor(kmh) {
+  if (kmh < WALK_MAX_KMH) return "walking";
+  if (kmh < CYCLE_MAX_KMH) return "cycling";
   return "driving";
 }
 
@@ -82,7 +143,7 @@ export function tripSegment(points) {
     end,
     durationMs: end - start,
     distanceM: Math.round(distance),
-    mode: modeFor(distance, movingMsOf(points)),
+    mode: modeFor(movingKmh(points, distance)),
     path: points.map((p) => [p.lat, p.lon]),
   };
   // The fixes with their times, for telling a bus ride from a drive. Not part of the JSON.

@@ -21,8 +21,20 @@ const MIN_SPEED_KMH = 12;
 export const HALT_SPACING_M = { min: 300, max: 900 };
 // Kinds that need no halts on the way, and how fast they have to have been on average.
 const NO_HALT_MIN_KMH = { train: 25, subway: 25, ferry: 12 };
-// Without halts, departure and arrival both have to be this close to the timetable.
-const NO_HALT_WINDOW_S = 10 * 60;
+// How late a vehicle may run against the timetable, and how early: late is common, early rare.
+const LATE_S = 30 * 60;
+const EARLY_S = 3 * 60;
+// Between boarding and alighting a delay grows or shrinks by at most this much.
+const DELAY_DRIFT_S = 10 * 60;
+// A vehicle passes the stops of its line: the fixes have to come this close to most stops
+// between boarding and alighting. Feeds without line shapes (the nationwide German one has
+// none) leave this as the check that the way was the line's, and not a drive between two stops.
+const STOP_PASS_M = 50;
+const STATION_PASS_M = 400;
+const PASS_SHARE = 0.6;
+// A bus or tram halts at its stops; a car halts at red lights. Most halts have to be at a stop.
+const HALT_AT_STOP_M = 40;
+const HALT_SHARE = 0.5;
 // The route types (basic and extended) of trains, subways and ferries, see kindOf.
 const RAIL_TYPES_SQL =
   "(r.type IN (1, 2, 4, 12, 1200) OR r.type BETWEEN 100 AND 117 OR r.type BETWEEN 400 AND 405 OR r.type BETWEEN 1000 AND 1021)";
@@ -48,6 +60,7 @@ export const TRIP_MODES = ["walking", "cycling", "driving", "transit"];
 export function rideProfile(fixes) {
   let distance = 0;
   const halts = [];
+  const haltPoints = [];
   for (let i = 1; i < fixes.length; i++) {
     const a = fixes[i - 1];
     const b = fixes[i];
@@ -55,7 +68,10 @@ export function rideProfile(fixes) {
     const dt = (b.ts - a.ts) / 1000;
     // The wait at the boarding stop is no halt along the way; several slow fixes in a row are one halt.
     if (dt >= HALT_MIN_S && d <= HALT_MAX_M && distance > HALT_MAX_M) {
-      if (!halts.length || distance - halts[halts.length - 1] > HALT_MAX_M) halts.push(distance);
+      if (!halts.length || distance - halts[halts.length - 1] > HALT_MAX_M) {
+        halts.push(distance);
+        haltPoints.push({ lat: a.lat, lon: a.lon });
+      }
     }
     distance += d;
   }
@@ -65,6 +81,8 @@ export function rideProfile(fixes) {
     speedKmh: seconds > 0 ? (distance / seconds) * 3.6 : 0,
     halts: halts.length,
     haltSpacingM: distance / (halts.length + 1),
+    // Where the vehicle stood, to tell a halt at a stop from one at a red light.
+    haltPoints,
   };
 }
 
@@ -107,6 +125,43 @@ function pointToSegment([px, py], [ax, ay], [bx, by]) {
   const len2 = dx * dx + dy * dy;
   const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
   return Math.hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+
+// How close the way of the fixes came to a point: the distance to the nearest part of it.
+function distanceToWay(project, way, point) {
+  const p = project(point.lat, point.lon);
+  if (way.length === 1) return Math.hypot(p[0] - way[0][0], p[1] - way[0][1]);
+  let best = Infinity;
+  for (let i = 1; i < way.length; i++) best = Math.min(best, pointToSegment(p, way[i - 1], way[i]));
+  return best;
+}
+
+// Whether a ride went the way of the line's stops and halted where the line halts. `stops` are
+// the stops of the timetable trip from boarding to alighting, in order. Without line shapes
+// (the nationwide German feed has none) this tells a bus from a car that drove between two of
+// its stops, and a train from a drive between two stations.
+export function followsStops(fixes, stops, kind, profile) {
+  if (!fixes.length || stops.length < 2) return true;
+  const project = projector(fixes[0].lat, fixes[0].lon);
+  const way = fixes.map((f) => project(f.lat, f.lon));
+  const between = stops.slice(1, -1);
+  const rail = kind in NO_HALT_MIN_KMH;
+  if (between.length) {
+    const radius = rail ? STATION_PASS_M : STOP_PASS_M;
+    const passed = between.filter((stop) => distanceToWay(project, way, stop) <= radius).length;
+    if (passed / between.length < PASS_SHARE) return false;
+  }
+  if (rail) {
+    // A train halts at its stations and, now and then, at a signal; a car in town at every light.
+    return profile.halts <= between.length + 1;
+  }
+  if (!profile.haltPoints?.length) return true;
+  const atStops = stops.map((s) => project(s.lat, s.lon));
+  const atStop = profile.haltPoints.filter((h) => {
+    const p = project(h.lat, h.lon);
+    return atStops.some((s) => Math.hypot(p[0] - s[0], p[1] - s[1]) <= HALT_AT_STOP_M);
+  }).length;
+  return atStop / profile.haltPoints.length >= HALT_SHARE;
 }
 
 // How far the fixes stray from a line's shape on average: the mean of each fix's distance
@@ -164,11 +219,19 @@ export function localSeconds(ts, timeZone) {
   }
 }
 
-// Timetables count past midnight ("25:10:00"), so a departure is compared on the nearest day.
-function departureGap(departure, observed) {
-  if (departure === null || observed === null) return Infinity;
-  return Math.min(...[-1, 0, 1].map((day) => Math.abs(departure - (observed + day * 86_400))));
+// How late the vehicle was in seconds, negative when early. Timetables count past midnight
+// ("25:10:00"), so the departure is compared on the nearest day. Null when either is unknown.
+export function delayOf(scheduled, observed) {
+  if (scheduled === null || scheduled === undefined || observed === null) return null;
+  return [-1, 0, 1].map((day) => observed + day * 86_400 - scheduled).reduce((a, b) => (Math.abs(b) < Math.abs(a) ? b : a));
 }
+
+// Up to half an hour late counts, a few minutes early too.
+const delayFits = (delay) => delay !== null && delay >= -EARLY_S && delay <= LATE_S;
+
+// Of several timetable trips, the one the ride most likely was: being late is common, so
+// minutes late weigh less than minutes early.
+const delayScore = (delay) => (delay < 0 ? -delay * 3 : delay);
 
 const place = (stop) => ({ name: stop.name, lat: stop.lat, lon: stop.lon });
 
@@ -204,6 +267,12 @@ function withLinePath(transit, linePath) {
   return transit;
 }
 
+// Whether the timetables have stops at both ends of a trip, so their verdict counts.
+function timetablesKnow(trip) {
+  const fixes = trip.fixes;
+  return stopsNear(fixes[0].lat, fixes[0].lon).length > 0 && stopsNear(fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon).length > 0;
+}
+
 // The line of a trip according to the timetables, or null.
 export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
   const fixes = trip.fixes;
@@ -230,7 +299,25 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
     return observed.get(key);
   };
 
-  let best = null;
+  // The stops of a timetable trip from boarding to alighting, shared by its many runs a day.
+  const stopsCache = new Map();
+  const stopsOf = (feedId, row) => {
+    const key = `${feedId}:${row.trip_id}:${row.from_seq}:${row.to_seq}`;
+    if (!stopsCache.has(key)) {
+      stopsCache.set(
+        key,
+        db
+          .prepare(
+            `SELECT s.lat, s.lon FROM transit_stop_times st JOIN transit_stops s ON s.feed_id = st.feed_id AND s.id = st.stop_id
+             WHERE st.feed_id = ? AND st.trip_id = ? AND st.seq BETWEEN ? AND ? ORDER BY st.seq`
+          )
+          .all(feedId, row.trip_id, row.from_seq, row.to_seq)
+      );
+    }
+    return stopsCache.get(key);
+  };
+
+  const candidates = [];
   for (const feedId of new Set(from.map((s) => s.feed_id))) {
     const fromIds = from.filter((s) => s.feed_id === feedId).map((s) => s.id);
     const toIds = to.filter((s) => s.feed_id === feedId).map((s) => s.id);
@@ -240,7 +327,8 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
     // alighting stops. Not the same stop twice: a loop line does not explain a ride that came back.
     const rows = db
       .prepare(
-        `SELECT t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, b.stop_id AS to_id, a.departure, b.departure AS arrival,
+        `SELECT t.id AS trip_id, t.route_id, t.headsign, t.shape_id, a.stop_id AS from_id, b.stop_id AS to_id, a.seq AS from_seq, b.seq AS to_seq,
+                a.departure, b.departure AS arrival,
                 r.short_name, r.long_name, r.type, r.color, r.text_color, r.agency, r.timezone
          FROM transit_stop_times a
          JOIN transit_stop_times b ON b.feed_id = a.feed_id AND b.trip_id = a.trip_id AND b.seq > a.seq AND b.stop_id <> a.stop_id
@@ -252,15 +340,22 @@ export function matchGtfs(trip, profile = rideProfile(trip.fixes)) {
     for (const row of rows) {
       const kind = kindOf(row.type);
       if (!fitsKind(kind, profile)) continue;
-      const gap = departureGap(row.departure, observedIn(row.timezone));
-      // Nothing on the way says "train", so the timetable has to say it at both ends.
-      if (kind in NO_HALT_MIN_KMH && (gap > NO_HALT_WINDOW_S || departureGap(row.arrival, observedIn(row.timezone, trip.end)) > NO_HALT_WINDOW_S)) {
-        continue;
+      // Up to half an hour late at boarding.
+      const delay = delayOf(row.departure, observedIn(row.timezone));
+      if (!delayFits(delay)) continue;
+      // Nothing on the way says "train", so the timetable has to say it at both ends, with a
+      // delay that stayed about the same.
+      if (kind in NO_HALT_MIN_KMH) {
+        const arrival = delayOf(row.arrival, observedIn(row.timezone, trip.end));
+        if (!delayFits(arrival) || Math.abs(arrival - delay) > DELAY_DRIFT_S) continue;
       }
       if (!shapeFits(feedId, row.shape_id)) continue;
-      if (!best || gap < best.gap) best = { row, gap, feedId };
+      candidates.push({ row, kind, feedId, score: delayScore(delay) });
     }
   }
+  // The closest timetable trip first; the stops are only looked at until one fits.
+  candidates.sort((a, b) => a.score - b.score);
+  const best = candidates.find((c) => followsStops(fixes, stopsOf(c.feedId, c.row), c.kind, profile));
   if (!best) return null;
   const { row } = best;
   const fromStop = from.find((s) => s.feed_id === best.feedId && s.id === row.from_id);
@@ -578,8 +673,10 @@ export async function matchTransit(userId, deviceId, segments, { waitMs = 3_000 
         storeResult(userId, deviceId, trip, gtfs, stamp);
         continue;
       }
-      // OpenStreetMap knows no timetable, only the halts can tell a ride from a drive there.
-      if (!looksLikeRide(profile)) {
+      // OpenStreetMap knows no timetable, only the halts can tell a ride from a drive there. Where
+      // the timetables know the stops at both ends and still found no line, they had the better
+      // look: a drive between two bus stops must not become a bus through the back door.
+      if (!looksLikeRide(profile) || timetablesKnow(trip)) {
         trip.transit = null;
         storeResult(userId, deviceId, trip, null, stamp);
         continue;

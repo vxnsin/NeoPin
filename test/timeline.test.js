@@ -48,6 +48,36 @@ test("a day becomes visits and the trips between them", () => {
   assert.ok(trip.path.length >= 6);
 });
 
+// A stay, then `metres` north at `speedMs` with a fix every `everyS` seconds that jumps `jitterM`
+// to the east and west in turn, then a stay. `reported` adds the phone's own speed to each fix.
+function aWay(speedMs, { metres = 2000, everyS = 10, jitterM = 12, reported = false } = {}) {
+  const points = [];
+  for (let m = 0; m <= 20; m += 5) points.push(at(m, 48.1));
+  const start = DAY0 + 20 * MIN;
+  const steps = Math.round(metres / (speedMs * everyS));
+  const east = (side) => (side * jitterM) / (111_320 * Math.cos((48.1 * Math.PI) / 180));
+  for (let i = 1; i <= steps; i++) {
+    const fix = { ts: start + i * everyS * 1000, lat: 48.1 + (i * speedMs * everyS) / 111_320, lon: 11 + east(i % 2 ? 1 : -1) };
+    if (reported) fix.speed = speedMs;
+    points.push(fix);
+  }
+  const end = points[points.length - 1];
+  for (let m = 1; m <= 21; m += 5) points.push({ ts: end.ts + m * MIN, lat: end.lat, lon: 11 });
+  return buildTimeline(points).segments.find((x) => x.type === "trip");
+}
+
+test("a brisk walk stays a walk even when the GPS jumps from side to side", () => {
+  // 6.8 km/h; summed leg by leg, the zigzag would make it 11 km/h.
+  assert.equal(aWay(1.9).mode, "walking");
+  assert.equal(aWay(1.9, { reported: true }).mode, "walking", "the phone's own speed says the same");
+  assert.equal(aWay(1.1, { jitterM: 20 }).mode, "walking");
+});
+
+test("a bike and a car keep their modes with the same wobbly GPS", () => {
+  assert.equal(aWay(4.5, { everyS: 5, jitterM: 8 }).mode, "cycling");
+  assert.equal(aWay(12, { metres: 5000, everyS: 5, jitterM: 8 }).mode, "driving");
+});
+
 test("waiting at a red light does not turn a drive into a ride by bike or a walk", () => {
   const points = [];
   for (let m = 0; m <= 20; m += 5) points.push(at(m, 48.1));
