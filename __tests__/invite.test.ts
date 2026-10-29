@@ -1,4 +1,4 @@
-import { checkLine, codeChip, codeFromLink, formatCode, hasProblems, inviteLink, isFullCode, normalizeCode, registerProblems, shareText } from "../lib/invite";
+import { checkLine, codeChip, codeFromLink, formatCode, hasProblems, inviteLink, isFullCode, normalizeCode, registerProblems, serverFromLink, shareText } from "../lib/invite";
 
 test("a code is normalised like the server does", () => {
   expect(normalizeCode(" abcde-12345 ")).toBe("ABCDE12345");
@@ -14,11 +14,20 @@ test("a code is shown with its dash", () => {
   expect(formatCode("abcdef")).toBe("ABCDE-F");
 });
 
-test("the link and the share text carry the code", () => {
-  expect(inviteLink("abcde12345")).toBe("neopin://invite?code=ABCDE-12345");
-  expect(shareText("ABCDE-12345")).toBe(
-    "Join me on NeoPin with this invite code: ABCDE-12345\nneopin://invite?code=ABCDE-12345"
+test("the link is the server's invite page and the share text carries it", () => {
+  expect(inviteLink("abcde12345", "wss://neopin.example.org")).toBe("https://neopin.example.org/invite/ABCDE-12345");
+  expect(inviteLink("abcde12345", "ws://192.168.1.20:3012/")).toBe("http://192.168.1.20:3012/invite/ABCDE-12345");
+  expect(shareText("ABCDE-12345", "wss://neopin.example.org")).toBe(
+    "Join me on NeoPin with this invite code: ABCDE-12345\nhttps://neopin.example.org/invite/ABCDE-12345"
   );
+});
+
+test("the server of an invite link is taken as it came, anything else is dropped", () => {
+  expect(serverFromLink("https://neopin.example.org/")).toBe("https://neopin.example.org");
+  expect(serverFromLink(["http://192.168.1.20:3012"])).toBe("http://192.168.1.20:3012");
+  expect(serverFromLink("javascript:alert(1)")).toBe("");
+  expect(serverFromLink("neopin.example.org")).toBe("");
+  expect(serverFromLink(undefined)).toBe("");
 });
 
 test("a deep link is read for its code", () => {

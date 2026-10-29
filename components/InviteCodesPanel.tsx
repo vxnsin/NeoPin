@@ -80,7 +80,7 @@ export default function InviteCodesPanel({ auth, isAdmin, groups }: Props) {
   };
 
   const share = (code: string) => {
-    Share.share({ message: shareText(code) }).catch(() => {});
+    Share.share({ message: shareText(code, auth.serverIp) }).catch(() => {});
   };
 
   const revoke = (code: InviteCode) => {
