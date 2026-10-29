@@ -113,6 +113,17 @@ import {
   relyingParty,
   verifyPasskeyLogin,
 } from "./passkeys.js";
+import {
+  REVIEW_PERIODS,
+  buildReview,
+  createReviewJob,
+  fixedZone,
+  namedZone,
+  parseDate,
+  reviewNotificationsOn,
+  serverZone,
+  setReviewNotifications,
+} from "./review.js";
 
 const CLOSE_POLICY = 4000;
 const CLOSE_REPLACED = 4001;
@@ -266,6 +277,26 @@ const Timeline = t.object({
   pathsPending: t.boolean(),
   // Stops the person dismissed on this day, so the clients can bring one back.
   dismissed: t.array(t.object({ start: t.number(), end: t.number() })),
+});
+
+// A week or a month in numbers, see src/review.js.
+const ModeShare = t.object({ km: t.number(), minutes: t.number() });
+const Review = t.object({
+  period: t.enum(REVIEW_PERIODS),
+  from: t.string(),
+  to: t.string(),
+  distanceKm: t.number(),
+  movingMinutes: t.number(),
+  trips: t.number(),
+  stops: t.number(),
+  byMode: t.object({ walking: ModeShare, cycling: ModeShare, driving: ModeShare, transit: ModeShare }),
+  transit: t.array(t.object({ kind: t.enum(TRANSIT_KINDS), line: t.string(), color: t.string().nullable(), rides: t.number() })),
+  topPlaces: t.array(t.object({ name: t.string(), kind: t.enum(PLACE_KINDS), visits: t.number(), minutes: t.number() })),
+  newPlaces: t.number(),
+  days: t.array(t.object({ date: t.string(), km: t.number(), movingMinutes: t.number() })),
+  path: t.array(t.array(t.number())),
+  previous: t.object({ distanceKm: t.number(), movingMinutes: t.number() }).nullable(),
+  empty: t.boolean(),
 });
 
 const Message = t.object({ message: t.string() });
@@ -556,6 +587,10 @@ export function createApp({ gracefulShutdown = true } = {}) {
       if (target.platform === "android") sendNotification(target, message).catch(() => {});
     }
   }
+
+  // Monday 09:00 the week, the first of the month 09:00 the month: a notification with an
+  // Android push for everyone who was out and about (see src/review.js).
+  const reviewJob = createReviewJob({ push: pushToAndroid, changed: notifyNotifications });
 
   // Arrived at or left one of the person's alert places: a notification for everyone they chose,
   // with a push to their Android phones. The time is the server's (TZ), the data carries `at`.
@@ -1291,7 +1326,15 @@ export function createApp({ gracefulShutdown = true } = {}) {
           at: t.number(),
         }),
       });
-      const Notification = t.union(InviteUsedNotification, PresenceNotification);
+      // The week or month review is ready (GET /api/review with that period and `from` as date).
+      const ReviewNotification = t.object({
+        id: t.number(),
+        type: t.literal("review"),
+        createdAt: t.string(),
+        readAt: t.string().nullable(),
+        data: t.object({ period: t.enum(REVIEW_PERIODS), from: t.string(), to: t.string(), distanceKm: t.number() }),
+      });
+      const Notification = t.union(InviteUsedNotification, PresenceNotification, ReviewNotification);
 
       api.get("/notifications", { response: { 200: t.array(Notification), 401: t.problem() } }, (ctx) =>
         notificationsFor(currentUser(ctx).user.id)
@@ -1677,6 +1720,52 @@ export function createApp({ gracefulShutdown = true } = {}) {
         (ctx) => {
           const { ownerId, full } = timelineReader(ctx, ctx.query.userId);
           return daysWithData(ownerId, ctx.query.deviceId, ctx.query.tz ?? 0, { exceptHidden: !full, since: spansKeptSince() });
+        }
+      );
+
+      // The week (Monday to Sunday) or month around `date`, without one the last finished one.
+      // Own only; the admin reads anyone's with userId. `tz` as for the timeline, or `timeZone`
+      // (IANA) for weeks that span a change of the clocks; neither means the server's zone.
+      api.get(
+        "/review",
+        {
+          query: t.object({
+            period: t.enum(REVIEW_PERIODS).optional(),
+            date: t.string().max(10).optional(),
+            tz: t.number().min(-1440).max(1440).optional(),
+            timeZone: t.string().max(64).optional(),
+            userId: t.number().optional(),
+          }),
+          response: { 200: Review, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
+        },
+        async (ctx) => {
+          const userId = targetUserId(ctx, ctx.query.userId);
+          const { date, tz, timeZone } = ctx.query;
+          if (date !== undefined && parseDate(date) === null) throw problem(400, "bad-date", "date has to look like 2025-01-31");
+          let zone = serverZone;
+          if (timeZone !== undefined) {
+            try {
+              zone = namedZone(timeZone);
+            } catch {
+              throw problem(400, "bad-time-zone", "timeZone has to be an IANA zone like Europe/Berlin");
+            }
+          } else if (tz !== undefined) zone = fixedZone(tz);
+          return buildReview(userId, { period: ctx.query.period ?? "week", date: date ?? null, zone });
+        }
+      );
+
+      // Whether the Monday and first-of-the-month review comes as a notification. On by default.
+      const ReviewNotifications = t.object({ enabled: t.boolean() });
+      api.get("/me/review-notifications", { response: { 200: ReviewNotifications, 401: t.problem() } }, (ctx) => ({
+        enabled: reviewNotificationsOn(currentUser(ctx).user.id),
+      }));
+      api.put(
+        "/me/review-notifications",
+        { body: ReviewNotifications, response: { 200: ReviewNotifications, 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          setReviewNotifications(user.id, ctx.body.enabled);
+          return { enabled: reviewNotificationsOn(user.id) };
         }
       );
 
@@ -2148,10 +2237,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
       disconnectAccount(userId, reason);
     },
     resetAuthFailures: () => authFailures.reset(),
+    // Sends the reviews due at `now` (ms) right away, for tests and the console.
+    sendDueReviews: (now) => reviewJob.run(now),
     stop() {
       clearTimeout(broadcastTimer);
       clearInterval(sweep);
       clearInterval(rideSweep);
+      reviewJob.stop();
       broadcastTimer = null;
     },
   };

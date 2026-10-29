@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
 import { config } from "./config.js";
+import { REVIEW_SCHEMA } from "./reviewSchema.js";
 
 let db = null;
 // The file the open database lives in, ":memory:" in tests. Backups copy it.
@@ -317,6 +318,7 @@ export function initDb(file = config.dbPath) {
   const hadGroups = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_groups'").get();
   const hadSpans = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'hidden_spans'").get();
   db.exec(SCHEMA);
+  db.exec(REVIEW_SCHEMA);
   // Servers from before the spans: whoever hides right now is hidden from now on, when it began is unknown.
   const hasHidden = db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "hidden_until");
   if (!hadSpans && hasHidden) {

@@ -1,4 +1,4 @@
-// The bell in the HUD: who joined with an invite code, who arrived somewhere or left.
+// The bell in the HUD: who joined with an invite code, who arrived somewhere or left, a new review.
 const bellButton = document.getElementById("bellButton");
 const bellBadge = document.getElementById("bellBadge");
 
@@ -43,7 +43,24 @@ function notificationText(item) {
   };
 }
 
+// "Your week: 84 km" · "19 – 25 Oct · 2 h ago"; a click opens that review.
+function reviewNotificationRow(item) {
+  const { period, from, to, distanceKm } = item.data;
+  const range = `${fmt(from, { day: "numeric", month: "short" })} – ${fmt(to, { day: "numeric", month: "short" })}`;
+  return `
+    <li class="row notice notice--link${freshIds.has(item.id) || !item.readAt ? " is-unread" : ""}">
+      <button class="notice__open" type="button" data-open-review="${esc(period)}" data-review-from="${esc(from)}" aria-label="${esc(`Open the review of ${range}`)}"></button>
+      <span class="notice__icon"><svg class="icon"><use href="#i-chart" /></svg></span>
+      <span class="row__text">
+        <strong>Your ${esc(period)}: ${esc(kmText(distanceKm))}</strong>
+        <span>${esc(range)} · ${esc(timeAgo(item.createdAt))}</span>
+      </span>
+      <svg class="icon notice__chevron" aria-hidden="true"><use href="#i-next" /></svg>
+    </li>`;
+}
+
 function notificationRow(item) {
+  if (item.type === "review") return reviewNotificationRow(item);
   const { user, title, meta } = notificationText(item);
   return `
     <li class="row notice${freshIds.has(item.id) || !item.readAt ? " is-unread" : ""}">
@@ -60,7 +77,7 @@ function renderNotifications() {
   modalBody.innerHTML = notifications.length
     ? `${unread ? '<div class="row__edit-actions notice-actions"><button class="btn btn--small btn--ghost" type="button" data-read-all>Mark all read</button></div>' : ""}
        <ul class="rows">${notifications.map(notificationRow).join("")}</ul>`
-    : '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-bell" /></svg></span><strong>Nothing new</strong>You hear here about new accounts that join with your invite codes, and when people arrive at or leave their places.</div>';
+    : '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-bell" /></svg></span><strong>Nothing new</strong>You hear here about new accounts that join with your invite codes, when people arrive at or leave their places, and when your weekly review is ready.</div>';
 }
 
 async function markAllRead() {
@@ -99,7 +116,10 @@ function showNotifications() {
 
 bellButton.addEventListener("click", showNotifications);
 modalBody.addEventListener("click", (event) => {
-  if (notificationsOpen() && event.target.closest("[data-read-all]")) markAllRead();
+  if (!notificationsOpen()) return;
+  if (event.target.closest("[data-read-all]")) markAllRead();
+  const open = event.target.closest("[data-open-review]");
+  if (open) showReview({ period: open.dataset.openReview, date: open.dataset.reviewFrom });
 });
 
 document.addEventListener("notificationschanged", refreshNotifications);

@@ -156,7 +156,7 @@ Without an invite there is no sign-up: the admin creates accounts. With invite c
 
 ## Push notifications
 
-With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations, find requests and [arrivals](#arrival-alerts). Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
+With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations, find requests, [arrivals](#arrival-alerts) and the [review](#review). Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
 
 How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds.
 
@@ -218,6 +218,28 @@ With the Balanced profile the app reports every 15 s, with Battery every 2 minut
 The server replaces the trip's `path` with that course and says where it came from in `pathSource` (`line` or `road`); without it the path is the fixes themselves. Distances still come from the fixes. A match that is much longer than the fixes is a detour the phone never made and is not used. Results are cached per trip; a day that is still being matched says `pathsPending`, and a reload a few seconds later has the rest.
 
 **Privacy.** Unlike the place lookup, which only sees single spots, the routing service sees the whole way of every trip it matches. The default is the public OSRM of [FOSSGIS](https://routing.openstreetmap.de), which logs requests (see its privacy statement). It gets the coordinates and the seconds between the fixes, not the date or the account, and not the centres of the stays at both ends of a trip. Run your own [OSRM](https://github.com/Project-OSRM/osrm-backend) and point `ROAD_MATCH_URL` at it, or set it to `off` and the fixes are drawn as they are. FOSSGIS allows light use only: one request a second (the server keeps to it), a valid user agent, and attribution: the routes are based on [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors.
+
+## Review
+
+A week (Monday to Sunday) or a calendar month in numbers. `GET /api/review?period=week|month&date=YYYY-MM-DD&tz=<minutes>` takes any day of the period as `date`; without it, the last one that is over. `tz` is what the timeline takes (`getTimezoneOffset()`); `timeZone=Europe/Berlin` instead keeps whole days in a week where the clocks change; with neither the server's zone counts. It answers:
+
+```
+{ period, from, to, distanceKm, movingMinutes, trips, stops,
+  byMode: { walking: { km, minutes }, cycling, driving, transit },
+  transit: [{ kind, line, color, rides }],      // most ridden lines, at most 10
+  topPlaces: [{ name, kind, visits, minutes }], // at most 5, own places and suggestions
+  newPlaces,                                    // places stayed at for the first time
+  days: [{ date, km, movingMinutes }],
+  path: [[lat, lon], ...],                      // all trips, thinned to at most 600 points
+  previous: { distanceKm, movingMinutes } | null,
+  empty }
+```
+
+Every day is that day's own timeline, built as `GET /api/timeline` builds it: from the device with the most fixes that day (the main device on a tie), with dismissed stops, corrected modes, answered rides and place names. Invisible stretches count, as in the own timeline. Distances and minutes are those of the trips, without stretches that had no fixes. Only the own review, the admin reads anyone's with `userId`; a shared timeline does not share the review.
+
+Finished days are kept in `review_days` with a stamp of what they were made of (the fixes of each device, dismissed stops, corrections, ride answers, own places, timetable data), so a month answers from the store and a change shows on the next request. Today and days still waiting for place names or paths are built every time.
+
+Mondays at 09:00 server time (`TZ`) everyone who was out and about the week before gets a notification `{ "type": "review", "data": { period, from, to, distanceKm } }`, a `notificationsChanged` on their sockets and on Android, with [push](#push-notifications), `Your week: 84 km, 6 h on the move` with the data `{ type: "review", period, from, to }`. On the first of a month the same for the month. Each goes out once per account and period, also across restarts; a server that was down at nine catches up later that day. `GET` / `PUT /api/me/review-notifications` (`{ "enabled" }`, on by default) turns it off. In the dashboard the review opens from the account menu and from the notification.
 
 ## Shared timelines
 
@@ -333,7 +355,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/invite-codes/check` | | `{ "code" }` answers `{ "valid", "invitedBy"?, "groupName"? }` |
 | `POST` `GET` | `/api/invite-codes` | ✓ | Create a code (`{ "groupId"?, "note"? }`, `201`) and list your own, the admin gets all |
 | `DELETE` | `/api/invite-codes/:id` | ✓ | Revokes an open code. `204`, else `404` |
-| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`, `arrived`, `left`) |
+| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`, `arrived`, `left`, `review`) |
 | `GET` `PUT` | `/api/alerts` | ✓ | `{ "places", "recipients": { "users", "groups" } }`: which own places send [arrival alerts](#arrival-alerts) to whom. `400` for foreign places, people or groups |
 | `POST` | `/api/notifications/read` | ✓ | `{ "ids"? }` marks them read, all when omitted. `204` |
 | `GET` | `/api/me` | ✓ | The signed-in account, with `tours: { app, dashboard }` (seen or not) and for the admin `setupNeeded` |
@@ -351,6 +373,8 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"?, "userId"? }`, asks one or all devices and answers with the list. An offline device is woken with a push when [push](#push-notifications) is set up: `202` when it has not answered in time |
 | `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
 | `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
+| `GET` | `/api/review` | ✓ | `period`, `date`, `tz` or `timeZone`: a week or month in numbers, see [Review](#review). The admin adds `userId` |
+| `GET` `PUT` | `/api/me/review-notifications` | ✓ | `{ "enabled" }`: whether the [review](#review) comes as a notification, on by default |
 | `GET` `PUT` | `/api/timeline/sharing` | ✓ | `{ "mode": "off" \| "groups" \| "selected", "users", "groups" }`: who may read your timeline. `400` for people or groups you share nothing with |
 | `GET` | `/api/timeline/people` | ✓ | `[{ userId, displayName, avatarUrl, devices }]`: whose timelines you may read, you first |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
