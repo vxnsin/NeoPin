@@ -11,7 +11,7 @@ export default {
   expo: {
     name: "NeoPin",
     slug: "neopin",
-    version: "1.8.0",
+    version: "1.8.1",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
     scheme: "neopin",
