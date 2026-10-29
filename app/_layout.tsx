@@ -7,6 +7,7 @@ import * as Notifications from "expo-notifications";
 import useThemeManager from "@/hooks/useThemeManager";
 import { WebSocketProvider, useWebSocketContext } from "@/context/WebSocket";
 import Footer from "@/components/Footer";
+import { resetLanding } from "@/components/StartScreen";
 import { socket, readCredentials } from "@/lib/socket";
 import { openFromNotification, startPush } from "@/lib/push";
 import { checkAndPrompt } from "@/lib/updates";
@@ -103,6 +104,8 @@ function ConnectionLifecycle() {
 export default function RootLayout() {
   const theme = useThemeManager();
   const pathname = usePathname();
+  // The root mounts once per app window; during its first render, before the start screen reads it.
+  useState(resetLanding);
 
   // The start screen hides the splash the moment it is drawn, with the logo in the same place.
   // The timer is only a safety net for a screen that never gets there.

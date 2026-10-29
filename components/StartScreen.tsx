@@ -11,8 +11,14 @@ const LOGO = 120;
 const SLOW_AFTER_MS = 2500;
 const TRACK = 120;
 
-// Once per process: a later screen (index → map) starts at rest instead of landing again.
+// Once per app window: a later screen (index → map) starts at rest instead of landing again.
 let landed = false;
+
+// A new app window lands again. On Android the location service keeps the JS running after the
+// app is swiped away, so "once per process" would mean the animation never shows a second time.
+export function resetLanding() {
+  landed = false;
+}
 
 type Props = {
   // What the screen waits for is drawn underneath.
