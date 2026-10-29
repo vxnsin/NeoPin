@@ -21,3 +21,13 @@ test("the online ring only animates opacity, which never repaints the map", () =
   expect(html).toContain("@keyframes breathe { 0%, 100% { opacity: 0; } 45% { opacity: .85; } }");
   expect(html).not.toContain("pulse-ring");
 });
+
+test("the small review map has no bar over it and takes the route's own top padding", () => {
+  const html = buildMapHtml(false, 0, 0);
+  expect(html).toContain(".maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right { margin-bottom: 0px; }");
+  expect(html).toContain("showRoute(data.segments, data.bottom, data.top)");
+  const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+  // The map screen keeps its bar.
+  expect(buildMapHtml(false, 0)).toContain("margin-bottom: 96px;");
+});

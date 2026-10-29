@@ -71,7 +71,8 @@ test("walks through every control, across the sheets, and ends with Done", async
   // Every control was measured once, the steps without one not at all.
   const measured = measure.mock.calls.map((call) => call[0]);
   expect(measured).toEqual(steps.map((s) => s.target).filter(Boolean));
-});
+  // Every step waits for its card in real time, which takes a while next to the other suites.
+}, 20_000);
 
 test("Skip ends it at once", async () => {
   const onFinish = jest.fn();

@@ -5,6 +5,7 @@ import { fetchServerStatus, registerPushToken, removePushToken, type DeviceAuth 
 import { dataOf, needsRegistration, parsePushAction, type StoredPush } from "@/lib/pushPayload";
 import { openRideResponse } from "@/lib/ridePush";
 import { parseRideQuestion } from "@/lib/rides";
+import { requestReview } from "@/lib/review";
 import { requestSheet } from "@/lib/sheetRequest";
 import { socket } from "@/lib/socket";
 import { handlePush } from "@/tasks/PushTask";
@@ -100,7 +101,7 @@ export async function stopPush(auth: DeviceAuth | null) {
 // What a tap on a notification should open, or null when it is not one of ours.
 export type NotificationTarget = "map" | "connect";
 
-// An invitation goes to the groups sheet, a used invite code or an arrival to the notifications. A find request goes to the map, where the dialog shows once the
+// An invitation goes to the groups sheet, a used invite code or an arrival to the notifications, a review to its period. A find request goes to the map, where the dialog shows once the
 // socket replays the request; without a connection the start screen has to connect first.
 export function openFromNotification(response: Notifications.NotificationResponse): NotificationTarget | null {
   // A ride question: Yes or No is answered without moving the app, a tap opens the question on the map.
@@ -113,6 +114,11 @@ export function openFromNotification(response: Notifications.NotificationRespons
   }
   if (action?.type === "inviteUsed" || action?.type === "placeAlert") {
     requestSheet("notifications");
+    return "map";
+  }
+  // A review opens over the map, which takes the request once it is there.
+  if (action?.type === "review") {
+    requestReview({ period: action.period, date: action.date });
     return "map";
   }
   if (action?.type === "findRequest") return socket.connected ? "map" : "connect";

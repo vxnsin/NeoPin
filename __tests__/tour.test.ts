@@ -51,7 +51,7 @@ test("one short step per control, the admin gets the dashboard one at the end", 
 
 test("the controls Luis listed each get their step", () => {
   const targets = tourSteps(false).map((s) => s.target);
-  for (const t of ["peopleBar", "groupChips", "personRow", "findButton", "refreshButton", "timelineButton", "settingsButton", "profile", "groupsEntry", "inviteCodesEntry", "alertsEntry", "presets", "sharingEntry"])
+  for (const t of ["peopleBar", "groupChips", "personRow", "findButton", "refreshButton", "timelineButton", "settingsButton", "profile", "groupsEntry", "inviteCodesEntry", "alertsEntry", "presets", "reviewEntry", "sharingEntry"])
     expect(targets).toContain(t);
 });
 

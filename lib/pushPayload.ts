@@ -1,4 +1,6 @@
 // What a push message means for the app. Kept free of native modules so it can be tested.
+import type { ReviewPeriod } from "@/lib/api";
+import { reviewTarget } from "@/lib/review";
 
 export type PushAction =
   | { type: "requestLocation"; from: string; id: string | null }
@@ -6,7 +8,9 @@ export type PushAction =
   | { type: "inviteUsed" }
   // Someone arrived at or left a place. FCM data values are strings, the id is read back as a number.
   | { type: "placeAlert"; userId: number | null }
-  | { type: "findRequest"; session: string; from: string };
+  | { type: "findRequest"; session: string; from: string }
+  // "Your week: 84 km": opens the review of that period. date is a day in it, null for the last finished one.
+  | { type: "review"; period: ReviewPeriod; date: string | null };
 
 function asObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -55,6 +59,7 @@ export function parsePushAction(input: unknown): PushAction | null {
     const session = typeof data.session === "string" ? data.session : "";
     return { type: "findRequest", session, from: typeof data.from === "string" ? data.from : "" };
   }
+  if (data.type === "review") return { type: "review", ...reviewTarget(data) };
   if (data.type === "requestLocation") {
     const from = typeof data.from === "string" && data.from ? data.from : "";
     return { type: "requestLocation", from, id: typeof data.id === "string" && data.id ? data.id : null };

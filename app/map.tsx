@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  Switch,
   Text,
   View,
   useWindowDimensions,
@@ -50,6 +51,7 @@ import NotificationsPanel from "@/components/NotificationsPanel";
 import AlertsPanel from "@/components/AlertsPanel";
 import { takeFindRequest } from "@/lib/findInbox";
 import { onSheetRequest, takeRequestedSheet } from "@/lib/sheetRequest";
+import { onReviewRequest, takeRequestedReview, type ReviewTarget } from "@/lib/review";
 import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
@@ -86,6 +88,8 @@ import {
   markNotificationsRead,
   fetchServerStatus,
   getAlerts,
+  getReviewNotifications,
+  setReviewNotifications,
   setPrimaryDeviceRequest,
   pingDeviceRequest,
   type AppNotification,
@@ -142,7 +146,7 @@ type MapWebViewProps = {
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
 // Controls of the tour that sit further down the settings, and the round ones.
-const TOUR_SCROLLED: TourTarget[] = ["groupsEntry", "alertsEntry", "inviteCodesEntry", "presets", "sharingEntry"];
+const TOUR_SCROLLED: TourTarget[] = ["groupsEntry", "alertsEntry", "inviteCodesEntry", "presets", "reviewEntry", "sharingEntry"];
 const ROUND_TARGETS: TourTarget[] = ["timelineButton", "settingsButton", "findButton", "refreshButton"];
 
 type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "ride" | "timelineSharing" | "alerts" | null;
@@ -168,6 +172,15 @@ export default function MapScreen() {
     return onSheetRequest((requested) => {
       takeRequestedSheet();
       setSheet(requested);
+    });
+  }, []);
+  // A tapped review push opens its period over the map, also when it started the app.
+  useEffect(() => {
+    const waiting = takeRequestedReview();
+    if (waiting) openReviewRef.current(waiting);
+    return onReviewRequest(() => {
+      const target = takeRequestedReview();
+      if (target) openReviewRef.current(target);
     });
   }, []);
   // A find request that came in before this screen was mounted.
@@ -239,6 +252,10 @@ export default function MapScreen() {
   const [invitesEnabled, setInvitesEnabled] = useState(false);
   // Only servers with arrival alerts get the entry; an older one answers 404.
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  // The weekly review notification switch; null while the server has no reviews (404), which also
+  // keeps the review entries away.
+  const [reviewNotify, setReviewNotify] = useState<boolean | null>(null);
+  const [reviewNote, setReviewNote] = useState("");
   const [foundAvatars, setFoundAvatars] = useState<string[]>([]);
   const [groupFilter, setGroupFilter] = useState<number | null>(null);
   const [cropPhoto, setCropPhoto] = useState<Photo | null>(null);
@@ -273,7 +290,7 @@ export default function MapScreen() {
     // Group members show their picture in the groups sheet even without a device.
     groups.forEach((group) => group.members.forEach((member) => add(member.avatarUrl)));
     foundAvatars.forEach(add);
-    notifications.forEach((item) => add(notificationPerson(item).avatarUrl));
+    notifications.forEach((item) => add(notificationPerson(item)?.avatarUrl));
     return [...devices, ...extra];
   }, [devices, user?.avatarUrl, groups, foundAvatars, notifications]);
   const avatarFor = useAvatars(avatarSources, creds);
@@ -317,6 +334,9 @@ export default function MapScreen() {
       .catch(() => setServerLabel(null));
     getAlerts(creds)
       .then((alerts) => setAlertsEnabled(alerts !== null))
+      .catch(() => {});
+    getReviewNotifications(creds)
+      .then(setReviewNotify)
       .catch(() => {});
     // The main device may have been picked on another device or the dashboard meanwhile.
     fetchMe(creds)
@@ -897,6 +917,36 @@ export default function MapScreen() {
     }
   };
 
+  // The review is a screen of its own over the map; a sheet would stay in front of it, so it goes first.
+  const openReview = (target?: ReviewTarget) => {
+    setSheet(null);
+    router.push({ pathname: "/review", params: target?.date ? { period: target.period, date: target.date } : { period: target?.period ?? "week" } });
+  };
+  const openReviewRef = useRef(openReview);
+  openReviewRef.current = openReview;
+
+  // Asked once the login is known, so the timeline gets its review button without the settings.
+  useEffect(() => {
+    const auth = credsRef.current;
+    if (!auth?.token) return;
+    getReviewNotifications(auth)
+      .then(setReviewNotify)
+      .catch(() => {});
+  }, [creds?.serverIp, creds?.token]);
+
+  const changeReviewNotify = async (enabled: boolean) => {
+    if (!creds || reviewNotify === null) return;
+    const before = reviewNotify;
+    setReviewNote("");
+    setReviewNotify(enabled);
+    try {
+      await setReviewNotifications(creds, enabled);
+    } catch (error: any) {
+      setReviewNotify(before);
+      setReviewNote(error?.message || "Could not save, try again.");
+    }
+  };
+
   const logout = async () => {
     setSheet(null);
     await signOut();
@@ -1163,6 +1213,7 @@ export default function MapScreen() {
           snaps={panelSnapsNow}
           onHeightChange={setPanelRest}
           mapTap={mapTap}
+          onReview={reviewNotify !== null ? () => openReview() : undefined}
           onClose={() => setTimelineOpen(false)}
         />
       )}
@@ -1315,6 +1366,7 @@ export default function MapScreen() {
                 avatarFor={avatarFor}
                 avatarOfUser={avatarOfUser}
                 onOpenPerson={focusPerson}
+                onOpenReview={openReview}
                 onMarkAll={markAllRead}
               />
             </ScrollView>
@@ -1493,6 +1545,42 @@ export default function MapScreen() {
                 }}
               />
 
+              {reviewNotify !== null && (
+                <>
+                  <Text style={[styles.sectionTitle, { color: c.muted }]}>Review</Text>
+                  <Pressable
+                    ref={tourRef("reviewEntry")}
+                    style={[styles.groupsEntry, { backgroundColor: c.subtle, marginTop: 0 }]}
+                    onPress={() => openReview()}
+                    accessibilityLabel="Review of your week or month"
+                  >
+                    <MaterialIcons name="insights" size={20} color={c.primary} />
+                    <Text style={[styles.groupsEntryText, { color: c.primary }]}>Your week and month</Text>
+                    <MaterialIcons name="chevron-right" size={22} color={c.muted} />
+                  </Pressable>
+                  {/* The whole row takes the tap, the switch alone is a small target. */}
+                  <Pressable
+                    style={[styles.switchRow, { backgroundColor: c.subtle }]}
+                    onPress={() => changeReviewNotify(!reviewNotify)}
+                    accessibilityRole="switch"
+                    accessibilityLabel="Weekly review notification"
+                    accessibilityState={{ checked: reviewNotify }}
+                  >
+                    <MaterialIcons name="notifications-none" size={20} color={c.primary} />
+                    <Text style={[styles.groupsEntryText, { color: c.primary }]}>Weekly review notification</Text>
+                    <Switch
+                      value={reviewNotify}
+                      onValueChange={changeReviewNotify}
+                      trackColor={{ true: c.secondary, false: c.raised }}
+                      thumbColor={reviewNotify ? c.onSecondary : undefined}
+                    />
+                  </Pressable>
+                  <Text style={[styles.presetHint, { color: c.muted }]}>
+                    {reviewNote || "Mondays for the week before, and on the first of the month for the month."}
+                  </Text>
+                </>
+              )}
+
               {sharingEnabled && (
                 <Pressable
                   ref={tourRef("sharingEntry")}
@@ -1590,6 +1678,7 @@ const styles = StyleSheet.create({
   groupChipText: { fontSize: 13.5, fontWeight: "600" },
   groupsEntry: { flexDirection: "row", alignItems: "center", gap: 12, height: 52, paddingHorizontal: 16, borderRadius: 14, marginTop: 14 },
   groupsEntryText: { flex: 1, fontSize: 15, fontWeight: "600" },
+  switchRow: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, paddingLeft: 16, paddingRight: 10, borderRadius: 14, marginTop: 10 },
   badge: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   badgeText: { fontSize: 12, fontWeight: "800" },
   sheetTitle: { fontSize: 24, fontWeight: "800", letterSpacing: -0.3 },

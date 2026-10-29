@@ -21,9 +21,10 @@ const BAR_HEIGHT = 96;
 // { type: "routeBottom", bottom } when the panel over the map changes its height,
 // { type: "routeFocus", index } to zoom to one segment (null for the whole day)
 // and { type: "routeClear" } to go back to the live pins. The map answers a tap on
-// a stop or a line with { type: "segment", index }.
-export function buildMapHtml(dark: boolean, bottomInset = 0): string {
-  const bottom = BAR_HEIGHT + bottomInset;
+// a stop or a line with { type: "segment", index }. A route may bring its own top padding
+// ({ top }): the small map of the review has no bar or panel over it (barHeight 0).
+export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEIGHT): string {
+  const bottom = barHeight + bottomInset;
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -131,7 +132,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     var PX_PER_DEG_Z18 = 512 * Math.pow(2, 18) / 360;
     var STATE_RANK = { online: 0, stale: 1, offline: 2 };
     ${CLUSTER_SCRIPT}
-    // The day shown by the timeline: { segments, bottom, active }.
+    // The day shown by the timeline: { segments, bottom, top, active }.
     var route = null;
     var stops = [];
     // Room above a chosen device for its popup, and below for the app's buttons.
@@ -475,8 +476,9 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
     // swallows the map: the route keeps a strip of at least 120 px between the top padding and the panel.
     function routePadding() {
       var height = map.getContainer().clientHeight;
-      var bottom = Math.max(0, Math.min(route.bottom, height - 110 - 120));
-      return { top: 110, bottom: bottom, left: 40, right: 40 };
+      var top = Math.min(route.top, Math.max(0, height - 120));
+      var bottom = Math.max(0, Math.min(route.bottom, height - top - 120));
+      return { top: top, bottom: bottom, left: 40, right: 40 };
     }
     function fitRoute(index) {
       if (!route) return;
@@ -495,8 +497,8 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
       stops.forEach(function (s) { s.el.classList.toggle("active", s.index === index); });
       drawLines();
     }
-    function showRoute(segments, bottom) {
-      route = { segments: segments || [], bottom: bottom || 260, active: null };
+    function showRoute(segments, bottom, top) {
+      route = { segments: segments || [], bottom: bottom || 260, top: typeof top === "number" ? top : 110, active: null };
       selectedId = null;
       sync();
       clearStops();
@@ -558,7 +560,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0): string {
           var d = devices.find(function (x) { return keyOf(x) === data.key; });
           if (d && d.position) focusDevice(d);
         }
-        else if (data.type === "route") showRoute(data.segments, data.bottom);
+        else if (data.type === "route") showRoute(data.segments, data.bottom, data.top);
         // Same stops and selection, only the lines changed: no new markers, no new view.
         else if (data.type === "routePaths" && route) { route.segments = data.segments || route.segments; drawLines(); }
         else if (data.type === "routeFocus" && route) {

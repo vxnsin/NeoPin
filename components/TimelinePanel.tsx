@@ -70,10 +70,12 @@ type Props = {
   onHeightChange: (height: number) => void;
   // A stop or a line the user tapped on the map.
   mapTap: { index: number; n: number } | null;
+  // Opens the weekly review; left out on servers without reviews.
+  onReview?: () => void;
   onClose: () => void;
 };
 
-export default function TimelinePanel({ creds, devices, avatarFor, post, height, snaps, onHeightChange, mapTap, onClose }: Props) {
+export default function TimelinePanel({ creds, devices, avatarFor, post, height, snaps, onHeightChange, mapTap, onReview, onClose }: Props) {
   const { colors: c } = useThemeManager();
   const insets = useSafeAreaInsets();
 
@@ -437,6 +439,16 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           <View style={styles.header}>
             <Text style={[styles.title, { color: c.primary }]}>Timeline</Text>
             <View style={styles.headerActions}>
+              {/* The review is of the own account, so it stays away while someone else's day is shown. */}
+              {onReview && !viewingOther && (
+                <Pressable
+                  style={[styles.iconButton, { backgroundColor: c.subtle }]}
+                  onPress={onReview}
+                  accessibilityLabel="Weekly review"
+                >
+                  <MaterialIcons name="insights" size={20} color={c.primary} />
+                </Pressable>
+              )}
               <Pressable
                 style={[styles.iconButton, { backgroundColor: c.subtle }]}
                 onPress={() => setReloads((n) => n + 1)}

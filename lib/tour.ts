@@ -19,6 +19,7 @@ export type TourTarget =
   | "alertsEntry"
   | "inviteCodesEntry"
   | "presets"
+  | "reviewEntry"
   | "sharingEntry";
 
 // Which sheet has to be open for the control: none (the map), the people list or the settings.
@@ -40,6 +41,7 @@ export type TourStep = {
     | "where-to-vote"
     | "vpn-key"
     | "battery-charging-full"
+    | "insights"
     | "dashboard";
   title: string;
   text: string;
@@ -63,6 +65,7 @@ const STEPS: TourStep[] = [
   { key: "alerts", icon: "where-to-vote", title: "Arrival alerts", text: "Tell people when you arrive at or leave your places.", sheet: "settings", target: "alertsEntry" },
   { key: "codes", icon: "vpn-key", title: "Invite codes", text: "A code brings someone new onto the server.", sheet: "settings", target: "inviteCodesEntry" },
   { key: "battery", icon: "battery-charging-full", title: "Battery", text: "How often your phone reports. Battery saver lasts longest.", sheet: "settings", target: "presets" },
+  { key: "review", icon: "insights", title: "Review", text: "Your week and month in numbers, with a note every Monday.", sheet: "settings", target: "reviewEntry" },
   { key: "sharing", icon: "timeline", title: "Share my timeline", text: "Pick who may see where you were.", sheet: "settings", target: "sharingEntry" },
 ];
 
