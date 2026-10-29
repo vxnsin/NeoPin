@@ -53,7 +53,7 @@ import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
 import { onRide, takeRide } from "@/lib/rideInbox";
 import { sendRideAnswer } from "@/lib/ridePush";
-import type { RideQuestion } from "@/lib/rides";
+import { isStaleRide, type RideQuestion } from "@/lib/rides";
 import { timeAgo } from "@/lib/time";
 import { pinKinds } from "@/lib/mapPins";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
@@ -155,18 +155,36 @@ export default function MapScreen() {
     setSheet("find");
   }, []);
   // "Are you on Bus 10?": from the socket, a push or a tapped notification, also one that came before
-  // this screen was mounted. A running search keeps its sheet.
+  // this screen was mounted. It waits while another sheet is open (a search, the settings) and shows
+  // once that one closes, unless it is too old by then. A newer question takes the place of a waiting one.
   const [ride, setRide] = useState<RideQuestion | null>(null);
+  const [pendingRide, setPendingRide] = useState<RideQuestion | null>(null);
   useEffect(() => {
-    const open = (question: RideQuestion) => {
+    const queue = (question: RideQuestion) => {
       takeRide();
-      setRide(question);
-      setSheet((current) => (current === "find" ? current : "ride"));
+      setPendingRide(question);
     };
     const waiting = takeRide();
-    if (waiting) open(waiting);
-    return onRide(open);
+    if (waiting) setPendingRide(waiting);
+    return onRide(queue);
   }, []);
+  useEffect(() => {
+    if (sheet !== null || !pendingRide) return;
+    setPendingRide(null);
+    if (isStaleRide(pendingRide, Date.now())) return;
+    setRide(pendingRide);
+    setSheet("ride");
+  }, [sheet, pendingRide]);
+  // Another sheet that takes over from an unanswered question (a find request) hands it back to wait;
+  // a question swiped away is gone.
+  const previousSheet = useRef<Sheet>(null);
+  useEffect(() => {
+    const before = previousSheet.current;
+    previousSheet.current = sheet;
+    if (before !== "ride" || sheet === "ride") return;
+    if (sheet !== null && ride) setPendingRide((current) => current ?? ride);
+    setRide(null);
+  }, [sheet, ride]);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
   const [serverLabel, setServerLabel] = useState<string | null>(null);
@@ -1071,6 +1089,7 @@ export default function MapScreen() {
 
           {sheet === "ride" && ride && (
             <RideSheet
+              key={ride.rideId}
               question={ride}
               onAnswer={(answer) => sendRideAnswer(ride, answer)}
               onDone={() => {

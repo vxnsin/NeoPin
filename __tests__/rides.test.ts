@@ -1,12 +1,24 @@
 jest.mock("@react-native-async-storage/async-storage", () => require("@react-native-async-storage/async-storage/jest/async-storage-mock"));
+jest.mock("expo-notifications", () => ({
+  setNotificationCategoryAsync: jest.fn(),
+  scheduleNotificationAsync: jest.fn().mockResolvedValue("id"),
+  dismissNotificationAsync: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock("@/lib/credentials", () => ({
+  readCredentials: jest.fn().mockResolvedValue({ serverIp: "ws://10.0.0.2:3012", deviceId: "Pixel", token: "tok" }),
+}));
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { answerRide } from "../lib/api";
 import { dataOf } from "../lib/pushPayload";
-import { firstAnswer, firstAsk, forgetAnswer, offerRide, onRide, takeRide, wasAnswered } from "../lib/rideInbox";
+import * as Notifications from "expo-notifications";
+import { answerOnce, firstAsk, offerRide, onRide, showRide, takeRide, wasAnswered } from "../lib/rideInbox";
+import { sendRideAnswer } from "../lib/ridePush";
 import {
   RIDE_NO,
+  RIDE_MAX_AGE_MS,
   RIDE_YES,
+  isStaleRide,
   parseRideQuestion,
   readableOn,
   rememberOnce,
@@ -14,6 +26,7 @@ import {
   rideQuestionDetail,
   rideQuestionText,
   rideResponseOf,
+  stampRide,
 } from "../lib/rides";
 
 const transit = { kind: "bus", line: "10", headsign: "Hauptbahnhof", color: "#d3171e", from: "Sanderring" };
@@ -108,7 +121,7 @@ test("each ride is asked once, also when the socket and the push both bring it",
   await Promise.all([offerRide(question), offerRide(question)]);
   await offerRide(question);
   expect(shown).toEqual(["Pixel:1761750000000"]);
-  expect(takeRide()?.rideId).toBe("Pixel:1761750000000");
+  expect(typeof takeRide()?.seenAt).toBe("number");
   expect(takeRide()).toBeNull();
   off();
   // A later run (the background task, a restart) still knows it from storage.
@@ -116,13 +129,70 @@ test("each ride is asked once, also when the socket and the push both bring it",
   expect(await firstAsk("another")).toBe(true);
 });
 
-test("an answer goes out once, a failed one can be given again", async () => {
-  expect(await firstAnswer("r9")).toBe(true);
-  expect(await firstAnswer("r9")).toBe(false);
-  expect(await wasAnswered("r9")).toBe(true);
-  await forgetAnswer("r9");
-  expect(await wasAnswered("r9")).toBe(false);
-  expect(await firstAnswer("r9")).toBe(true);
+test("a question is too old 15 minutes after it reached the app, or after the ride began without that", () => {
+  const question = parseRideQuestion(socketMessage)!;
+  const seen = stampRide(question, 1_000_000);
+  expect(stampRide(seen, 2_000_000).seenAt).toBe(1_000_000);
+  expect(isStaleRide(seen, 1_000_000 + RIDE_MAX_AGE_MS)).toBe(false);
+  expect(isStaleRide(seen, 1_000_001 + RIDE_MAX_AGE_MS)).toBe(true);
+  expect(isStaleRide(question, question.at! + RIDE_MAX_AGE_MS + 1)).toBe(true);
+  expect(isStaleRide({ ...question, at: null }, Date.now())).toBe(false);
+  // The age comes back from the notification's data.
+  expect(parseRideQuestion({ ...socketMessage, seenAt: "1000000" })?.seenAt).toBe(1_000_000);
+});
+
+test("an old question is neither offered nor taken", async () => {
+  const shown: string[] = [];
+  const off = onRide((question) => shown.push(question.rideId));
+  const old = parseRideQuestion({ ...socketMessage, rideId: "old" })!;
+  // It reached the app long ago (it comes back from a notification with its seenAt).
+  await offerRide(stampRide(old, 0), RIDE_MAX_AGE_MS + 1);
+  expect(shown).toEqual([]);
+  showRide(stampRide(old, 0));
+  off();
+  expect(takeRide(RIDE_MAX_AGE_MS + 1)).toBeNull();
+  showRide(stampRide(old, 0));
+  expect(takeRide(RIDE_MAX_AGE_MS)?.rideId).toBe("old");
+});
+
+test("the same answer twice goes out once, another one after it, and none reports early", async () => {
+  let release: () => void = () => {};
+  const first = jest.fn(() => new Promise<void>((resolve) => (release = resolve)));
+  const again = jest.fn(async () => {});
+  const other = jest.fn(async () => {});
+  const a = answerOnce("r1", "yes", first);
+  const b = answerOnce("r1", "yes", again);
+  const c = answerOnce("r1", "no", other);
+  let settled = false;
+  b.then(() => (settled = true));
+  await Promise.resolve();
+  expect(first).toHaveBeenCalledTimes(1);
+  expect(again).not.toHaveBeenCalled();
+  expect(other).not.toHaveBeenCalled();
+  expect(settled).toBe(false);
+  release();
+  await Promise.all([a, b, c]);
+  expect(other).toHaveBeenCalledTimes(1);
+  // Once nothing is on its way, the answer can be given (and changed) again.
+  const later = jest.fn(async () => {});
+  await answerOnce("r1", "yes", later);
+  expect(later).toHaveBeenCalledTimes(1);
+});
+
+test("a failed answer throws and can be given again, a ride the server no longer knows just goes away", async () => {
+  const question = parseRideQuestion(socketMessage)!;
+  (global as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ detail: "Broken" }) });
+  await expect(sendRideAnswer(question, "yes")).rejects.toThrow("Broken");
+  expect(await wasAnswered(question.rideId)).toBe(false);
+  (global as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "No such ride" }) });
+  await expect(sendRideAnswer(question, "no")).resolves.toBeUndefined();
+  expect(await wasAnswered(question.rideId)).toBe(true);
+  expect(Notifications.dismissNotificationAsync).toHaveBeenCalledWith("ride.Pixel:1761750000000");
+  // The answer may still be changed.
+  const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 204, json: async () => ({}) });
+  (global as any).fetch = fetchMock;
+  await sendRideAnswer(question, "yes");
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ rideId: "Pixel:1761750000000", answer: "yes" });
 });
 
 test("the answer is posted with the ride id and expects no content", async () => {

@@ -3,15 +3,17 @@ import { AppState, Platform } from "react-native";
 import { answerRide } from "@/lib/api";
 import { readCredentials } from "@/lib/credentials";
 import { dataOf } from "@/lib/pushPayload";
-import { firstAnswer, firstAsk, forgetAnswer, offerRide, showRide, wasAnswered } from "@/lib/rideInbox";
+import { answerOnce, firstAsk, offerRide, rememberAnswer, showRide, wasAnswered } from "@/lib/rideInbox";
 import {
   RIDE_CATEGORY,
   RIDE_NO,
   RIDE_YES,
+  isStaleRide,
   parseRideQuestion,
   rideQuestionDetail,
   rideResponseOf,
   rideQuestionText,
+  stampRide,
   type RideAnswer,
   type RideQuestion,
 } from "@/lib/rides";
@@ -23,44 +25,64 @@ const notificationId = (rideId: string) => `ride.${rideId}`;
 
 // Yes and No answer without opening the app: Android hands the button to the background task
 // (expo-notifications runs registered tasks for action buttons while the app is not in front).
-let category: Promise<unknown> | null = null;
-function rideCategory(): Promise<unknown> {
+// False when the category could not be registered; the notification then goes out without buttons.
+let category: Promise<boolean> | null = null;
+function rideCategory(): Promise<boolean> {
   category ??= Notifications.setNotificationCategoryAsync(RIDE_CATEGORY, [
     { identifier: RIDE_YES, buttonTitle: "Yes", options: { opensAppToForeground: false } },
     { identifier: RIDE_NO, buttonTitle: "No", options: { opensAppToForeground: false } },
-  ]).catch(() => {
-    category = null;
-  });
+  ]).then(
+    () => true,
+    () => {
+      category = null;
+      return false;
+    }
+  );
   return category;
 }
 
 // The question travels in the notification's data, so a tap or a button brings it back whole.
-const rideData = (question: RideQuestion) => ({ type: "rideQuestion", rideId: question.rideId, transit: question.transit, at: question.at });
+const rideData = (question: RideQuestion) => ({
+  type: "rideQuestion",
+  rideId: question.rideId,
+  transit: question.transit,
+  at: question.at,
+  ...(question.seenAt !== undefined ? { seenAt: question.seenAt } : {}),
+});
 
 async function present(question: RideQuestion, failed = false) {
-  if (!failed) await rideCategory();
+  const buttons = !failed && (await rideCategory());
   await Notifications.scheduleNotificationAsync({
     identifier: notificationId(question.rideId),
     content: failed
       ? { title: "Your answer did not get through", body: `${rideQuestionText(question)} Tap to answer in NeoPin.`, data: rideData(question) }
-      : { title: rideQuestionText(question), body: rideQuestionDetail(question), data: rideData(question), categoryIdentifier: RIDE_CATEGORY },
+      : {
+          title: rideQuestionText(question),
+          body: buttons ? rideQuestionDetail(question) : `${rideQuestionDetail(question)} Tap to answer.`,
+          data: rideData(question),
+          ...(buttons ? { categoryIdentifier: RIDE_CATEGORY } : {}),
+        },
     trigger: Platform.OS === "android" ? { channelId: CHANNEL_ID } : null,
   });
 }
 
-// Sends the answer once and takes the notification away. Throws when the server could not be reached,
-// the answer may then be given again.
-export async function sendRideAnswer(question: RideQuestion, answer: RideAnswer): Promise<void> {
-  if (!(await firstAnswer(question.rideId))) return;
-  try {
+const dismiss = (rideId: string) => Notifications.dismissNotificationAsync(notificationId(rideId)).catch(() => {});
+
+// Sends the answer and takes the notification away. Throws when the server could not be reached, the
+// answer may then be given again; a later answer replaces an earlier one. A ride the server no longer
+// knows (404) is over: nothing to retry, the question just goes away.
+export function sendRideAnswer(question: RideQuestion, answer: RideAnswer): Promise<void> {
+  return answerOnce(question.rideId, answer, async () => {
     const creds = await readCredentials();
     if (!creds) throw new Error("Not signed in.");
-    await answerRide(creds, question.rideId, answer);
-  } catch (error) {
-    await forgetAnswer(question.rideId);
-    throw error;
-  }
-  await Notifications.dismissNotificationAsync(notificationId(question.rideId)).catch(() => {});
+    try {
+      await answerRide(creds, question.rideId, answer);
+    } catch (error: any) {
+      if (error?.status !== 404) throw error;
+    }
+    await rememberAnswer(question.rideId);
+    await dismiss(question.rideId);
+  });
 }
 
 // A button on the notification. Without the app in front a failed answer leaves a notification
@@ -75,14 +97,19 @@ async function answerFromButton(question: RideQuestion, answer: RideAnswer) {
 }
 
 // From lib/push.ts when a ride notification is tapped or answered with the app running. A button is
-// answered where the user is ("answered"); a tap opens the question on the map ("shown").
-export function openRideResponse(payload: unknown): "answered" | "shown" | null {
+// answered where the user is ("answered"); a tap opens the question on the map ("shown"), unless the
+// question is too old by now ("stale").
+export function openRideResponse(payload: unknown): "answered" | "shown" | "stale" | null {
   const response = rideResponseOf(payload);
   if (!response) return null;
   const { question, answer } = response;
   if (answer) {
     answerFromButton(question, answer);
     return "answered";
+  }
+  if (isStaleRide(question, Date.now())) {
+    dismiss(question.rideId);
+    return "stale";
   }
   wasAnswered(question.rideId).then((done) => {
     if (!done) showRide(question);
@@ -92,8 +119,12 @@ export function openRideResponse(payload: unknown): "answered" | "shown" | null 
 
 // Asks a ride once, whichever way it came (socket, push, push task): as the sheet with the app in front,
 // as a notification with Yes and No on Android otherwise. iPhones keep it for the map until the app is back.
-export async function askRide(question: RideQuestion): Promise<void> {
-  if (AppState.currentState === "active" || Platform.OS !== "android") await offerRide(question);
+// A question older than 15 minutes is not asked.
+export async function askRide(input: RideQuestion): Promise<void> {
+  const now = Date.now();
+  const question = stampRide(input, now);
+  if (isStaleRide(question, now)) return;
+  if (AppState.currentState === "active" || Platform.OS !== "android") await offerRide(question, now);
   else if (await firstAsk(question.rideId)) await present(question).catch(() => {});
 }
 

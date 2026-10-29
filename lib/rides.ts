@@ -15,7 +15,12 @@ export type RideTransit = {
   from: string | null;
 };
 
-export type RideQuestion = { rideId: string; transit: RideTransit; at: number | null };
+// `at` is when the ride began, `seenAt` when this app got the question (it travels along in the
+// notification, so a tap later still knows how old the question is).
+export type RideQuestion = { rideId: string; transit: RideTransit; at: number | null; seenAt?: number };
+
+// A question is only worth asking while the ride may still be going on.
+export const RIDE_MAX_AGE_MS = 15 * 60_000;
 
 export type RideAnswer = "yes" | "no";
 
@@ -78,6 +83,7 @@ export function parseRideQuestion(input: unknown): RideQuestion | null {
   const color = hexColor(transit.color);
   const from = text(transit.from) ?? text(asObject(transit.from)?.name);
   const at = Number(data.at);
+  const seenAt = Number(data.seenAt);
   return {
     rideId,
     transit: {
@@ -89,7 +95,19 @@ export function parseRideQuestion(input: unknown): RideQuestion | null {
       from,
     },
     at: data.at !== undefined && data.at !== null && Number.isFinite(at) ? at : null,
+    ...(data.seenAt !== undefined && data.seenAt !== null && Number.isFinite(seenAt) ? { seenAt } : {}),
   };
+}
+
+// Notes when the question reached the app, the first time it does.
+export function stampRide(question: RideQuestion, now: number): RideQuestion {
+  return question.seenAt !== undefined ? question : { ...question, seenAt: now };
+}
+
+// Older than 15 minutes since it reached the app (or, without that, since the ride began): not asked any more.
+export function isStaleRide(question: RideQuestion, now: number, maxAgeMs = RIDE_MAX_AGE_MS): boolean {
+  const since = question.seenAt ?? question.at;
+  return since !== null && now - since > maxAgeMs;
 }
 
 // "Bus 10" but "RB 53" and "S1": a line that starts with letters already says what it is.
