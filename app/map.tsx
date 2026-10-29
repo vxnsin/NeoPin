@@ -37,6 +37,7 @@ import TimelineSharingPanel from "@/components/TimelineSharingPanel";
 import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
+import MyDevicesSection from "@/components/MyDevicesSection";
 import FindSheet from "@/components/FindSheet";
 import RideSheet from "@/components/RideSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
@@ -1480,6 +1481,8 @@ export default function MapScreen() {
                   </Text>
                 </>
               ) : null}
+
+              <MyDevicesSection auth={creds} />
 
               <HideSection
                 auth={creds}
