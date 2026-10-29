@@ -1,4 +1,4 @@
-// The bell in the HUD: who joined with an invite code.
+// The bell in the HUD: who joined with an invite code, who arrived somewhere or left.
 const bellButton = document.getElementById("bellButton");
 const bellBadge = document.getElementById("bellBadge");
 
@@ -16,15 +16,41 @@ function updateBell() {
   bellButton.setAttribute("aria-label", unread ? `Notifications, ${unread} unread` : "Notifications");
 }
 
-function notificationRow(item) {
+// The person of an arrival from the groups, for the picture; their name from then otherwise.
+function presencePerson({ userId, name }) {
+  for (const group of groups) {
+    const member = group.members.find((m) => m.id === userId);
+    if (member) return member;
+  }
+  return { id: userId, username: name, displayName: name, avatarUrl: null };
+}
+
+function notificationText(item) {
+  if (item.type === "arrived" || item.type === "left") {
+    const { name, placeName, at } = item.data;
+    const clock = new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return {
+      user: presencePerson(item.data),
+      title: `${esc(name)} ${item.type === "arrived" ? "arrived at" : "left"} ${esc(placeName)}`,
+      meta: `${esc(clock)} · ${esc(timeAgo(item.createdAt))}`,
+    };
+  }
   const { user, invitedBy, groupName } = item.data;
-  const joined = `${personName(user)} joined with ${esc(invitedBy.displayName || invitedBy.username)}'s invite code`;
+  return {
+    user,
+    title: `${personName(user)} joined with ${esc(invitedBy.displayName || invitedBy.username)}'s invite code`,
+    meta: `${groupName ? `${esc(groupName)} · ` : ""}${esc(timeAgo(item.createdAt))}`,
+  };
+}
+
+function notificationRow(item) {
+  const { user, title, meta } = notificationText(item);
   return `
     <li class="row notice${freshIds.has(item.id) || !item.readAt ? " is-unread" : ""}">
       ${accountAvatarHtml(user, "sm")}
       <span class="row__text">
-        <strong>${joined}</strong>
-        <span>${groupName ? `${esc(groupName)} · ` : ""}${esc(timeAgo(item.createdAt))}</span>
+        <strong>${title}</strong>
+        <span>${meta}</span>
       </span>
     </li>`;
 }
@@ -34,7 +60,7 @@ function renderNotifications() {
   modalBody.innerHTML = notifications.length
     ? `${unread ? '<div class="row__edit-actions notice-actions"><button class="btn btn--small btn--ghost" type="button" data-read-all>Mark all read</button></div>' : ""}
        <ul class="rows">${notifications.map(notificationRow).join("")}</ul>`
-    : '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-bell" /></svg></span><strong>Nothing new</strong>You hear about new accounts that join with your invite codes here.</div>';
+    : '<div class="tl-note"><span class="empty__icon"><svg class="icon"><use href="#i-bell" /></svg></span><strong>Nothing new</strong>You hear here about new accounts that join with your invite codes, and when people arrive at or leave their places.</div>';
 }
 
 async function markAllRead() {

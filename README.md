@@ -121,6 +121,7 @@ Then set these two in `.env` and connect the app to `wss://neopin.example.com`:
 | `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
 | `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
 | `PUSH_WAIT_MS` | `20000` | How long asking an offline phone for its location waits for the answer |
+| `TZ` | the system's | Time zone of the clock times in push texts, e.g. `Europe/Berlin`. The Docker image runs in UTC without it |
 | `INVITE_CODES` | on | Sign-up with invite codes, see [Invite codes](#invite-codes). `off` turns it off |
 | `INVITE_TTL_DAYS` | `7` | How long an invite code stays valid |
 | `INVITE_MAX_OPEN` | `5` | Open codes a non-admin account may hold at once, the admin has no limit |
@@ -144,7 +145,7 @@ Without an invite there is no sign-up: the admin creates accounts. With invite c
 
 ## Push notifications
 
-With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations and find requests. Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
+With a Firebase project the server can wake a phone that has no connection and ask it for a fresh location, and it can notify people about group invitations, find requests and [arrivals](#arrival-alerts). Without credentials push is off, nothing else changes, and `GET /api/status` says `"push": false` so the clients hide the feature.
 
 How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds.
 
@@ -175,6 +176,14 @@ Limits:
 - An Android app that was force-stopped receives no push until it is opened again, and aggressive battery managers of some manufacturers (Xiaomi, Huawei, Oppo, Samsung sleeping apps, ...) hold or drop pushes of apps they put to sleep.
 - iOS needs APNs: an Apple Developer account and an APNs key uploaded to the Firebase project. iOS also throttles silent pushes and does not run them for apps the user swiped away, so waking an iPhone is best effort.
 - One app build is tied to one Firebase project (its `google-services.json`). A server can only push to apps built for the project of its service account.
+
+## Arrival alerts
+
+Everybody can let others know when they arrive at or leave one of their own places. `GET /api/alerts` answers `{ "places": [placeId], "recipients": { "users": [id], "groups": [id] } }`, `PUT` takes the same and answers what was saved. Until someone saves, their places of kind `home` and `work` count and nobody is told. A place that is not your own, someone who shares no group with you (or yourself) and a group you are not in answer `400`. A group means its members at the time of the alert, also those who join later.
+
+The server decides from the positions every device sends (`updatePosition`, and the newest fix of a `positionBatch`). Inside is within the place's radius, at least 60 m; arrived takes two fixes inside at least 2 minutes apart; left takes two fixes more than 50 m beyond the radius, the later one at least 3 minutes after the last fix inside. Every device of a person counts on its own, the alerts are per person: the same place and direction at most once in 10 minutes, so two phones coming home make one alert. The first change after a place was switched on only learns where the device is. While a person is invisible (`PUT /api/me/hidden`) nothing goes out, and only people who still share a group with the person when it happens are told.
+
+Each recipient gets a notification `arrived` or `left` with `{ userId, name, placeId, placeName, kind, at }` (`at` in ms), `notificationsChanged` on their sockets and, on Android phones with [push](#push-notifications), a notification `Kaspar arrived at Home` / `Leo left Work` with the clock time (`TZ`) in the body and the data `{ "type", "userId", "placeId", "at" }`. iPhones read it in the list.
 
 ## Transit data
 
@@ -286,7 +295,8 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/api/invite-codes/check` | | `{ "code" }` answers `{ "valid", "invitedBy"?, "groupName"? }` |
 | `POST` `GET` | `/api/invite-codes` | ✓ | Create a code (`{ "groupId"?, "note"? }`, `201`) and list your own, the admin gets all |
 | `DELETE` | `/api/invite-codes/:id` | ✓ | Revokes an open code. `204`, else `404` |
-| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`) |
+| `GET` | `/api/notifications` | ✓ | Your latest 50 notifications, newest first (`inviteUsed`, `arrived`, `left`) |
+| `GET` `PUT` | `/api/alerts` | ✓ | `{ "places", "recipients": { "users", "groups" } }`: which own places send [arrival alerts](#arrival-alerts) to whom. `400` for foreign places, people or groups |
 | `POST` | `/api/notifications/read` | ✓ | `{ "ids"? }` marks them read, all when omitted. `204` |
 | `GET` | `/api/me` | ✓ | The signed-in account |
 | `POST` | `/api/me/password` | ✓ | `{ "currentPassword", "newPassword" }`, at least 8 characters |
