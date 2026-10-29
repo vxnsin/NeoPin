@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
+import Footer from "@/components/Footer";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import useThemeManager from "@/hooks/useThemeManager";
 import { readCredentials } from "@/lib/socket";
 import { httpBase } from "@/lib/api";
 import { logout } from "@/lib/logout";
-import { formatCode, normalizeCode, serverFromLink } from "@/lib/invite";
+import { formatCode, linkServerParams, normalizeCode, serverFromLink } from "@/lib/invite";
 
 // neopin://invite?code=XXXXX-XXXXX&server=https://... lands here (the server's /invite page sends
 // it) and goes on to the login screen in invite mode, with the server filled in when it came along.
@@ -14,11 +15,11 @@ import { formatCode, normalizeCode, serverFromLink } from "@/lib/invite";
 export default function Invite() {
   const { colors } = useThemeManager();
   const router = useRouter();
-  const { code, server } = useLocalSearchParams<{ code?: string; server?: string }>();
+  const { code, server, secure } = useLocalSearchParams<{ code?: string; server?: string; secure?: string }>();
   const params: Record<string, string> = {};
   if (typeof code === "string" && code) params.code = code;
-  const from = serverFromLink(server);
-  if (from) params.server = from;
+  const from = serverFromLink(server, secure);
+  if (from) Object.assign(params, linkServerParams(from));
 
   // null while the stored login is looked up, "" when there is none.
   const [loggedInTo, setLoggedInTo] = useState<string | null>(null);
@@ -93,13 +94,14 @@ export default function Invite() {
           )}
         </Pressable>
       </View>
+      <Footer inline />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 110 },
+  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32 },
   badge: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center", marginBottom: 20 },
   title: { fontSize: 26, fontWeight: "800", letterSpacing: -0.4, textAlign: "center" },
   lead: { fontSize: 15, marginTop: 8, marginBottom: 28, textAlign: "center", maxWidth: 420 },

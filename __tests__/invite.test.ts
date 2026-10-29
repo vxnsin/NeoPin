@@ -1,4 +1,4 @@
-import { checkLine, codeChip, codeFromLink, formatCode, hasProblems, inviteLink, isFullCode, normalizeCode, registerProblems, serverFromLink, shareText } from "../lib/invite";
+import { checkLine, codeChip, codeFromLink, formatCode, hasProblems, inviteLink, isFullCode, normalizeCode, registerProblems, serverFromLink, shareText, linkServerParams, inviteRedirect } from "../lib/invite";
 
 test("a code is normalised like the server does", () => {
   expect(normalizeCode(" abcde-12345 ")).toBe("ABCDE12345");
@@ -26,8 +26,27 @@ test("the server of an invite link is taken as it came, anything else is dropped
   expect(serverFromLink("https://neopin.example.org/")).toBe("https://neopin.example.org");
   expect(serverFromLink(["http://192.168.1.20:3012"])).toBe("http://192.168.1.20:3012");
   expect(serverFromLink("javascript:alert(1)")).toBe("");
-  expect(serverFromLink("neopin.example.org")).toBe("");
+  expect(serverFromLink("neopin.example.org")).toBe("https://neopin.example.org");
+  expect(serverFromLink("192.168.1.20:3012", "0")).toBe("http://192.168.1.20:3012");
+  expect(serverFromLink("evil/path")).toBe("");
   expect(serverFromLink(undefined)).toBe("");
+});
+
+test("the server goes on inside the app without its scheme", () => {
+  expect(linkServerParams("https://neopin.example.org/")).toEqual({ server: "neopin.example.org" });
+  expect(linkServerParams("http://192.168.1.20:3012")).toEqual({ server: "192.168.1.20:3012", secure: "0" });
+});
+
+test("an incoming invite link is rewritten so the router finds the invite route", () => {
+  expect(inviteRedirect("neopin:///invite?code=XJ7KZTJ8E4&server=https://neopin.labvault.xyz")).toBe(
+    "neopin:///invite?code=XJ7KZTJ8E4&server=neopin.labvault.xyz"
+  );
+  expect(inviteRedirect("neopin://invite?code=xj7kz-tj8e4&server=http%3A%2F%2F192.168.1.20%3A3012")).toBe(
+    "neopin:///invite?code=XJ7KZTJ8E4&server=192.168.1.20%3A3012&secure=0"
+  );
+  expect(inviteRedirect("neopin://invite?code=XJ7KZTJ8E4")).toBe("neopin:///invite?code=XJ7KZTJ8E4");
+  expect(inviteRedirect("neopin://map")).toBeNull();
+  expect(inviteRedirect("https://neopin.labvault.xyz/invite/XJ7KZ-TJ8E4")).toBeNull();
 });
 
 test("a deep link is read for its code", () => {

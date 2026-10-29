@@ -13,6 +13,7 @@ import {
 import * as Device from "expo-device";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { MaterialIcons } from "@expo/vector-icons";
+import Footer from "@/components/Footer";
 import useThemeManager from "@/hooks/useThemeManager";
 import Field from "@/components/Field";
 import { useWebSocketContext } from "@/context/WebSocket";
@@ -44,9 +45,9 @@ const Login = () => {
   const { colors } = useThemeManager();
   const router = useRouter();
   const { connect } = useWebSocketContext();
-  const params = useLocalSearchParams<{ code?: string; server?: string }>();
+  const params = useLocalSearchParams<{ code?: string; server?: string; secure?: string }>();
   const linkCode = typeof params.code === "string" ? normalizeCode(params.code) : "";
-  const linkServer = serverFromLink(params.server);
+  const linkServer = serverFromLink(params.server, params.secure);
   const [server, setServer] = useState(linkServer);
   // An invite link from the server's page brings everything, so it goes straight to the form.
   const [step, setStep] = useState<Step>(linkCode && linkServer ? "form" : "server");
@@ -431,6 +432,7 @@ const Login = () => {
             )}
           </View>
         )}
+        <Footer inline />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -438,7 +440,7 @@ const Login = () => {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 110 },
+  content: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 48, paddingBottom: 32 },
   logo: { width: 84, height: 84, marginBottom: 14 },
   title: { fontSize: 30, fontWeight: "800", letterSpacing: -0.5 },
   lead: { fontSize: 15, marginTop: 6, marginBottom: 30, textAlign: "center" },
