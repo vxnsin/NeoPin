@@ -12,15 +12,18 @@ import { userAgent } from "./overpass.js";
 // OSRM answers at most this many coordinates per match, longer trips go in pieces.
 const MAX_COORDS = 100;
 const DEFAULT_RADIUS_M = 25;
-const RADIUS_M = { min: 10, max: 50 };
+// The public FOSSGIS servers refuse a radius over 40 m with TooBig, for the whole request: one
+// vague fix of the Battery profile would cost the trip its roads.
+const RADIUS_M = { min: 10, max: 40 };
 // A match that is much longer than the fixes took a detour the phone never made.
 const MAX_STRETCH = 1.5;
 const MAX_EXTRA_M = 200;
 const TIMEOUT_MS = 10_000;
 const RETRY_MS = 10 * 60_000;
 // Raised whenever snapping gets better: a path stored by an older version, also "no path",
-// counts as not cached and the trip is matched again. 2: detours and pieces (1.7.1).
-export const PATH_ALGO = 2;
+// counts as not cached and the trip is matched again. 2: detours and pieces (1.7.1). 3: radii
+// within the public servers' limit, trips with vague fixes had been stored as "no path".
+export const PATH_ALGO = 3;
 const PROFILES = { walking: "foot", cycling: "bike", driving: "car" };
 
 // The public FOSSGIS servers allow one request a second; a queue keeps to that.

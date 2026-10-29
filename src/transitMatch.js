@@ -608,7 +608,8 @@ function stopIndexAround(fixes, at, last, nearest = nearestStopM) {
 
 // A trip that began or ended on foot is cut where the ride began and ended, at the stops:
 // the walk to the stop, the ride, the walk from the stop. The timetables and the halts then
-// see the ride alone. A walk shorter than a trip's minimum is no walk and stays with the ride.
+// see the ride alone. A walk shorter than a trip's minimum is no walk and stays with the ride,
+// and so does a "walk" faster than one: that was the ride up to a station it halted at.
 export function splitAtStops(trip) {
   const fixes = trip.fixes;
   const lastIndex = (fixes?.length ?? 0) - 1;
@@ -619,8 +620,9 @@ export function splitAtStops(trip) {
   const slow = lastFast(fixes, dist);
   const board = stopIndexAround(fixes, fast, true);
   const alight = stopIndexAround(fixes, slow, false);
-  const start = board > 0 && dist[board] >= MIN_TRIP_M ? board : 0;
-  const end = alight >= 0 && dist[lastIndex] - dist[alight] >= MIN_TRIP_M ? alight : lastIndex;
+  const walked = (i, k) => dist[k] - dist[i] >= MIN_TRIP_M && speedOver(fixes, dist, i, k) < RIDE_MS;
+  const start = board > 0 && walked(0, board) ? board : 0;
+  const end = alight >= 0 && walked(alight, lastIndex) ? alight : lastIndex;
   if (start === 0 && end === lastIndex) return [trip];
   if (end <= start || dist[end] - dist[start] < MIN_TRIP_M) return [trip];
   const parts = [];
