@@ -24,6 +24,7 @@ import {
   userForToken,
   verifyLogin,
   HIDDEN_FOREVER,
+  hiddenSpans,
   hiddenUntilOf,
   isHidden,
   setHiddenUntil,
@@ -71,6 +72,7 @@ import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToke
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
+import { SHARING_MODES, canSeeTimeline, saveTimelineSharing, timelinePeople, timelineSharing, withoutSpans } from "./sharing.js";
 import { transitStatus } from "./transit.js";
 import { TRANSIT_KINDS, TRIP_MODES, matchTransit, setTripMode } from "./transitMatch.js";
 import { smoothPaths } from "./paths.js";
@@ -602,6 +604,17 @@ export function createApp({ gracefulShutdown = true } = {}) {
     if (!user.is_admin) throw problem(403, "forbidden", "You can only see your own devices");
     if (!getUser(requested)) throw problem(404, "unknown-user", "No such account");
     return requested;
+  }
+
+  // Whose timeline a request reads: the signed-in account's, or one shared with it (see
+  // canSeeTimeline). `full` is false for anyone but the owner and the admin, they do not get what
+  // happened while the owner was invisible.
+  function timelineReader(ctx, requested) {
+    const { user } = currentUser(ctx);
+    if (requested === undefined || requested === user.id) return { ownerId: user.id, full: true };
+    if (!canSeeTimeline(user, requested)) throw problem(403, "forbidden", "This timeline is not shared with you");
+    if (!getUser(requested)) throw problem(404, "unknown-user", "No such account");
+    return { ownerId: requested, full: user.is_admin === 1 };
   }
 
 
@@ -1419,11 +1432,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
           response: { 200: Timeline, 400: t.problem(), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
         async (ctx) => {
-          const userId = targetUserId(ctx, ctx.query.userId);
+          const { ownerId: userId, full } = timelineReader(ctx, ctx.query.userId);
           const range = dayRange(ctx.query.date, ctx.query.tz ?? 0);
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
-          const points = positionsBetween(userId, ctx.query.deviceId, range.from, range.to);
-          const dismissed = dismissedVisits(userId, ctx.query.deviceId, range.from, range.to);
+          // The fixes and dismissed stops from while the owner was invisible are not for others.
+          const spans = full ? [] : hiddenSpans(userId, range.from, range.to);
+          const points = withoutSpans(positionsBetween(userId, ctx.query.deviceId, range.from, range.to), spans);
+          const dismissed = withoutSpans(dismissedVisits(userId, ctx.query.deviceId, range.from, range.to), spans);
           const timeline = buildTimeline(points, { dismissed });
           // The paths need the final mode of every trip, corrections included, so they come after the lines.
           const [places, paths] = await Promise.all([
@@ -1492,7 +1507,49 @@ export function createApp({ gracefulShutdown = true } = {}) {
           query: t.object({ deviceId: t.string().max(64), tz: t.number().optional(), userId: t.number().optional() }),
           response: { 200: t.array(t.string()), 401: t.problem(), 403: t.problem(), 404: t.problem() },
         },
-        (ctx) => daysWithData(targetUserId(ctx, ctx.query.userId), ctx.query.deviceId, ctx.query.tz ?? 0)
+        (ctx) => {
+          const { ownerId, full } = timelineReader(ctx, ctx.query.userId);
+          return daysWithData(ownerId, ctx.query.deviceId, ctx.query.tz ?? 0, { exceptHidden: !full });
+        }
+      );
+
+      // Who may read my timeline: nobody ("off"), everyone in my groups, or chosen people and groups.
+      const TimelineSharing = t.object({
+        mode: t.enum(SHARING_MODES),
+        users: t.array(t.int()).max(200),
+        groups: t.array(t.int()).max(200),
+      });
+
+      api.get("/timeline/sharing", { response: { 200: TimelineSharing, 401: t.problem() } }, (ctx) =>
+        timelineSharing(currentUser(ctx).user.id)
+      );
+
+      api.put(
+        "/timeline/sharing",
+        { body: TimelineSharing, response: { 200: TimelineSharing, 400: t.problem(), 401: t.problem() } },
+        (ctx) => {
+          const { user } = currentUser(ctx);
+          try {
+            return saveTimelineSharing(user.id, ctx.body);
+          } catch (error) {
+            if (error.code === "invalid") throw problem(400, "invalid-sharing", error.message);
+            throw error;
+          }
+        }
+      );
+
+      // Whose timelines I may read, myself first, with the devices to pick from.
+      api.get(
+        "/timeline/people",
+        {
+          response: {
+            200: t.array(
+              t.object({ userId: t.number(), displayName: t.string(), avatarUrl: t.string().nullable(), devices: t.array(t.string()) })
+            ),
+            401: t.problem(),
+          },
+        },
+        (ctx) => timelinePeople(currentUser(ctx).user)
       );
 
       // Which regions have timetable data for the lines in the timeline, and how fresh it is.

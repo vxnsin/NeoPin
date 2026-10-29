@@ -663,3 +663,18 @@
   background: var(--brand-soft);
   color: var(--brand);
 }
+
+/* Share my timeline: the three choices, then the people and groups to pick. */
+.share__chips {
+  flex-wrap: wrap;
+  padding: 4px 16px 8px;
+  overflow: visible;
+}
+
+.share__modes {
+  padding-top: 16px;
+}
+
+.share__note {
+  padding: 4px 16px 12px;
+}

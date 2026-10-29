@@ -208,6 +208,14 @@ The server replaces the trip's `path` with that course and says where it came fr
 
 **Privacy.** Unlike the place lookup, which only sees single spots, the routing service sees the whole way of every trip it matches. The default is the public OSRM of [FOSSGIS](https://routing.openstreetmap.de), which logs requests (see its privacy statement). It gets the coordinates and the seconds between the fixes, not the date or the account, and not the centres of the stays at both ends of a trip. Run your own [OSRM](https://github.com/Project-OSRM/osrm-backend) and point `ROAD_MATCH_URL` at it, or set it to `off` and the fixes are drawn as they are. FOSSGIS allows light use only: one request a second (the server keeps to it), a valid user agent, and attribution: the routes are based on [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors.
 
+## Shared timelines
+
+A timeline is private until its owner shares it. `PUT /api/timeline/sharing` takes `{ "mode", "users", "groups" }`: `off` (the default), `groups` for everyone who shares a group with you, or `selected` for the people in `users` and the members of `groups`. Only people and groups you share a group with can be picked (`400` otherwise), and the picks are kept while another mode is on. Whoever stops sharing a group with you loses access, also when picked by name. The admin reads every timeline, as before.
+
+`GET /api/timeline/people` lists whose timelines you may read, yourself first, with their linked devices, and `GET /api/timeline` / `/api/timeline/days` take their `userId`; anything else answers `403`. A shared timeline is for reading: naming places, correcting trips and dismissing stops stay with the owner and the admin.
+
+The server keeps every stretch of being invisible, from switching it on until it runs out or is switched off. Fixes inside those stretches, and stops dismissed there, are left out of a timeline read by anyone but the owner and the admin, and a day spent invisible does not appear in their `days`.
+
 ## Console
 
 Type into the running server. It only starts when a terminal is attached; without one (Docker without `-it`) it stays off and the dashboard does the same jobs.
@@ -309,7 +317,9 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"?, "userId"? }`, asks one or all devices and answers with the list. An offline device is woken with a push when [push](#push-notifications) is set up: `202` when it has not answered in time |
 | `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
-| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). The admin may pass `userId` |
+| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
+| `GET` `PUT` | `/api/timeline/sharing` | ✓ | `{ "mode": "off" \| "groups" \| "selected", "users", "groups" }`: who may read your timeline. `400` for people or groups you share nothing with |
+| `GET` | `/api/timeline/people` | ✓ | `[{ userId, displayName, avatarUrl, devices }]`: whose timelines you may read, you first |
 | `GET` | `/api/transit` | ✓ | `{ enabled, regions: [{ cell, feeds, updatedAt }] }`: which regions have timetable data, see [Transit data](#transit-data) |
 | `POST` | `/api/rides/answer` | ✓ | `{ rideId, answer: "yes" \| "no" }` answers a `rideQuestion`. `204`, `404` for an unknown ride or someone else's |
 | `PUT` | `/api/trips/mode` | ✓ | `{ deviceId, start, mode }` corrects how a trip was made: `walking`, `cycling`, `driving`, `transit`, or `auto` to forget the correction. `404` when no trip of the device starts at `start` |
