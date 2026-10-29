@@ -5,6 +5,8 @@ import { config } from "./config.js";
 import { REVIEW_SCHEMA } from "./reviewSchema.js";
 
 let db = null;
+// The file the open database lives in, ":memory:" in tests. Backups copy it.
+let dbFile = null;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
@@ -291,6 +293,18 @@ const SCHEMA = `
     at INTEGER NOT NULL,
     PRIMARY KEY (user_id, place_id, direction)
   );
+  CREATE TABLE IF NOT EXISTS passkeys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id TEXT NOT NULL UNIQUE,
+    public_key BLOB NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    transports TEXT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS passkeys_user ON passkeys(user_id);
 `;
 
 // ":memory:" gives tests a clean database. Anything else is a file path.
@@ -298,6 +312,7 @@ export function initDb(file = config.dbPath) {
   closeDb();
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   db = new DatabaseSync(file);
+  dbFile = file;
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   const hadGroups = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'user_groups'").get();
@@ -381,7 +396,13 @@ export function getDb() {
   return db ?? initDb();
 }
 
+export function currentDbFile() {
+  getDb();
+  return dbFile;
+}
+
 export function closeDb() {
   db?.close();
   db = null;
+  dbFile = null;
 }

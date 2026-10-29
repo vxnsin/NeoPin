@@ -21,6 +21,7 @@ config.placeFallbackUrl = null;
 config.roadMatchUrl = null;
 // Tests log in a lot, and scrypt makes every login slow enough to count.
 config.loginRateLimit.max = 30;
+config.passkeyRateLimit.max = 60;
 
 export const PASSWORD = "correct-horse";
 

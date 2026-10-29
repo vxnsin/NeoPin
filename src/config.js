@@ -94,6 +94,13 @@ export const config = {
   inviteMaxOpen: Number(process.env.INVITE_MAX_OPEN) || 5,
   // How long asking an offline device for its location waits for the answer.
   pushWaitMs: Number(process.env.PUSH_WAIT_MS) || 20 * 1000,
+  // A copy of the database every night at 03:30 (server time) in backups/ next to it, the newest
+  // BACKUP_KEEP stay. "off" turns it off; the download in the dashboard works either way.
+  backups: !["off", "false", "no", "0"].includes((process.env.BACKUPS ?? "").trim().toLowerCase()),
+  backupKeep: Math.max(1, Number(process.env.BACKUP_KEEP) || 7),
+  // The address the dashboard is reached at, e.g. https://neopin.example.com. Passkeys are bound
+  // to its host name; without it the Host of each request counts.
+  publicUrl: envOrNull("PUBLIC_URL"),
   // Only behind a reverse proxy: take the client IP and https from X-Forwarded-*.
   trustProxy: process.env.TRUST_PROXY === "true",
   // Send the dashboard cookie over HTTPS only. Turn on once the server sits behind TLS.
@@ -104,6 +111,8 @@ export const config = {
   heartbeatMs: 30 * 1000,
   locationWaitMs: 2 * 1000,
   loginRateLimit: { windowMs: 60 * 1000, max: 5 },
+  // Passkey sign-ins and registrations, per IP. Each try takes two requests.
+  passkeyRateLimit: { windowMs: 60 * 1000, max: 10 },
   // Wrong logins over the socket and HTTP routes with a device token, per IP.
   deviceAuthLimit: { windowMs: 60 * 1000, max: 10 },
   // Profile picture uploads and downloads per IP, a whole family fits easily.

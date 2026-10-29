@@ -104,6 +104,7 @@ function setMode(register) {
   registering = register;
   clearError();
   for (const field of registerFields) field.hidden = !register;
+  passkeyRow.hidden = register || !passkeysOn;
   input.autocomplete = register ? "new-password" : "current-password";
   lead.textContent = register ? "Create your account with an invite code." : "Sign in to see where your devices are.";
   submitLabel.textContent = register ? "Create account" : "Sign in";
@@ -227,10 +228,49 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+// Passkeys: no username, the browser offers the passkeys it has for this server.
+const passkeyRow = document.getElementById("passkeyRow");
+const passkeyButton = document.getElementById("passkeyButton");
+let passkeysOn = false;
+
+passkeyButton.addEventListener("click", async () => {
+  clearError();
+  passkeyButton.disabled = true;
+  try {
+    const options = await post("/login/passkey/options", {});
+    if (!options.ok) {
+      message.textContent =
+        options.status === 429 ? "Too many attempts. Wait a minute and try again." : await problemText(options, "Passkeys are not available.");
+      return;
+    }
+    let credential;
+    try {
+      credential = await getPasskey(await options.json());
+    } catch (error) {
+      message.textContent = passkeyErrorText(error, false) ?? "";
+      return;
+    }
+    const response = await post("/login/passkey", { credential });
+    if (response.ok) {
+      window.location.href = "/";
+      return;
+    }
+    if (response.status === 401) message.textContent = "This passkey is not known here. Sign in with your password and add it again.";
+    else if (response.status === 429) message.textContent = "Too many attempts. Wait a minute and try again.";
+    else message.textContent = await problemText(response, "The server could not sign you in. Try again.");
+  } catch {
+    message.textContent = "The server is not reachable.";
+  } finally {
+    passkeyButton.disabled = false;
+  }
+});
+
 // Sign-up is only offered while the server has invite codes on. A link with ?code= opens it directly.
 fetch("/api/status")
   .then((response) => (response.ok ? response.json() : null))
   .then((status) => {
+    passkeysOn = Boolean(status?.passkeys) && passkeysSupported();
+    passkeyRow.hidden = !passkeysOn || registering;
     invitesOn = Boolean(status?.invites);
     if (!invitesOn) return;
     switchRow.hidden = false;

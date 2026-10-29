@@ -11,6 +11,7 @@ services:
       # The admin password is generated on the first start and printed once in the logs.
       # - TRUST_PROXY=true       # behind a reverse proxy
       # - SECURE_COOKIES=true    # once HTTPS is in place
+      # - PUBLIC_URL=https://neopin.example.com   # for passkeys behind a proxy
       # - HISTORY_DAYS=365
     volumes:
       - neopin-data:/app/data

@@ -1142,3 +1142,56 @@
     font-size: 9px;
   }
 }
+
+
+/* Backups dialog */
+.backup {
+  display: grid;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+
+.backup__download,
+.rows a.btn {
+  text-decoration: none;
+}
+
+.backup__download .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.backup__restore {
+  padding: 0;
+}
+
+.backup__restore .row__text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Something that cannot be undone, said before it is done. */
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.warning .icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--danger);
+}
+
+.warning code {
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
