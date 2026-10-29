@@ -91,8 +91,9 @@ function fakeOsrm() {
     calls.push({ profile: match[1], count: coords.length, timestamps: url.searchParams.get("timestamps"), radiuses: url.searchParams.get("radiuses") });
     res.setHeader("content-type", "application/json");
     if (reply) {
-      res.statusCode = reply.status ?? 200;
-      return res.end(JSON.stringify(reply.body(coords)));
+      const body = reply.body(coords, url);
+      res.statusCode = reply.status ?? (body.code === "TooBig" ? 400 : 200);
+      return res.end(JSON.stringify(body));
     }
     res.end(
       JSON.stringify({
@@ -299,4 +300,41 @@ test("a database from before keeps its stored lines and gains the column for the
     closeDb();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Like the public FOSSGIS servers: a search radius over 40 m fails the whole request with
+// TooBig; otherwise a few sparse points come back as one matching along a road drawn with many
+// points, the points themselves a little east of the fixes.
+const FOSSGIS_MAX_RADIUS_M = 40;
+function likeFossgis(coords, url) {
+  const radii = (url.searchParams.get("radiuses") ?? "").split(";").map(Number);
+  if (radii.some((r) => r > FOSSGIS_MAX_RADIUS_M)) return { code: "TooBig", message: "Radius search size is too large for map matching." };
+  const road = [];
+  coords.forEach(([lon, lat], i) => {
+    if (!i) return road.push([lon + SHIFT, lat]);
+    const [lon0, lat0] = coords[i - 1];
+    for (let k = 1; k <= 20; k++) road.push([lon0 + ((lon - lon0) * k) / 20 + SHIFT, lat0 + ((lat - lat0) * k) / 20]);
+  });
+  return {
+    code: "Ok",
+    matchings: [{ confidence: 0.04, geometry: { coordinates: road } }],
+    tracepoints: coords.map((_, i) => ({ matchings_index: 0, waypoint_index: i })),
+  };
+}
+
+test("a sparse drive with vague fixes (Battery profile) is snapped: no radius over what public servers allow", async () => {
+  osrm.answer({ body: likeFossgis });
+  const home = { lat: 48.1, lon: 11.5 };
+  record([0, 5, 10].map((m) => ({ ts: DAY0 + m * MIN, ...home })));
+  // 4 km in 5 minutes, a fix every 75 s, as exact as a phone saving its battery says it is.
+  const fixes = [60, 90, 35].map((accuracy, i) => ({ ts: DAY0 + 10 * MIN + (i + 1) * 75_000, lat: home.lat + ((i + 1) * 1000) / 111_320, lon: home.lon, accuracy }));
+  record(fixes);
+  const end = { lat: home.lat + 4000 / 111_320, lon: home.lon };
+  record([5, 10, 15].map((m) => ({ ts: DAY0 + 10 * MIN + m * MIN, ...end })));
+  const trip = theTrip(await timeline());
+  assert.equal(trip.mode, "driving");
+  assert.equal(trip.pathSource, "road");
+  assert.ok(trip.path.length > 20, `${trip.path.length} points`);
+  assert.equal(osrm.calls.length, 1);
+  assert.deepEqual(osrm.calls[0].radiuses.split(";").map(Number), [40, 40, 35], "vague fixes search 40 m around them, not more");
 });
