@@ -30,10 +30,48 @@ export function shareText(code: string, serverIp: string): string {
   return `Join me on NeoPin with this invite code: ${formatCode(code)}\n${inviteLink(code, serverIp)}`;
 }
 
+type Param = string | string[] | null | undefined;
+const one = (value: Param) => (Array.isArray(value) ? value[0] : value ?? "").trim();
+
 // The server a neopin://invite link came with, as the address field takes it, or "" without one.
-export function serverFromLink(value: string | string[] | null | undefined): string {
-  const server = (Array.isArray(value) ? value[0] : value ?? "").trim();
-  return /^(https?|wss?):\/\/[^\s/]+/i.test(server) ? server.replace(/\/+$/, "") : "";
+// Links carry it without a scheme ("neopin.example.org", secure unless secure=0): a "://" inside
+// the query made the router miss the invite route. Older links with a full address still work.
+export function serverFromLink(value: Param, secure?: Param): string {
+  const server = one(value);
+  if (/^(https?|wss?):\/\/[^\s/]+/i.test(server)) return server.replace(/\/+$/, "");
+  if (/^[a-z0-9.-]+(:\d{1,5})?$/i.test(server) && server.includes(".")) return `${one(secure) === "0" ? "http" : "https"}://${server}`;
+  if (/^localhost(:\d{1,5})?$/i.test(server)) return `${one(secure) === "0" ? "http" : "https"}://${server}`;
+  return "";
+}
+
+// The other way round, for handing the server on inside the app: no "://" in a route.
+export function linkServerParams(server: string): { server: string; secure?: string } {
+  const host = server.replace(/^[a-z]+:\/\//i, "").replace(/\/+$/, "");
+  return /^(http|ws):\/\//i.test(server) ? { server: host, secure: "0" } : { server: host };
+}
+
+// An incoming neopin://invite link in the form the router can take: the server without its
+// scheme. Anything that is not an invite link is left alone (null).
+export function inviteRedirect(url: string): string | null {
+  const match = /^neopin:\/{2,3}invite\/?\?(.*)$/i.exec(url.trim());
+  if (!match) return null;
+  let query: URLSearchParams;
+  try {
+    query = new URLSearchParams(match[1].split("#")[0]);
+  } catch {
+    return null;
+  }
+  const out = new URLSearchParams();
+  const code = normalizeCode(query.get("code") ?? "");
+  if (code) out.set("code", code);
+  const server = serverFromLink(query.get("server"), query.get("secure"));
+  if (server) {
+    const params = linkServerParams(server);
+    out.set("server", params.server);
+    if (params.secure) out.set("secure", params.secure);
+  }
+  const rest = out.toString();
+  return `neopin:///invite${rest ? `?${rest}` : ""}`;
 }
 
 // The code of a neopin://invite?code=... link, or null when the link is something else.

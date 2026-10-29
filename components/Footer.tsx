@@ -4,7 +4,13 @@ import { FontAwesome } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import useThemeManager from "@/hooks/useThemeManager";
 
-export default function Footer() {
+type Props = {
+  // At the end of a scrolling screen instead of pinned to the bottom, so it never sits on a
+  // form field (the sign-up is longer than a phone screen).
+  inline?: boolean;
+};
+
+export default function Footer({ inline }: Props) {
   const colors = useThemeManager();
   // The app version lives in app.config.js, package.json is never bumped. With an over-the-air
   // update this is the version of the running update, like the label in the settings.
@@ -12,7 +18,7 @@ export default function Footer() {
 
   return (
     <TouchableOpacity
-      style={styles.footer}
+      style={inline ? styles.inline : styles.footer}
       onPress={() => Linking.openURL("https://github.com/vxnsin/NeoPin")}
     >
       <FontAwesome name="github" size={24} color={colors.colors.primary} />
@@ -34,6 +40,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: "100%",
     zIndex: 999,
+  },
+  inline: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "center",
+    marginTop: 36,
+    paddingVertical: 8,
   },
   footerText: {
     marginLeft: 8,
