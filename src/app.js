@@ -62,14 +62,14 @@ import {
 } from "./groups.js";
 import { createInvite, getInviteCode, inviteSummary, inviteView, listInvites, registerWithCode, revokeInvite } from "./invites.js";
 import { markRead, notificationsFor } from "./notifications.js";
-import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit, withoutSpans } from "./history.js";
-import { SHARING_MODES, canSeeTimeline, saveTimelineSharing, timelinePeople, timelineSharing } from "./sharing.js";
+import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
 import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
 import { fcmEnabled, sendNotification, sendWakeUp } from "./fcm.js";
 import { PUSH_PLATFORMS, deletePushToken, pushTokenOf, pushTokensOf, setPushToken } from "./push.js";
 import { createAttemptLimiter } from "./rateLimit.js";
 import { sessionPlugin, sessionUserId, signIn } from "./sessions.js";
 import { buildTimeline, dayRange } from "./timeline.js";
+import { SHARING_MODES, canSeeTimeline, saveTimelineSharing, timelinePeople, timelineSharing, withoutSpans } from "./sharing.js";
 import { transitStatus } from "./transit.js";
 import { TRANSIT_KINDS, TRIP_MODES, matchTransit, setTripMode } from "./transitMatch.js";
 import { smoothPaths } from "./paths.js";

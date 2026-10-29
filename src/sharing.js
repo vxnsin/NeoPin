@@ -12,6 +12,17 @@ export const SHARING_MODES = ["off", "groups", "selected"];
 const invalid = (message) => Object.assign(new Error(message), { code: "invalid" });
 const column = (rows, name) => rows.map((r) => Number(r[name]));
 
+// What has a time (a fix's `ts`, a span's `start` and `end`) outside the spans of hiding, for
+// whoever reads somebody else's timeline.
+export function withoutSpans(items, spans) {
+  if (!spans.length) return items;
+  return items.filter((item) => {
+    const from = item.ts ?? item.start;
+    const to = item.ts ?? item.end;
+    return !spans.some((s) => from < s.end && to >= s.start);
+  });
+}
+
 export function timelineSharing(userId) {
   const db = getDb();
   return {

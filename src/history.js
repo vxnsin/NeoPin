@@ -94,16 +94,6 @@ export function daysWithData(userId, deviceId, tzOffsetMin, { limit = 120, excep
     .map((r) => r.day);
 }
 
-// Whatever has a time (a fix's `ts`, a span's `start` and `end`) outside the spans.
-export function withoutSpans(items, spans) {
-  if (!spans.length) return items;
-  return items.filter((item) => {
-    const from = item.ts ?? item.start;
-    const to = item.ts ?? item.end;
-    return !spans.some((s) => from < s.end && to >= s.start);
-  });
-}
-
 // "That was no stop" (a red light, a jam): the fixes of that stretch count as on the way, so the
 // trips before and after it become one. Kept by its time span, which outlives a rebuilt timeline.
 // False when the device has no fix at `start`, where every stop begins.
