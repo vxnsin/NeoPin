@@ -2,6 +2,8 @@ import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
 import { noteServerDevices, readBattery } from "@/lib/battery";
 import { toFix } from "@/lib/fixes";
+import { askRide } from "@/lib/ridePush";
+import { parseRideQuestion } from "@/lib/rides";
 
 type Socket = {
   onMessage: (fn: (data: Message) => void) => () => void;
@@ -46,6 +48,13 @@ export function registerHandlers(ws: Socket) {
       case "groupsChanged":
       case "notificationsChanged":
         break;
+
+      // Asked once per ride, also when the same question comes by push.
+      case "rideQuestion": {
+        const question = parseRideQuestion(data);
+        if (question) askRide(question).catch(() => {});
+        break;
+      }
 
       default:
         console.warn("Unhandled message type:", data.type);

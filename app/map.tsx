@@ -35,6 +35,7 @@ import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
 import FindSheet from "@/components/FindSheet";
+import RideSheet from "@/components/RideSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
 import { startNearby, type NearbyReading, type NearbyState } from "@/lib/nearby";
 import { LiveUpdater, hideLive, liveAvailable, liveContent, onLiveStop, showLive } from "@/lib/live";
@@ -48,6 +49,9 @@ import AvatarCropper from "@/components/AvatarCropper";
 import { askPhotoChoice } from "@/lib/photoMenu";
 import BatteryBadge, { batteryLabel } from "@/components/BatteryBadge";
 import { logout as signOut } from "@/lib/logout";
+import { onRide, takeRide } from "@/lib/rideInbox";
+import { sendRideAnswer } from "@/lib/ridePush";
+import type { RideQuestion } from "@/lib/rides";
 import { timeAgo } from "@/lib/time";
 import { pinKinds } from "@/lib/mapPins";
 import { pickPhoto, removeAvatar, renderAvatar, uploadAvatar, type Photo } from "@/lib/avatar";
@@ -114,7 +118,7 @@ type MapWebViewProps = {
 // The package's own props type collapses to never with this TypeScript version.
 const WebView = NativeWebView as unknown as React.ComponentType<MapWebViewProps>;
 
-type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | null;
+type Sheet = "devices" | "settings" | "groups" | "inviteCodes" | "notifications" | "find" | "ride" | null;
 
 export default function MapScreen() {
   const theme = useThemeManager();
@@ -145,6 +149,19 @@ export default function MapScreen() {
     if (!waiting) return;
     setFind((current) => reduceFind(current, waiting));
     setSheet("find");
+  }, []);
+  // "Are you on Bus 10?": from the socket, a push or a tapped notification, also one that came before
+  // this screen was mounted. A running search keeps its sheet.
+  const [ride, setRide] = useState<RideQuestion | null>(null);
+  useEffect(() => {
+    const open = (question: RideQuestion) => {
+      takeRide();
+      setRide(question);
+      setSheet((current) => (current === "find" ? current : "ride"));
+    };
+    const waiting = takeRide();
+    if (waiting) open(waiting);
+    return onRide(open);
   }, []);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
   // "Server v1.4.0 · 21a136a", under the app version in the settings.
@@ -966,7 +983,7 @@ export default function MapScreen() {
           </View>
 
           <View style={styles.sheetHeader} {...sheetPan.panHandlers}>
-            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : "People"}</Text>
+            <Text style={[styles.sheetTitle, { color: c.primary }]}>{sheet === "settings" ? "Settings" : sheet === "groups" ? "Groups" : sheet === "inviteCodes" ? "Invite codes" : sheet === "notifications" ? "Notifications" : sheet === "find" ? "Find me" : sheet === "ride" ? "Your ride" : "People"}</Text>
             <View style={styles.headerActions}>
               {sheet === "devices" && (
                 <Pressable
@@ -977,7 +994,7 @@ export default function MapScreen() {
                   <MaterialIcons name="refresh" size={20} color={c.primary} />
                 </Pressable>
               )}
-              {sheet !== "find" && (
+              {sheet !== "find" && sheet !== "ride" && (
               <Pressable
                 style={[styles.headerButton, { backgroundColor: c.subtle }]}
                 onPress={() => setSheet(sheet === "devices" ? "settings" : sheet === "settings" ? "devices" : "settings")}
@@ -1006,6 +1023,17 @@ export default function MapScreen() {
               onStop={stopFind}
               onClose={() => {
                 setFind(null);
+                closeSheet();
+              }}
+            />
+          )}
+
+          {sheet === "ride" && ride && (
+            <RideSheet
+              question={ride}
+              onAnswer={(answer) => sendRideAnswer(ride, answer)}
+              onDone={() => {
+                setRide(null);
                 closeSheet();
               }}
             />

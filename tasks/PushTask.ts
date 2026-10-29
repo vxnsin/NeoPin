@@ -4,6 +4,7 @@ import * as Location from "expo-location";
 import { Platform } from "react-native";
 import { toFix } from "@/lib/fixes";
 import { createDedupe, parsePushAction } from "@/lib/pushPayload";
+import { handleRidePush } from "@/lib/ridePush";
 import { reportFixes } from "@/tasks/LocationTask";
 
 export const PUSH_TASK = "neopin-push-wakeup";
@@ -39,8 +40,10 @@ async function currentPosition(): Promise<Location.LocationObject | null> {
 }
 
 // Reports the position when the message asks for it. Used by the background task and the foreground
-// listener, the same wake-up is only answered once.
+// listener, the same wake-up is only answered once. A ride question, or a Yes or No pressed on one, is
+// handled first; the task also gets those buttons while the app is not in front.
 export async function handlePush(payload: unknown): Promise<void> {
+  if (await handleRidePush(payload)) return;
   const action = parsePushAction(payload);
   if (action?.type !== "requestLocation" || !firstTime(action.id)) return;
   const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
