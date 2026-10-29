@@ -18,7 +18,9 @@ test("a chip toggles its id", () => {
 
 test("people and groups that are gone are dropped before saving", () => {
   const value = { users: [2, 9], groups: [5, 6] };
-  expect(pruneRecipients(value, [{ id: 2 }], [{ id: 5 }])).toEqual({ users: [2], groups: [5] });
+  expect(pruneRecipients(value, [{ id: 2 }], [{ id: 5 }], true)).toEqual({ users: [2], groups: [5] });
   // Groups not loaded yet: nothing is known, nothing is dropped.
-  expect(pruneRecipients(value, [], [])).toEqual(value);
+  expect(pruneRecipients(value, [], [], false)).toEqual(value);
+  // Loaded and none left: everything goes, or every save would fail on the stale ids.
+  expect(pruneRecipients(value, [], [], true)).toEqual({ users: [], groups: [] });
 });

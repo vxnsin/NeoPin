@@ -11,12 +11,14 @@ type Props = {
   auth: DeviceAuth;
   userId: number;
   groups: Group[];
+  // False until the groups have been loaded once; nothing is dropped from the picks before that.
+  groupsLoaded: boolean;
   avatarFor: (url?: string | null) => string | null;
 };
 
 // "Share my timeline": off, everyone in my groups, or the people and groups picked here. Every change
 // is saved right away; a failed save puts back what the server has.
-export default function TimelineSharingPanel({ auth, userId, groups, avatarFor }: Props) {
+export default function TimelineSharingPanel({ auth, userId, groups, groupsLoaded, avatarFor }: Props) {
   const { colors: c } = useThemeManager();
   const [sharing, setSharing] = useState<TimelineSharing | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -48,7 +50,7 @@ export default function TimelineSharingPanel({ auth, userId, groups, avatarFor }
   }, [auth.serverIp, auth.deviceId, auth.token, reloads]);
 
   const save = (next: TimelineSharing) => {
-    const picks = pruneRecipients({ users: next.users, groups: next.groups }, contacts, groups);
+    const picks = pruneRecipients({ users: next.users, groups: next.groups }, contacts, groups, groupsLoaded);
     const clean = { ...next, ...picks };
     const mine = ++latest.current;
     setSharing(clean);
@@ -62,6 +64,19 @@ export default function TimelineSharingPanel({ auth, userId, groups, avatarFor }
         if (mine !== latest.current) return;
         setSaveError(e?.message || "Could not save, try again.");
         setSharing(saved.current);
+        // A save that timed out may still have reached the server: show what it really has, so the
+        // next change does not undo it.
+        getTimelineSharing(auth)
+          .then((server) => {
+            if (mine !== latest.current) return;
+            const value = server ?? { mode: "off" as const, users: [], groups: [] };
+            saved.current = value;
+            setSharing(value);
+          })
+          .catch(() => {
+            if (mine !== latest.current) return;
+            setSaveError("Could not save, and the saved state could not be read. Reload to check.");
+          });
       });
   };
 

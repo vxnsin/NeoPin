@@ -569,7 +569,7 @@ export async function registerRequest(
   );
 }
 
-export type AppNotification = {
+export type InviteUsedNotification = {
   id: number;
   type: "inviteUsed";
   createdAt: string;
@@ -581,6 +581,17 @@ export type AppNotification = {
   };
 };
 
+// Someone arrived at or left one of their own places. `at` is when it was noticed, `kind` the place's kind.
+export type PlaceNotification = {
+  id: number;
+  type: "arrived" | "left";
+  createdAt: string;
+  readAt: string | null;
+  data: { userId: number; name: string; placeId: number; placeName: string; kind: PlaceKind; at: number | string; avatarUrl?: string | null };
+};
+
+export type AppNotification = InviteUsedNotification | PlaceNotification;
+
 export async function fetchNotifications(auth: DeviceAuth): Promise<AppNotification[]> {
   return json(await request(api(auth, "/notifications"), jsonInit(auth, "GET")));
 }
@@ -588,4 +599,25 @@ export async function fetchNotifications(auth: DeviceAuth): Promise<AppNotificat
 // Without ids everything is marked.
 export async function markNotificationsRead(auth: DeviceAuth, ids?: number[]): Promise<void> {
   await noContent(await request(api(auth, "/notifications/read"), jsonInit(auth, "POST", ids ? { ids } : {})));
+}
+
+export type OwnPlace = { id: number; name: string; kind: PlaceKind; lat: number; lon: number; radiusM: number; osmId: string | null };
+
+export async function fetchPlaces(auth: DeviceAuth): Promise<OwnPlace[]> {
+  return json(await request(api(auth, "/places"), jsonInit(auth, "GET")));
+}
+
+// Which own places tell others when you arrive or leave, and who hears about it.
+export type AlertSettings = { places: number[]; recipients: { users: number[]; groups: number[] } };
+
+// null when the server has no arrival alerts yet (404), so the app can leave the setting out.
+export async function getAlerts(auth: DeviceAuth): Promise<AlertSettings | null> {
+  const response = await request(api(auth, "/alerts"), jsonInit(auth, "GET"));
+  if (response.status === 404) return null;
+  return json(response);
+}
+
+// The whole setting each time. Ids the server does not know, or people outside your groups, are a 400.
+export async function setAlerts(auth: DeviceAuth, settings: AlertSettings): Promise<void> {
+  await noContent(await request(api(auth, "/alerts"), jsonInit(auth, "PUT", settings)));
 }
