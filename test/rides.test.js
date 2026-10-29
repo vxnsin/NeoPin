@@ -8,7 +8,8 @@ import { getDb } from "../src/db.js";
 import { distanceM, recordPosition } from "../src/history.js";
 import { setPushToken } from "../src/push.js";
 import { refreshTransit, resetTransit } from "../src/transit.js";
-import { localSeconds } from "../src/transitMatch.js";
+import { createRideWatch } from "../src/rides.js";
+import { localSeconds, matchLive } from "../src/transitMatch.js";
 import { sentCount, startFakeFcm } from "./fakeFcm.js";
 import { STOPS, fakeTransitHost, gtfsText, gtfsZip } from "./gtfsFixture.js";
 import { deviceHeaders, startServer } from "./helpers.js";
@@ -151,7 +152,7 @@ async function theTrip() {
   return segments[1];
 }
 
-const ASKED = { kind: "bus", line: "10", headsign: "Hauptbahnhof", color: "#e30613", from: { name: "Sanderring", lat: A.lat, lon: A.lon } };
+const ASKED = { kind: "bus", line: "10", headsign: "Hauptbahnhof", color: "#e30613", textColor: "#ffffff", from: { name: "Sanderring", lat: A.lat, lon: A.lon } };
 
 test("a bus ride in progress is asked about once, over the socket and as a data push", async () => {
   const questions = await rideOver([A, B, C, D]);
@@ -219,4 +220,43 @@ test("without transit data nothing is asked", async () => {
   config.transit = false;
   assert.deepEqual(await rideOver([A, B, C, D]), []);
   assert.equal(fake.sent.length, 0);
+});
+
+test("the question goes to the device on the ride only", async () => {
+  const tablet = await s.device("luis", "tablet");
+  setPushToken(luis.user.id, "tablet", "tablet-fcm", "android");
+  const [question] = await rideOver([A, B, C, D]);
+  assert.deepEqual(question.transit, ASKED);
+  tablet.send({ type: "ping" });
+  const seen = [];
+  for (let msg = await tablet.next(); msg.type !== "pong"; msg = await tablet.next()) seen.push(msg.type);
+  assert.ok(!seen.includes("rideQuestion"), "the tablet was not on the bus");
+  assert.deepEqual(fake.sent.map((p) => p.token), ["luis-fcm"]);
+});
+
+test("a ride that comes in as a batch is asked about too", async () => {
+  luis.token = await s.tokenFor("luis", "phone");
+  const phone = await s.device("luis", "phone", luis.token);
+  const fixes = [{ ts: start - 8 * MIN, ...A }, { ts: start - 20_000, ...A }, ...ride(start, [A, B, C, D], 8, 30)];
+  // Out of order, as a phone may keep them; the server sorts them.
+  const points = fixes.map((f) => ({ latitude: f.lat, longitude: f.lon, recordedAt: Math.round(f.ts) })).reverse();
+  phone.send({ type: "positionBatch", points });
+  phone.send({ type: "ping" });
+  const seen = [];
+  for (let msg = await phone.next(); msg.type !== "pong"; msg = await phone.next()) seen.push(msg);
+  const questions = seen.filter((m) => m.type === "rideQuestion");
+  assert.equal(questions.length, 1);
+  assert.equal(questions[0].at, Math.round(start - 20_000));
+});
+
+test("a drive that starts at a bus stop asks the timetables once, not every 30 seconds", () => {
+  let lookups = 0;
+  const watch = createRideWatch({ match: (fixes, found) => (lookups++, matchLive(fixes, found)) });
+  const fixes = [{ ts: start - 8 * MIN, ...A }, { ts: start - 20_000, ...A }];
+  // Twenty minutes east at 50 km/h, a fix every 5 seconds, past no stop of the fixture.
+  for (let ts = start; ts <= start + 20 * MIN; ts += 5_000) {
+    fixes.push({ ts, lat: A.lat, lon: A.lon + ((ts - start) / 1000) * 14 / 72_000 });
+  }
+  for (const fix of fixes) assert.equal(watch.observe(luis.user.id, "car", fix), null);
+  assert.ok(lookups >= 1 && lookups <= 2, `${lookups} lookups`);
 });

@@ -306,9 +306,10 @@ function lookup(userId, deviceId, trip, profile) {
 
 // Gives the trips of a timeline their smooth path: the line's course for a recognised ride,
 // the roads for the rest. Matches that are not cached yet get up to waitMs, the rest is there
-// on the next load (pending). Gaps keep their straight line, nobody knows that way.
-export async function smoothPaths(userId, deviceId, segments, { waitMs = 3_000 } = {}) {
-  const trips = segments.filter((s) => s.type === "trip" && !s.gap && s.fixes?.length >= 2);
+// on the next load (pending). Gaps keep their straight line, nobody knows that way. `withheld`
+// trips (see matchTransit) keep their fixes: a stored path was snapped from all of them.
+export async function smoothPaths(userId, deviceId, segments, { waitMs = 3_000, withheld = () => false } = {}) {
+  const trips = segments.filter((s) => s.type === "trip" && !s.gap && s.fixes?.length >= 2 && !withheld(s));
   const waiting = [];
   for (const trip of trips) {
     if (trip.mode === "transit" && trip.transit?.linePath) {

@@ -1,7 +1,12 @@
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { HIDDEN_FOREVER, hiddenSpans } from "../src/accounts.js";
-import { getDb } from "../src/db.js";
+import { HIDDEN_FOREVER, hiddenSpans, spansKeptSince } from "../src/accounts.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { config } from "../src/config.js";
+import { closeDb, getDb, initDb } from "../src/db.js";
+import { PATH_ALGO } from "../src/paths.js";
 import { createGroup, removeMember } from "../src/groups.js";
 import { recordPosition } from "../src/history.js";
 import { shareGroup, startServer } from "./helpers.js";
@@ -204,4 +209,113 @@ test("what happened while the owner was invisible is only for the owner and the 
   assert.equal(shared.summary.pointCount, 7 + 9, "the stay at A and the way until 08:39");
   assert.deepEqual(shared.dismissed, []);
   assert.deepEqual(await json(await daysOf(luis, anna)), ["2025-06-10"], "a day spent invisible has nothing to show");
+});
+
+// 08:00 to 08:20 at A, a drive north until 09:00 (about 650 m a minute), then a stay at its end.
+function aDrive(userId) {
+  const at = (m) => DAY0 + 8 * 60 * MIN + m * MIN;
+  for (let m = 0; m <= 20; m += 5) recordPosition(userId, "phone", A.lat, A.lon, at(m));
+  for (let m = 21; m <= 60; m++) recordPosition(userId, "phone", A.lat + (m - 20) * 0.0058, A.lon, at(m));
+  for (let m = 65; m <= 90; m += 5) recordPosition(userId, "phone", A.lat + 40 * 0.0058, A.lon, at(m));
+  return at;
+}
+const hide = (userId, start, end) => getDb().prepare("INSERT INTO hidden_spans (user_id, start, end_ms) VALUES (?, ?, ?)").run(userId, start, end);
+const theDrive = async (owner, who) => (await json(await timelineOf(owner, who))).segments.find((x) => x.type === "trip" && !x.gap);
+
+test("a trip across an invisible stretch gets nothing the server stored from all of the owner's fixes", async () => {
+  const boss = await s.account("boss");
+  const luis = await s.account("luis");
+  const anna = await s.account("anna");
+  shareGroup("Family", luis.user, anna.user);
+  await share(luis, { mode: "groups" });
+  const at = aDrive(luis.user.id);
+  // Ten minutes of the drive invisible: too short for a gap, the trip keeps its start and end.
+  hide(luis.user.id, at(35), at(45));
+  const own = await theDrive(luis, luis);
+  // The owner's road path, snapped from every fix, the invisible ones too.
+  const snapped = [[48.1, 11.5], [48.2, 11.6], [48.33, 11.5]];
+  getDb()
+    .prepare("INSERT OR REPLACE INTO trip_paths (user_id, device_id, start, end_ms, profile, path, created_at, algo) VALUES (?, 'phone', ?, ?, 'car', ?, 0, ?)")
+    .run(luis.user.id, own.start, own.end, JSON.stringify(snapped), PATH_ALGO);
+  config.roadMatchUrl = "http://127.0.0.1:9/{profile}";
+  try {
+    assert.deepEqual((await theDrive(luis, luis)).path, snapped);
+    assert.deepEqual((await theDrive(luis, boss)).path, snapped);
+    const seen = await theDrive(luis, anna);
+    assert.equal(seen.start, own.start);
+    assert.equal(seen.end, own.end, "the same trip as the owner's");
+    // Only its own fixes: no road path, and nothing from 08:35 to 08:45.
+    assert.equal(seen.pathSource, undefined, "not the way through the invisible stretch");
+    assert.notDeepEqual(seen.path, snapped);
+    assert.equal(seen.path.length, 41 - 10, "08:20 to 09:00 without the ten invisible minutes");
+  } finally {
+    config.roadMatchUrl = null;
+  }
+});
+
+test("a viewer never overwrites what the server stored about the owner's trips", async () => {
+  const luis = await s.account("luis");
+  const anna = await s.account("anna");
+  shareGroup("Family", luis.user, anna.user);
+  await share(luis, { mode: "groups" });
+  const at = aDrive(luis.user.id);
+  // Invisible from 08:50 on: for others the drive ends ten minutes early.
+  hide(luis.user.id, at(50), at(120));
+  const own = await theDrive(luis, luis);
+  const stored = () => getDb().prepare("SELECT start, end_ms, transit FROM trip_transit WHERE user_id = ? ORDER BY start").all(luis.user.id);
+  const before = stored();
+  assert.ok(before.some((r) => Number(r.start) === own.start && Number(r.end_ms) === own.end));
+  const seen = await theDrive(luis, anna);
+  assert.equal(seen.start, own.start);
+  assert.ok(seen.end < own.end);
+  assert.deepEqual(stored(), before);
+});
+
+test("dismissed stops inside an invisible stretch still shape the day, they are just not listed", async () => {
+  const { luis, anna } = await people();
+  await share(luis, { mode: "groups" });
+  const at = (h, m) => DAY0 + (h * 60 + m) * MIN;
+  // The stay at A, dismissed, overlaps a stretch of hiding from 08:25 to 08:28.
+  getDb().prepare("INSERT INTO dismissed_visits (user_id, device_id, start, end_ms) VALUES (?, 'phone', ?, ?)").run(luis.user.id, at(8, 0), at(8, 30));
+  hide(luis.user.id, at(8, 25), at(8, 28));
+  const own = await json(await timelineOf(luis, luis));
+  const shared = await json(await timelineOf(luis, anna));
+  assert.notEqual(own.segments[0].type, "visit", "the owner dismissed the stay at A");
+  assert.notEqual(shared.segments[0].type, "visit", "for others too");
+  assert.deepEqual(shared.dismissed, []);
+});
+
+test("what was recorded before the server kept spans of hiding is for the owner and the admin only", async () => {
+  const { boss, luis, anna } = await people();
+  await share(luis, { mode: "groups" });
+  // As if the server got the spans at 08:40 that day: nobody knows who hid before.
+  getDb().prepare("UPDATE meta SET value = ? WHERE key = 'hidden_spans_since'").run(String(DAY0 + (8 * 60 + 40) * MIN));
+  for (const who of [luis, boss]) assert.equal((await json(await timelineOf(luis, who))).summary.pointCount, 7 + 14 + 10);
+  const shared = await json(await timelineOf(luis, anna));
+  assert.equal(shared.summary.pointCount, 5 + 10, "from 08:40 on only");
+  getDb().prepare("UPDATE meta SET value = ? WHERE key = 'hidden_spans_since'").run(String(DAY0 + 86_400_000));
+  assert.deepEqual(await json(await daysOf(luis, anna)), []);
+  assert.deepEqual(await json(await daysOf(luis, luis)), ["2025-06-10"]);
+});
+
+test("the spans are kept since the upgrade on a server with fixes, since ever on a new one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "neopin-spans-"));
+  const file = path.join(dir, "db.sqlite");
+  try {
+    initDb(file);
+    assert.equal(spansKeptSince(), 0, "a new server");
+    getDb().prepare("INSERT INTO users (username, display_name, password_hash, created_at) VALUES ('old', 'old', 'x', '')").run();
+    getDb().prepare("INSERT INTO positions (user_id, device_id, ts, lat, lon) VALUES (1, 'phone', 1, 0, 0)").run();
+    // A server from before the spans: no spans, nothing in meta.
+    getDb().exec("DROP TABLE hidden_spans; DELETE FROM meta");
+    const before = Date.now();
+    initDb(file);
+    assert.ok(spansKeptSince() >= before && spansKeptSince() <= Date.now());
+    const kept = spansKeptSince();
+    initDb(file);
+    assert.equal(spansKeptSince(), kept, "only the first start counts");
+  } finally {
+    closeDb();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

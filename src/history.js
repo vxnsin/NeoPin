@@ -79,18 +79,19 @@ export function forgetBattery(userId, deviceId) {
 }
 
 // Local calendar days that have any data, newest first. `exceptHidden` leaves out the fixes
-// taken while the person was invisible, for anyone else looking at a shared timeline.
-export function daysWithData(userId, deviceId, tzOffsetMin, { limit = 120, exceptHidden = false } = {}) {
+// taken while the person was invisible, and those from before the server kept that (`since`),
+// for anyone else looking at a shared timeline.
+export function daysWithData(userId, deviceId, tzOffsetMin, { limit = 120, exceptHidden = false, since = 0 } = {}) {
   const shiftSeconds = Math.round((-tzOffsetMin * 60_000) / 1000);
   const hidden = exceptHidden
-    ? "AND NOT EXISTS (SELECT 1 FROM hidden_spans h WHERE h.user_id = positions.user_id AND positions.ts >= h.start AND positions.ts < h.end_ms)"
+    ? "AND NOT EXISTS (SELECT 1 FROM hidden_spans h WHERE h.user_id = positions.user_id AND positions.ts >= h.start AND positions.ts < h.end_ms) AND positions.ts >= ?"
     : "";
   return getDb()
     .prepare(
       `SELECT DISTINCT date(ts / 1000 + ?, 'unixepoch') AS day FROM positions
        WHERE user_id = ? AND device_id = ? ${hidden} ORDER BY day DESC LIMIT ?`
     )
-    .all(shiftSeconds, userId, deviceId, limit)
+    .all(shiftSeconds, userId, deviceId, ...(exceptHidden ? [since] : []), limit)
     .map((r) => r.day);
 }
 

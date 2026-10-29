@@ -1,23 +1,36 @@
 import { distanceM } from "./history.js";
 import { askedLately, recordQuestion } from "./rideAnswers.js";
 import { GAP_MS, MIN_VISIT_MS, STOP_RADIUS_M } from "./timeline.js";
-import { matchLive } from "./transitMatch.js";
+import { liveRide, matchLive, stopsNear } from "./transitMatch.js";
 
 // Rides are watched while they are on, so the rider can say right away whether the server got the
 // line right. Per device the fixes since the last stay are kept, the newest BUFFER_MS of them.
 // At most every CHECK_EVERY_MS of the ride the timetables are asked (see matchLive), and a match
-// is asked about once per ride.
+// is asked about once per ride. A ride the timetables found no line for is asked about again only
+// once it went past another stop: a drive that started at a bus stop costs one lookup, not one
+// every CHECK_EVERY_MS until it ends.
 export const BUFFER_MS = 90 * 60_000;
 export const CHECK_EVERY_MS = 30_000;
 
-export function createRideWatch() {
+// How many stops the fixes of a ride went near. Each fix is looked up once, the count is cheap.
+function stopsAlong(ride) {
+  const seen = new Set();
+  for (const fix of ride) {
+    fix.near ??= stopsNear(fix.lat, fix.lon).map((s) => `${s.feed_id}:${s.id}`);
+    for (const id of fix.near) seen.add(id);
+  }
+  return seen.size;
+}
+
+// `match` is there for the tests, to count the lookups.
+export function createRideWatch({ match: matchRide = matchLive } = {}) {
   const devices = new Map();
 
   // Feeds one stored fix of a device. Returns the question to ask, { rideId, transit, at }, or null.
   function observe(userId, deviceId, fix) {
     const key = `${userId}:${deviceId}`;
     let state = devices.get(key);
-    if (!state) devices.set(key, (state = { fixes: [], checkedAt: -Infinity, asked: false, seenAt: 0 }));
+    if (!state) devices.set(key, (state = { fixes: [], checkedAt: -Infinity, asked: false, tried: null, seenAt: 0 }));
     state.seenAt = Date.now();
     const last = state.fixes[state.fixes.length - 1];
     if (last && fix.ts <= last.ts) return null;
@@ -31,13 +44,20 @@ export function createRideWatch() {
     if (fix.ts - state.fixes[first].ts >= MIN_VISIT_MS) {
       state.fixes = [fix];
       state.asked = false;
+      state.tried = null;
       return null;
     }
     while (fix.ts - state.fixes[0].ts > BUFFER_MS) state.fixes.shift();
 
     if (state.asked || fix.ts - state.checkedAt < CHECK_EVERY_MS) return null;
     state.checkedAt = fix.ts;
-    const match = matchLive(state.fixes);
+    const found = liveRide(state.fixes);
+    if (!found) return null;
+    // The same boarding past no new stop has nothing new for the timetables.
+    const tried = { boardedAt: found.ride[0].ts, stops: stopsAlong(found.ride) };
+    if (state.tried?.boardedAt === tried.boardedAt && tried.stops <= state.tried.stops) return null;
+    state.tried = tried;
+    const match = matchRide(state.fixes, found);
     if (!match) return null;
     state.asked = true;
     // A halt at a station longer than a visit starts a new ride for the server, not for the rider.

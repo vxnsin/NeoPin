@@ -82,6 +82,17 @@ export function hiddenSpans(userId, from, to) {
     .map((r) => ({ start: Number(r.start), end: Number(r.end_ms) }));
 }
 
+// Since when the spans are kept (ms): before that nobody knows who was invisible. 0 on a server
+// that kept them from its first fix.
+export function spansKeptSince() {
+  return Number(getDb().prepare("SELECT value FROM meta WHERE key = 'hidden_spans_since'").get()?.value ?? 0);
+}
+
+// Whether the account hid at `ts`: a fix taken then is nobody else's business.
+export function hiddenAt(userId, ts) {
+  return !!getDb().prepare("SELECT 1 FROM hidden_spans WHERE user_id = ? AND start <= ? AND end_ms > ?").get(userId, ts, ts);
+}
+
 // What the account itself sees about its hiding: until when, or null when visible.
 export function hiddenUntilOf(row, now = Date.now()) {
   return isHidden(row, now) ? Number(row.hidden_until) : null;
