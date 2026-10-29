@@ -4,7 +4,7 @@ import http from "node:http";
 import { config } from "../src/config.js";
 import { getDb } from "../src/db.js";
 import { recordPosition } from "../src/history.js";
-import { chunks, pathFromMatch, profileFor, roadWithDetours } from "../src/paths.js";
+import { chunks, PATH_ALGO, pathFromMatch, profileFor, roadWithDetours } from "../src/paths.js";
 import { deviceHeaders, startServer } from "./helpers.js";
 
 const MIN = 60_000;
@@ -215,6 +215,19 @@ test("a match with a detour the phone never made is not used, and not asked agai
   await timeline();
   assert.equal(osrm.calls.length, 1);
   assert.equal(getDb().prepare("SELECT path FROM trip_paths").get().path, null);
+});
+
+test("a path an older version stored, also no path, is matched again", async () => {
+  aDay(20);
+  assert.equal(theTrip(await timeline()).pathSource, "road");
+  // What 1.6.0 left behind when the whole trip had to fit at once.
+  getDb().prepare("UPDATE trip_paths SET path = NULL, algo = 1").run();
+  const trip = theTrip(await timeline());
+  assert.equal(trip.pathSource, "road");
+  assert.equal(osrm.calls.length, 2);
+  assert.equal(getDb().prepare("SELECT algo FROM trip_paths").get().algo, PATH_ALGO);
+  await timeline();
+  assert.equal(osrm.calls.length, 2, "the new answer is cached again");
 });
 
 test("a part that fits no road keeps its fixes, the rest of the trip is still snapped", async () => {

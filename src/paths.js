@@ -18,6 +18,9 @@ const MAX_STRETCH = 1.5;
 const MAX_EXTRA_M = 200;
 const TIMEOUT_MS = 10_000;
 const RETRY_MS = 10 * 60_000;
+// Raised whenever snapping gets better: a path stored by an older version, also "no path",
+// counts as not cached and the trip is matched again. 2: detours and pieces (1.7.1).
+export const PATH_ALGO = 2;
 const PROFILES = { walking: "foot", cycling: "bike", driving: "car" };
 
 // The public FOSSGIS servers allow one request a second; a queue keeps to that.
@@ -266,16 +269,18 @@ export async function snapToRoads(fixes, profile) {
 
 function cachedPath(userId, deviceId, trip, profile) {
   const row = getDb()
-    .prepare("SELECT end_ms, path FROM trip_paths WHERE user_id = ? AND device_id = ? AND start = ? AND profile = ?")
+    .prepare("SELECT end_ms, path, algo FROM trip_paths WHERE user_id = ? AND device_id = ? AND start = ? AND profile = ?")
     .get(userId, deviceId, trip.start, profile);
-  if (!row || Number(row.end_ms) !== trip.end) return undefined;
+  if (!row || Number(row.end_ms) !== trip.end || Number(row.algo) !== PATH_ALGO) return undefined;
   return row.path === null ? null : JSON.parse(row.path);
 }
 
 function storePath(userId, deviceId, trip, profile, path) {
   getDb()
-    .prepare("INSERT OR REPLACE INTO trip_paths (user_id, device_id, start, end_ms, profile, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(userId, deviceId, trip.start, trip.end, profile, path ? JSON.stringify(path) : null, Date.now());
+    .prepare(
+      "INSERT OR REPLACE INTO trip_paths (user_id, device_id, start, end_ms, profile, path, created_at, algo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(userId, deviceId, trip.start, trip.end, profile, path ? JSON.stringify(path) : null, Date.now(), PATH_ALGO);
 }
 
 const lookupKey = (userId, deviceId, trip, profile) => `${userId}:${deviceId}:${trip.start}:${trip.end}:${profile}`;

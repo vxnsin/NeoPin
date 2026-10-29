@@ -354,6 +354,10 @@ export function initDb(file = config.dbPath) {
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "primary_device_id")) {
     db.exec("ALTER TABLE users ADD COLUMN primary_device_id TEXT");
   }
+  // Which snapping version made a stored path; older rows are matched again (see paths.js).
+  if (!db.prepare("PRAGMA table_info(trip_paths)").all().some((c) => c.name === "algo")) {
+    db.exec("ALTER TABLE trip_paths ADD COLUMN algo INTEGER NOT NULL DEFAULT 1");
+  }
   return db;
 }
 
