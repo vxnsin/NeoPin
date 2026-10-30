@@ -1,22 +1,26 @@
 <div align="center">
 
-<img src=".readme/Logo.png" alt="NeoPin" width="96">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".readme/wordmark-dark.svg">
+  <img src=".readme/wordmark-light.svg" alt="NeoPin" width="320">
+</picture>
 
-# NeoPin Server
+The self-hosted server and web dashboard behind the [NeoPin app](https://github.com/vxnsin/NeoPin).
 
-**Your phones, your server, one map.**<br>
-The backend for the [NeoPin app](https://github.com/vxnsin/NeoPin).
+[![Server version](https://img.shields.io/github/package-json/v/vxnsin/NeoPin/Server?style=flat-square&label=server&color=d3171e)](https://github.com/vxnsin/NeoPin/tags)
+[![Node.js](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fvxnsin%2FNeoPin%2FServer%2Fpackage.json&query=%24.engines.node&label=Node.js&color=339933&style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![Docker image](https://img.shields.io/badge/ghcr.io-neopin--server-2496ed?style=flat-square&logo=docker&logoColor=white)](https://github.com/vxnsin/NeoPin/pkgs/container/neopin-server)
+[![inkan](https://img.shields.io/badge/built%20with-inkan-c4381f?style=flat-square)](https://github.com/inkanjs/inkan)
+[![License](https://img.shields.io/github/license/vxnsin/NeoPin?style=flat-square&color=64748b)](LICENSE)
 
-[![Node.js](https://img.shields.io/badge/Node.js-22.18+-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
-[![inkan](https://img.shields.io/badge/built_with-inkan-c4381f?style=for-the-badge)](https://github.com/inkanjs/inkan)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](#docker)
-[![License](https://img.shields.io/badge/License-MIT-d3171e?style=for-the-badge)](LICENSE)
-
-[**Quick start**](#quick-start) · [**Docker**](#docker) · [**On the internet**](#on-the-internet) · [**Protocol**](#websocket-protocol) · [**App**](https://github.com/vxnsin/NeoPin)
+[**Quick start**](#quick-start) · [**Docker**](#docker) · [**On the internet**](#on-the-internet) · [**Configuration**](#configuration) · [**Protocol**](#websocket-protocol) · [**App**](https://github.com/vxnsin/NeoPin)
 
 <br>
 
-<img src=".readme/dashboard-map.jpg" alt="NeoPin dashboard with devices on a map" width="860">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".readme/map-dark.webp">
+  <img src=".readme/map-light.webp" alt="NeoPin dashboard: six people on a map of Berlin, with the people panel showing devices, battery and groups" width="880">
+</picture>
 
 </div>
 
@@ -26,15 +30,24 @@ The backend for the [NeoPin app](https://github.com/vxnsin/NeoPin).
 
 ```mermaid
 flowchart LR
-    A[📱 NeoPin app] -- "authenticate · updatePosition" --> S[(🖥️ NeoPin Server)]
+    A[📱 NeoPin app] -- "authenticate · updatePosition · positionBatch" --> S[(🖥️ NeoPin Server<br/>Node.js · SQLite)]
     S -- "dataResponse · requestLocation" --> A
     D[🌐 Dashboard] -- "POST /login" --> S
     D <-- "live over WebSocket" --> S
+    S -. "push (optional)" .-> F[Firebase Cloud Messaging]
+    S -. "place names · timetables · road paths (optional)" .-> O[Overpass · GTFS · OSRM]
 ```
 
 Everyone has an account: a username and a password, created by the admin in the dashboard or by signing up with an [invite code](#invite-codes). A phone logs in with it once, gets a token and sends its position whenever it moves. The server keeps the latest position of every device in memory and pushes each change to all phones and dashboards, at most twice a second. Hit refresh and it asks every device for a fresh fix.
 
-Accounts, profile pictures and the location history live in a SQLite file (`data/neopin.db`, built in `node:sqlite`, no extra database to run). The timeline in the dashboard shows the stays and trips of a device per day, built from that history. Positions older than `HISTORY_DAYS` are deleted at startup. The live map itself is memory only, so after a restart it fills up again as devices reconnect.
+Accounts, profile pictures, groups, places and the location history live in a SQLite file (`data/neopin.db`, built in `node:sqlite`, no extra database to run). Positions older than `HISTORY_DAYS` are deleted at startup. The live map itself is memory only, so after a restart it fills up again as devices reconnect.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".readme/timeline-dark.webp">
+  <img src=".readme/timeline-light.webp" alt="The timeline of one day in the dashboard: stays at home, the studio and a café, with walks and bike rides between them" width="880">
+</picture>
+
+From that history the dashboard and the app build the [timeline](#shared-timelines): the stays and trips of a device per day, with named places, the way of getting around and, where timetables cover the area, the bus or train line. Each week and month ends in a [review](#review).
 
 It runs on [inkan](https://github.com/inkanjs/inkan), with [`@inkanjs/session`](https://github.com/inkanjs/middleware/tree/main/packages/session) for the dashboard login and [`@inkanjs/secure-headers`](https://github.com/inkanjs/middleware/tree/main/packages/secure-headers) for the CSP. Every socket message is checked against a schema, and inkan serves the API docs at `/docs`.
 
@@ -105,6 +118,10 @@ Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 
 `.env` in the project root, real environment variables win.
 
+<details>
+<summary><b>All variables</b></summary>
+<br>
+
 | Variable | Default | |
 |:--|:--|:--|
 | `PORT` | `3012` | HTTP and WebSocket port |
@@ -131,6 +148,8 @@ Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 | `PUBLIC_URL` | unset | The dashboard's address, e.g. `https://neopin.example.com`. Passkeys belong to its host name, see [Passkeys](#passkeys). Unset, the `Host` of each request counts |
 | `BACKUPS` | on | A copy of the database every night at 03:30 server time, see [Backups](#backups). `off` turns it off, the download in the dashboard still works |
 | `BACKUP_KEEP` | `7` | How many of the nightly backups stay |
+
+</details>
 
 Timings and limits live in [`src/config.js`](src/config.js): heartbeat 30 s, location wait 2 s, dashboard session 5 h, 5 logins, 10 passkey requests (a sign-in takes two), 10 wrong device tokens and 120 profile picture requests per minute and IP.
 
@@ -160,7 +179,13 @@ With a Firebase project the server can wake a phone that has no connection and a
 
 How it works: the app registers its FCM token with `PUT /api/push-token` (`{ "token", "platform": "android" | "ios" }`, device auth, `DELETE` removes it). When someone asks for the location of a device that has no open socket (`POST /api/sendPing` with its `deviceId` and `userId`), is allowed to see it, and the device has a token, the server sends a high-priority data message and waits up to `PUSH_WAIT_MS` for the phone to report. It answers `200` with the refreshed list, or `202` when the phone has not answered yet. At most one wake-up per device every 10 seconds.
 
-Find over push: when somebody asks to find a person (`findRequest`) and that person has devices with a token but none online, the request is not ended with `offline`. It stays pending for the usual two minutes, the asker gets `findPending`, and every device of the person without an open socket gets a notification push (title `Find request`, body `<name> wants to find you`, high priority, channel `default`) with the data `{ "type": "findRequest", "session": "<id>", "from": "<display name>" }` (all values strings). Devices that are online only get the WebSocket message. A device that connects while the request is pending receives the `findRequest` message right after its first `dataResponse`, so tapping the notification, opening the app and connecting shows the question; answering works as usual with `findAnswer`. At most one find push per asker and asked person every 30 seconds. Hidden people and people outside the asker's groups are treated as before, the asker cannot tell whether a push went out. Without FCM or without a token the request still ends with `offline`.
+<details>
+<summary><b>Find over push</b></summary>
+<br>
+
+When somebody asks to find a person (`findRequest`) and that person has devices with a token but none online, the request is not ended with `offline`. It stays pending for the usual two minutes, the asker gets `findPending`, and every device of the person without an open socket gets a notification push (title `Find request`, body `<name> wants to find you`, high priority, channel `default`) with the data `{ "type": "findRequest", "session": "<id>", "from": "<display name>" }` (all values strings). Devices that are online only get the WebSocket message. A device that connects while the request is pending receives the `findRequest` message right after its first `dataResponse`, so tapping the notification, opening the app and connecting shows the question; answering works as usual with `findAnswer`. At most one find push per asker and asked person every 30 seconds. Hidden people and people outside the asker's groups are treated as before, the asker cannot tell whether a push went out. Without FCM or without a token the request still ends with `offline`.
+
+</details>
 
 Tokens that FCM reports as dead are deleted, as are the tokens of unlinked devices.
 
@@ -204,7 +229,13 @@ Germany is covered by the nationwide feed from [gtfs.de](https://gtfs.de) (data 
 
 A short wait at a stop leaves no visit, so the walk to the stop, the ride and the walk from it arrive as one trip. The server cuts such a trip where the phone speeds up next to a stop and where it slows down next to one, and the timeline shows the walks and the ride separately. With the data in place, a trip in the timeline that starts and ends at a stop (a station counts up to 200 m away, its platforms are long) is matched against the lines serving both stops in that order. A bus or tram ride has to halt every few hundred metres; a train, subway or ferry calls every few kilometres or not at all, so instead its departure and its arrival both have to be within ten minutes of the timetable and a train has to have averaged 25 km/h. The line's shape has to follow the fixes, and of several lines the one with a departure closest to the observed one wins. Such a trip comes back with `mode: "transit"` and a `transit` object (kind, line, headsign, colours, agency, the stops boarded and left, `source: "gtfs"`). Where no timetable covers a ride with bus-like halts but OpenStreetMap has route relations at both stops (asked through `PLACE_LOOKUP_URL`, cached like the place names), at least the line number comes back with `source: "osm"`. Results are stored per account, device and trip, and a correction sent with `PUT /api/trips/mode` wins over all of it. The battery profile of the app sends too few fixes for any of this.
 
-**Confirming a ride while riding.** The server also watches a ride while it is on. Per device it keeps the stored fixes since the last stay (at most 90 minutes) and looks at them at most every 30 seconds of the ride: when the phone first went faster than a walk next to a timetable stop, has been on its way for 3 minutes since, fast enough for a vehicle, and went past at least two further stops of a line, the timetables are asked as for a finished trip, without the arrival. A match is asked about once per ride: `{ "type": "rideQuestion", "rideId", "transit": { kind, line, headsign, color, from }, "at" }` (`at` is when the ride was boarded, in ms) to the rider's open sockets, and on Android phones with [push](#push-notifications) a data-only push with the same fields plus `"t": "rideQuestion"`, `transit` as a JSON string (FCM data are strings); the app builds the notification with Yes and No from it. `POST /api/rides/answer` (`{ "rideId", "answer": "yes" | "no" }`) answers `204`, `404` for an unknown ride or someone else's. In the timeline the trip that contains the boarding then gets that line on "yes" (up to the last of its stops the trip went past, when the timetables alone would not match it) and no line, its speed's mode, on "no". A correction with `PUT /api/trips/mode` still wins. Without an answer nothing changes. With `TRANSIT=off` nothing is asked; without push only the sockets are.
+<details>
+<summary><b>Confirming a ride while riding</b></summary>
+<br>
+
+The server also watches a ride while it is on. Per device it keeps the stored fixes since the last stay (at most 90 minutes) and looks at them at most every 30 seconds of the ride: when the phone first went faster than a walk next to a timetable stop, has been on its way for 3 minutes since, fast enough for a vehicle, and went past at least two further stops of a line, the timetables are asked as for a finished trip, without the arrival. A match is asked about once per ride: `{ "type": "rideQuestion", "rideId", "transit": { kind, line, headsign, color, from }, "at" }` (`at` is when the ride was boarded, in ms) to the rider's open sockets, and on Android phones with [push](#push-notifications) a data-only push with the same fields plus `"t": "rideQuestion"`, `transit` as a JSON string (FCM data are strings); the app builds the notification with Yes and No from it. `POST /api/rides/answer` (`{ "rideId", "answer": "yes" | "no" }`) answers `204`, `404` for an unknown ride or someone else's. In the timeline the trip that contains the boarding then gets that line on "yes" (up to the last of its stops the trip went past, when the timetables alone would not match it) and no line, its speed's mode, on "no". A correction with `PUT /api/trips/mode` still wins. Without an answer nothing changes. With `TRANSIT=off` nothing is asked; without push only the sockets are.
+
+</details>
 
 **Licenses.** The catalog is published by MobilityData under [Apache 2.0](https://github.com/MobilityData/mobility-database-catalogs/blob/main/LICENSE). Every feed comes under its own license, listed in the catalog and shown in `GET /api/transit`. Many feeds, the gtfs.de one included, are **CC BY 4.0**: if you show the lines to others (a public dashboard, screenshots), name the source, e.g. "Timetable data: gtfs.de / DELFI e.V., CC BY 4.0". Some feeds in the catalog need a login or an API key; those are skipped.
 
@@ -221,7 +252,20 @@ The server replaces the trip's `path` with that course and says where it came fr
 
 ## Review
 
-A week (Monday to Sunday) or a calendar month in numbers. `GET /api/review?period=week|month&date=YYYY-MM-DD&tz=<minutes>` takes any day of the period as `date`; without it, the last one that is over. `tz` is what the timeline takes (`getTimezoneOffset()`); `timeZone=Europe/Berlin` instead keeps whole days in a week where the clocks change; with neither the server's zone counts. It answers:
+A week (Monday to Sunday) or a calendar month in numbers: distance, time on the move, trips and stops, a map of everywhere you went, the most visited places and the most ridden lines.
+
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".readme/review-dark.webp">
+  <img src=".readme/review-light.webp" alt="The weekly review in the dashboard: distance, time on the move, trips and stops, a map of the week, kilometres per day and how you got around" width="880">
+</picture>
+</p>
+
+<details>
+<summary><b>API and storage</b></summary>
+<br>
+
+`GET /api/review?period=week|month&date=YYYY-MM-DD&tz=<minutes>` takes any day of the period as `date`; without it, the last one that is over. `tz` is what the timeline takes (`getTimezoneOffset()`); `timeZone=Europe/Berlin` instead keeps whole days in a week where the clocks change; with neither the server's zone counts. It answers:
 
 ```
 { period, from, to, distanceKm, movingMinutes, trips, stops,
@@ -238,6 +282,8 @@ A week (Monday to Sunday) or a calendar month in numbers. `GET /api/review?perio
 Every day is that day's own timeline, built as `GET /api/timeline` builds it: from the device with the most fixes that day (the main device on a tie), with dismissed stops, corrected modes, answered rides and place names. Invisible stretches count, as in the own timeline. Distances and minutes are those of the trips, without stretches that had no fixes. Only the own review, the admin reads anyone's with `userId`; a shared timeline does not share the review.
 
 Finished days are kept in `review_days` with a stamp of what they were made of (the fixes of each device, dismissed stops, corrections, ride answers, own places, timetable data), so a month answers from the store and a change shows on the next request. Today and days still waiting for place names or paths are built every time.
+
+</details>
 
 Mondays at 09:00 server time (`TZ`) everyone who was out and about the week before gets a notification `{ "type": "review", "data": { period, from, to, distanceKm } }`, a `notificationsChanged` on their sockets and on Android, with [push](#push-notifications), `Your week: 84 km, 6 h on the move` with the data `{ type: "review", period, from, to }`. On the first of a month the same for the month. Each goes out once per account and period, also across restarts; a server that was down at nine catches up later that day. `GET` / `PUT /api/me/review-notifications` (`{ "enabled" }`, on by default) turns it off. In the dashboard the review opens from the account menu and from the notification.
 
@@ -291,6 +337,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true, "features": ["positionBatch", "find", "rideQuestion"] }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
 | `{ "type": "updatePosition", "latitude", "longitude", "battery"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }` |
+| `{ "type": "positionBatch", "points": [...] }` | Up to 100 fixes taken while the phone had no connection, each `{ latitude, longitude, recordedAt?, accuracy?, speed? }`. Stored at their own time |
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
