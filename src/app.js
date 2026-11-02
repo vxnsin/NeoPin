@@ -765,8 +765,9 @@ export function createApp({ gracefulShutdown = true } = {}) {
           // MapLibre positions its markers and controls with inline styles. Scripts stay strict.
           "style-src": ["'self'", "'unsafe-inline'", "https://unpkg.com"],
           "img-src": ["'self'", "data:", "blob:"],
-          // Style, vector tiles, glyphs and sprites all come from OpenFreeMap.
-          "connect-src": ["'self'", "https://tiles.openfreemap.org"],
+          // Style, vector tiles, glyphs and sprites all come from OpenFreeMap; the 3D map's
+          // terrain tiles from AWS Open Data, only while 3D is on.
+          "connect-src": ["'self'", "https://tiles.openfreemap.org", "https://s3.amazonaws.com/elevation-tiles-prod/"],
         },
       },
       // The tile host may see which site loads its tiles, nothing more.

@@ -181,7 +181,7 @@ function addMarker(el, index, lngLat) {
     event.stopPropagation();
     focusSegment(index, { scroll: true });
   });
-  tl.markers.push(new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map));
+  tl.markers.push(new maplibregl.Marker({ element: el, ...UPRIGHT }).setLngLat(lngLat).addTo(map));
 }
 
 function drawMarkers() {
