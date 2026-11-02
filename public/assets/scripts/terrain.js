@@ -82,7 +82,7 @@ function applyTerrain(map, on, dark) {
         type: "hillshade",
         source: "hillshade-dem",
         paint: dark
-          ? { "hillshade-shadow-color": "#05070b", "hillshade-highlight-color": "#3a465e", "hillshade-accent-color": "#0d1119", "hillshade-exaggeration": 0.45 }
+          ? { "hillshade-shadow-color": "#000000", "hillshade-highlight-color": "#7a8aab", "hillshade-accent-color": "#1f2738", "hillshade-exaggeration": 0.8 }
           : { "hillshade-shadow-color": "#5b6577", "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#8a93a5", "hillshade-exaggeration": 0.3 },
       },
       map.getLayer("building") ? "building" : label
