@@ -128,6 +128,12 @@ export const config = {
   // BACKUP_KEEP stay. "off" turns it off; the download in the dashboard works either way.
   backups: !["off", "false", "no", "0"].includes((process.env.BACKUPS ?? "").trim().toLowerCase()),
   backupKeep: Math.max(1, Number(process.env.BACKUP_KEEP) || 7),
+  // Diagnostics exports the preview app uploads (see diagnostics.js), kept DIAGNOSTICS_TTL_DAYS.
+  // "off" turns the upload off and the links stop working.
+  diagnostics: !["off", "false", "no", "0"].includes((process.env.DIAGNOSTICS ?? "").trim().toLowerCase()),
+  diagnosticsTtlDays: Number(process.env.DIAGNOSTICS_TTL_DAYS) || 7,
+  // Uploads per IP and hour, an export is a button press, not a stream.
+  diagnosticsRateLimit: { windowMs: 60 * 60 * 1000, max: 10 },
   // The address the dashboard is reached at, e.g. https://neopin.example.com. Passkeys are bound
   // to its host name; without it the Host of each request counts.
   publicUrl: envOrNull("PUBLIC_URL"),
