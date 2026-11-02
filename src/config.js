@@ -49,6 +49,15 @@ const envOrNull = (name) => {
   return value && value.toLowerCase() !== "off" ? value : null;
 };
 
+const envOff = (name) => ["off", "false", "no", "0"].includes((process.env[name] ?? "").trim().toLowerCase());
+
+function roadMatchMode() {
+  const mode = (process.env.ROAD_MATCH ?? "").trim().toLowerCase();
+  if (["own", "osrm"].includes(mode)) return mode;
+  if (envOff("ROAD_MATCH") || process.env.ROAD_MATCH_URL === "off") return "off";
+  return "own";
+}
+
 export const config = {
   version: pkg.version,
   commit: (process.env.NEOPIN_COMMIT || gitCommit() || "").slice(0, 40) || null,
@@ -68,13 +77,22 @@ export const config = {
   // Asked when Overpass fails, a Photon reverse endpoint. "off" turns it off.
   placeFallbackUrl:
     process.env.PLACE_FALLBACK_URL === "off" ? null : process.env.PLACE_FALLBACK_URL || "https://photon.komoot.io/reverse",
-  // Snaps the trips of the timeline to the roads, an OSRM server; {profile} becomes car, bike
-  // or foot. It sees the whole way of every trip it is asked about. "off" turns it off.
+  // How the trips of the timeline are snapped to the roads: "own" (the server's own matcher on
+  // OpenStreetMap roads, nobody else sees the trips), "osrm" (an OSRM server at ROAD_MATCH_URL)
+  // or "off". An older ROAD_MATCH_URL=off still means off.
+  roadMatch: roadMatchMode(),
+  // The OSRM server for ROAD_MATCH=osrm; {profile} becomes car, bike or foot. It sees the whole
+  // way of every trip it is asked about.
   roadMatchUrl:
     process.env.ROAD_MATCH_URL === "off" ? null : process.env.ROAD_MATCH_URL || "https://routing.openstreetmap.de/routed-{profile}",
   // Points per match request. The public FOSSGIS servers refuse more than ten (TooBig); an own
   // OSRM takes 100 by default (--max-matching-size).
   roadMatchMaxCoords: Math.max(4, Math.floor(Number(process.env.ROAD_MATCH_MAX_COORDS)) || 10),
+  // Where the own matcher gets its roads, an Overpass API asked for a few map tiles at a time;
+  // it only learns which areas were visited. ROADS=off asks nothing (stored tiles are still used).
+  roadDataUrl: envOff("ROADS") ? null : process.env.ROADS_URL || "https://overpass-api.de/api/interpreter",
+  // Stored road tiles are asked for again after this many days.
+  roadTileDays: Number(process.env.ROAD_TILE_DAYS) || 30,
   // Bus, tram and train lines in the timeline, from GTFS timetables. "off" turns it off.
   transit: !["off", "false", "no", "0"].includes((process.env.TRANSIT ?? "").trim().toLowerCase()),
   // The Mobility Database catalog: which feeds exist, what each covers, where to get it.

@@ -180,6 +180,16 @@ const SCHEMA = `
     created_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start, profile)
   );
+  CREATE TABLE IF NOT EXISTS road_tiles (
+    layer TEXT NOT NULL,
+    z INTEGER NOT NULL,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    PRIMARY KEY (layer, z, x, y)
+  );
   CREATE TABLE IF NOT EXISTS trip_modes (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id TEXT NOT NULL,

@@ -237,6 +237,7 @@ test("a trip across an invisible stretch gets nothing the server stored from all
   getDb()
     .prepare("INSERT OR REPLACE INTO trip_paths (user_id, device_id, start, end_ms, profile, path, created_at, algo) VALUES (?, 'phone', ?, ?, 'car', ?, 0, ?)")
     .run(luis.user.id, own.start, own.end, JSON.stringify(snapped), PATH_ALGO);
+  config.roadMatch = "osrm";
   config.roadMatchUrl = "http://127.0.0.1:9/{profile}";
   try {
     assert.deepEqual((await theDrive(luis, luis)).path, snapped);
@@ -249,6 +250,7 @@ test("a trip across an invisible stretch gets nothing the server stored from all
     assert.notDeepEqual(seen.path, snapped);
     assert.equal(seen.path.length, 41 - 10, "08:20 to 09:00 without the ten invisible minutes");
   } finally {
+    config.roadMatch = "off";
     config.roadMatchUrl = null;
   }
 });

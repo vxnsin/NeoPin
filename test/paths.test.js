@@ -183,9 +183,11 @@ beforeEach(async () => {
   s = await startServer();
   luis = await s.account("luis");
   osrm = await fakeOsrm();
+  config.roadMatch = "osrm";
   config.roadMatchUrl = osrm.url;
 });
 afterEach(async () => {
+  config.roadMatch = "off";
   config.roadMatchUrl = null;
   await osrm.close();
   await s.stop();
@@ -263,7 +265,9 @@ test("a drive is snapped to the roads and cached", async () => {
 test("a dense 20 km drive, every fix stored twice, is snapped whole in at most twenty requests", async () => {
   // A fix every 100 m, as the app sends them on a road out of town.
   const fixes = aDay(200, 20, 5, { twice: true });
-  const body = await timeline();
+  // Twenty requests one after the other can take longer than one load waits on a busy machine.
+  let body = await timeline();
+  for (let i = 0; i < 20 && body.pathsPending; i++) body = await timeline();
   const trip = theTrip(body);
   assert.equal(trip.mode, "driving");
   assert.equal(trip.pathSource, "road");
