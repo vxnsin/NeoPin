@@ -1,7 +1,7 @@
 import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
 import { readBattery, serverTakesBattery, watchBattery } from "@/lib/battery";
-import { distanceM, toFix, type Fix } from "@/lib/fixes";
+import { distanceM, firstTimeLive, toFix, type Fix } from "@/lib/fixes";
 
 type Emitter = { emit: (msg: Message) => void };
 
@@ -46,7 +46,9 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
       anchor = fix;
       movedAt = lastFixAt;
     }
-    send(fix);
+    // The background task may have sent this very fix already.
+    if (firstTimeLive(fix)) send(fix);
+    else lastSent = Date.now();
   };
 
   // A phone on the charger may not move at all, its battery still changes.

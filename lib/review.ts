@@ -1,4 +1,5 @@
 import type { PlaceKind, Review, ReviewDay, ReviewLine, ReviewPeriod, ReviewPlace, TransitKind, TripMode } from "@/lib/api";
+import { readClimb, readHighest } from "@/lib/altitude";
 import { PLACE_LABELS, TRANSIT_LABELS, dayKey, formatDistance, formatDuration, parseDay, shiftDay, type RouteSegment } from "@/lib/timeline";
 
 // The weekly and monthly review: which period is shown, how it reads, and what a notification or a
@@ -159,6 +160,8 @@ export function readReview(raw: unknown, period: ReviewPeriod, date: string): Re
     path: path.map((p) => [p[0], p[1]]),
     previous: prev ? { distanceKm: finite(prev.distanceKm), movingMinutes: finite(prev.movingMinutes) } : null,
     empty: r.empty === true || (r.empty === undefined && distanceKm === 0 && trips === 0 && days.every((d) => d.km === 0)),
+    ascentM: readClimb(r.ascentM),
+    highest: readHighest(r.highestM),
   };
 }
 

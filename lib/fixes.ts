@@ -1,17 +1,27 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { LocationObject } from "expo-location";
 import type { Message } from "./SocketClient";
+import { fixAltitude } from "./altitude";
 
 // One GPS fix as the server takes it. recordedAt is when the phone took it, so a fix
-// sent later still lands at the right time in the timeline.
-export type Fix = { latitude: number; longitude: number; recordedAt?: number; accuracy?: number; speed?: number };
+// sent later still lands at the right time in the timeline. The GPS height (whole metres)
+// goes along; servers from before heights drop it.
+export type Fix = {
+  latitude: number;
+  longitude: number;
+  recordedAt?: number;
+  accuracy?: number;
+  speed?: number;
+  altitude?: number;
+  altitudeAccuracy?: number;
+};
 
 // The server closes the socket on values outside these, so those are left out.
 const MAX_ACCURACY_M = 100_000;
 const MAX_SPEED_MS = 200;
 
 export function toFix(location: LocationObject): Fix {
-  const { latitude, longitude, accuracy, speed } = location.coords;
+  const { latitude, longitude, accuracy, speed, altitude, altitudeAccuracy } = location.coords;
   return {
     latitude,
     longitude,
@@ -19,6 +29,7 @@ export function toFix(location: LocationObject): Fix {
     // iOS reports -1 when it does not know.
     ...(accuracy != null && accuracy >= 0 && accuracy <= MAX_ACCURACY_M && { accuracy }),
     ...(speed != null && speed >= 0 && speed <= MAX_SPEED_MS && { speed }),
+    ...fixAltitude(altitude, altitudeAccuracy),
   };
 }
 
@@ -31,9 +42,28 @@ export function distanceM(a: Fix, b: Fix): number {
   return 12_742_000 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// While the app is open the foreground watch and the background task both get every fix the
+// system makes, with the same time. Only the first of them sends it as the live position.
+let lastLive: Fix | null = null;
+
+export function firstTimeLive(fix: Fix): boolean {
+  // The still-beat repeats the spot without a time of its own: that is always news.
+  if (fix.recordedAt == null) return true;
+  const last = lastLive;
+  if (last?.recordedAt != null && Math.abs(last.recordedAt - fix.recordedAt) < 1_000 && distanceM(last, fix) < 2) return false;
+  lastLive = fix;
+  return true;
+}
+
+export function resetLiveFixes() {
+  lastLive = null;
+}
+
 // Servers that can take fixes collected offline say so in their login reply.
 export const BATCH_FEATURE = "positionBatch";
-const BATCH_SIZE = 100;
+// The server takes up to 100 per batch, but a message has to stay below its 16 KiB; with
+// the height along, 100 fixes at full GPS precision would not.
+const BATCH_SIZE = 75;
 
 // What goes out for the fixes of one report: the older ones as batches (history only),
 // the newest as a normal update so the map moves. Servers without batches only get

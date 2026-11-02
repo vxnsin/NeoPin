@@ -76,6 +76,7 @@ import {
   type Device,
   type Person,
 } from "@/lib/devices";
+import { deviceAltitude, formatAltitude } from "@/lib/altitude";
 import { buildMapHtml } from "@/lib/mapHtml";
 import { readCredentials, socket, type StoredCredentials } from "@/lib/socket";
 import { saveCredentials, updateStoredUser } from "@/lib/credentials";
@@ -1059,6 +1060,13 @@ export default function MapScreen() {
     return battery ? `, ${batteryLabel(battery, device.status !== "online")}` : "";
   };
 
+  // The ground height of the last position, " · 412 m" in the row and ", 412 m" in its label;
+  // nothing from servers from before heights.
+  const rowAltitude = (device: Device, separator = " · ") => {
+    const altitude = deviceAltitude(device);
+    return altitude === null ? "" : `${separator}${formatAltitude(altitude)}`;
+  };
+
   // The row and its ask button are siblings, so a screen reader reaches both.
   const linkedDevice = (device: Device) => {
     const state = freshness(device);
@@ -1067,7 +1075,7 @@ export default function MapScreen() {
         <Pressable
           style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
           onPress={() => focusDevice(device)}
-          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}${rowBattery(device)}`}
+          accessibilityLabel={`${device.deviceId}, ${statusText(device, timeAgo)}${rowAltitude(device, ", ")}${rowBattery(device)}`}
         >
           <MaterialIcons name={DEVICE_ICONS[typeOf(device)]} size={20} color={c.muted} />
           <View style={{ flex: 1 }}>
@@ -1079,6 +1087,7 @@ export default function MapScreen() {
               <View style={[styles.metaDot, { backgroundColor: STATE_COLORS[state] }]} />
               <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                 {statusText(device, timeAgo)}
+                {rowAltitude(device)}
               </Text>
               {batteryOf(device) ? <BatteryBadge battery={batteryOf(device)!} stale={device.status !== "online"} /> : null}
             </View>
@@ -1105,7 +1114,7 @@ export default function MapScreen() {
           <Pressable
             style={({ pressed }) => [styles.rowPress, pressed && { backgroundColor: c.subtle }]}
             onPress={() => togglePerson(person)}
-            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}${rowBattery(primary)}`}
+            accessibilityLabel={`${person.name}, ${primary.deviceId}, ${statusText(primary, timeAgo)}${rowAltitude(primary, ", ")}${rowBattery(primary)}`}
             accessibilityState={{ expanded: open }}
           >
             <Avatar name={person.name} uri={avatarFor(primary.avatarUrl)} state={freshness(primary)} gapColor={c.raised} />
@@ -1118,6 +1127,7 @@ export default function MapScreen() {
               <View style={styles.metaRow}>
                 <Text style={[styles.deviceMeta, styles.metaText, { color: c.muted }]} numberOfLines={1}>
                   {primary.deviceId} · {statusText(primary, timeAgo)}
+                  {rowAltitude(primary)}
                   {person.extra > 0 ? ` · +${person.extra} ${person.extra === 1 ? "device" : "devices"}` : ""}
                 </Text>
                 {batteryOf(primary) ? <BatteryBadge battery={batteryOf(primary)!} stale={primary.status !== "online"} /> : null}

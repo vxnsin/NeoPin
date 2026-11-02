@@ -15,7 +15,8 @@ export type Device = {
   deviceId: string;
   userId?: number;
   owner?: { username: string; displayName: string };
-  position: { latitude: number; longitude: number } | null;
+  // altitude: the ground height there in metres, looked up by the server. Older servers send none.
+  position: { latitude: number; longitude: number; altitude?: number | null } | null;
   lastPing: string | null;
   status: "online" | "offline";
   avatarUrl?: string | null;
