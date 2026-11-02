@@ -140,7 +140,9 @@ test("dark buildings and shading take the dark colours", () => {
   const extruded = map.layers.find((l) => l.id === "building-3d") as any;
   expect(extruded.paint["fill-extrusion-color"]).toBe(BUILDING_COLORS.dark);
   const shade = map.layers.find((l) => l.id === "hillshade") as any;
-  expect(shade.paint["hillshade-shadow-color"]).toBe("#05070b");
+  expect(shade.paint["hillshade-shadow-color"]).toBe("#000000");
+  // Strong enough to read the mountains on the dark map, not only on the light one.
+  expect(shade.paint["hillshade-exaggeration"]).toBeGreaterThanOrEqual(0.7);
 });
 
 test("switching on twice adds nothing twice, off leaves the flat map as it was", () => {
