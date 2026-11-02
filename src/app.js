@@ -106,6 +106,15 @@ import {
 } from "./places.js";
 import { RESTORE_MAX_BYTES, backupFile, downloadableBackup, listBackups, stageRestore } from "./backups.js";
 import {
+  DIAGNOSTICS_MAX_BYTES,
+  DiagnosticsError,
+  deleteDiagnostics,
+  diagnosticsFile,
+  listDiagnostics,
+  saveDiagnostics,
+  sweepDiagnostics,
+} from "./diagnostics.js";
+import {
   PASSKEY_NAME_MAX,
   deletePasskey,
   listPasskeys,
@@ -322,6 +331,14 @@ const Passkey = t.object({ id: t.number(), name: t.string(), createdAt: t.string
 // What the browser's navigator.credentials hands back, as JSON. @simplewebauthn checks it.
 const Credential = t.record(t.any());
 const Backup = t.object({ name: t.string(), size: t.number(), createdAt: t.string() });
+const Diagnostics = t.object({
+  id: t.string(),
+  username: t.string(),
+  deviceId: t.string().nullable(),
+  size: t.number(),
+  createdAt: t.string(),
+  expiresAt: t.string(),
+});
 
 const bare = (type) => t.object({ type: t.literal(type) });
 
@@ -533,6 +550,11 @@ export function createApp({ gracefulShutdown = true } = {}) {
     broadcastDevices();
   }, config.statusSweepMs);
   sweep.unref?.();
+
+  // Diagnostics links run out after a week; the files go with this hourly look (see diagnostics.js).
+  sweepDiagnostics().catch(() => {});
+  const diagnosticsSweep = setInterval(() => sweepDiagnostics().catch(() => {}), 60 * 60 * 1000);
+  diagnosticsSweep.unref?.();
 
   const rideWatch = createRideWatch();
   const rideSweep = setInterval(() => rideWatch.sweep(), BUFFER_MS);
@@ -846,6 +868,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
           invites: t.boolean(),
           // Whether this address can use passkeys (HTTPS or localhost), see passkeys.js.
           passkeys: t.boolean(),
+          // Whether the preview app can upload a diagnostics export, see diagnostics.js.
+          diagnostics: t.boolean(),
         }),
       },
     },
@@ -856,6 +880,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
       push: fcmEnabled(),
       invites: config.invites,
       passkeys: passkeyParty(ctx) !== null,
+      diagnostics: config.diagnostics,
     })
   );
 
@@ -2070,6 +2095,77 @@ export function createApp({ gracefulShutdown = true } = {}) {
     }
   );
 
+  // Diagnostics exports from the preview app (see diagnostics.js). The upload needs the device
+  // token or the dashboard session; the link it returns works for anyone who has it, for a week.
+  const diagnosticsOn = () => {
+    if (!config.diagnostics) throw problem(404, "diagnostics-off", "Diagnostics are turned off on this server");
+  };
+  // PUBLIC_URL when set, so a link made over the LAN still opens from outside.
+  const diagnosticsUrl = (ctx, id) =>
+    `${(config.publicUrl ?? `${ctx.secure ? "https" : "http"}://${ctx.headers.host}`).replace(/\/+$/, "")}/diagnostics/${id}.zip`;
+
+  app.register((uploads) => {
+    uploads.register(rateLimit({ max: config.diagnosticsRateLimit.max, window: config.diagnosticsRateLimit.windowMs }));
+    uploads.post(
+      "/api/diagnostics",
+      {
+        body: t.binary().max(DIAGNOSTICS_MAX_BYTES).accept("application/zip"),
+        response: {
+          201: t.object({ url: t.string(), expiresAt: t.string() }),
+          400: t.problem(),
+          401: t.problem(),
+          404: t.problem(),
+          413: t.problem(),
+          415: t.problem(),
+          429: t.problem(),
+        },
+      },
+      async (ctx) => {
+        diagnosticsOn();
+        const { user, deviceId } = currentUser(ctx);
+        let saved;
+        try {
+          saved = await saveDiagnostics(ctx.body, { username: user.username, deviceId });
+        } catch (error) {
+          if (error instanceof DiagnosticsError) throw problem(400, error.code, error.message);
+          throw error;
+        }
+        console.log(chalk.cyan(`[i] ${chalk.whiteBright(user.username)} uploaded a diagnostics export.`));
+        return reply(201, { url: diagnosticsUrl(ctx, saved.id), expiresAt: saved.expiresAt });
+      }
+    );
+  });
+
+  // The path carries ".zip" so chat apps show it as a file; the id alone picks it.
+  app.get("/diagnostics/:file", { response: { 404: t.problem() } }, (ctx) => {
+    diagnosticsOn();
+    const id = /^([0-9a-f]{32})\.zip$/.exec(ctx.params.file)?.[1];
+    const found = id ? diagnosticsFile(id) : null;
+    if (!found) throw problem(404, "unknown-diagnostics", "No such export, or it has expired");
+    return reply(200, createReadStream(found.file), {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="neopin-diagnostics-${id.slice(0, 8)}.zip"`,
+      "content-length": String(found.size),
+      "cache-control": "no-store",
+      "x-robots-tag": "noindex",
+    });
+  });
+
+  app.get("/api/admin/diagnostics", { response: { 200: t.array(Diagnostics), 401: t.problem(), 403: t.problem() } }, (ctx) => {
+    requireAdmin(ctx);
+    return listDiagnostics();
+  });
+
+  app.delete(
+    "/api/admin/diagnostics/:id",
+    { response: { 204: t.empty(), 401: t.problem(), 403: t.problem(), 404: t.problem() } },
+    async (ctx) => {
+      requireAdmin(ctx);
+      if (!(await deleteDiagnostics(ctx.params.id))) throw problem(404, "unknown-diagnostics", "No such export");
+      return reply(204);
+    }
+  );
+
   app.ws(
     "/",
     { origins: "*", message: ClientMessage, maxMessage: 32 * 1024, heartbeat: config.heartbeatMs },
@@ -2277,6 +2373,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
       clearTimeout(broadcastTimer);
       clearInterval(sweep);
       clearInterval(rideSweep);
+      clearInterval(diagnosticsSweep);
       reviewJob.stop();
       stopGroundWatch();
       stopElevation();

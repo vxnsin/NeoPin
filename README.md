@@ -155,6 +155,8 @@ Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 | `PUBLIC_URL` | unset | The dashboard's address, e.g. `https://neopin.example.com`. Passkeys belong to its host name, see [Passkeys](#passkeys). Unset, the `Host` of each request counts |
 | `BACKUPS` | on | A copy of the database every night at 03:30 server time, see [Backups](#backups). `off` turns it off, the download in the dashboard still works |
 | `BACKUP_KEEP` | `7` | How many of the nightly backups stay |
+| `DIAGNOSTICS` | on | Diagnostics exports from the preview app, see [Diagnostics](#diagnostics). `off` refuses uploads and stops the links |
+| `DIAGNOSTICS_TTL_DAYS` | `7` | How long a diagnostics link works |
 
 </details>
 
@@ -338,6 +340,16 @@ Every night at 03:30, and after a start when the newest one is older than a day,
 
 **Restore from file** uploads a backup. The server checks that it is a sound NeoPin database, keeps it as `neopin.db.restore` and answers `202`; nothing changes until the next start, which puts it in place and keeps the old database as `neopin.db.before-restore`. Restart the container or the process to finish. Uploads go up to 1 GB, a reverse proxy in front may need its body limit raised for that (`client_max_body_size` in nginx).
 
+## Diagnostics
+
+Preview builds of the app have a Developer section in their settings. **Export diagnostics** packs the app's own log into a zip, uploads it to this server and opens the share sheet with a link, for pasting into a chat when something misbehaves. The admin sees every export in the account menu under Diagnostics, with who sent it, its size and time, and can download or delete it.
+
+The zip goes to `diagnostics/` next to the database as `<id>.zip`, the id being 128 random bits. Anyone with the link can download it, nobody can list or guess it, and after `DIAGNOSTICS_TTL_DAYS` (7) the link answers `404` and an hourly sweep deletes the file. Uploads take the device token or the dashboard session, are zips of at most 5 MB, and 10 an hour per IP.
+
+What an export holds: `summary.json` (device model and OS, app and update version, update channel and runtime, the position preset, permission states, battery drain per hour, fixes per hour by source, the share of duplicate fixes, reconnects), `events.jsonl` (the log, one event per line: fixes taken, sent or skipped with accuracy, speed and whether the phone moved, socket connects and disconnects with their reason, foreground and background, battery level and charging, preset changes, pushes received, errors), `errors.txt` (errors and warnings in plain text) and `settings.json` (the app's settings). The username is in it; the device name stays on the server, next to the upload, for the admin's list.
+
+What it never holds: positions. A fix is logged as its distance to the previous one (whole metres), never with coordinates. No token, no password, no push token, no server ids beyond the username, no names of other people. Error texts are cleaned of anything that looks like a token or a coordinate before they are logged. Set `DIAGNOSTICS=off` to keep exports off the server altogether.
+
 ## Passkeys
 
 Every account can add passkeys in the account menu (Passkeys) and then sign in to the dashboard with **Sign in with a passkey**, without a username or password. The password login stays, and the app keeps signing in with the password and its device token.
@@ -430,7 +442,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `POST` | `/login` | | `{ "username", "password" }`, sets the cookie. `401` when wrong, `429` after 5 tries a minute |
 | `POST` | `/api/auth/login` | | `{ "username", "password", "deviceId", "deviceType"? }`, answers with the device `token` |
 | `GET` | `/logout` | | Ends the session |
-| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push", "invites", "passkeys" }`, used by the login screens and the Docker health check. `passkeys` says whether this address can use them |
+| `GET` | `/api/status` | | `{ "version", "commit", "builtAt", "push", "invites", "passkeys", "diagnostics" }`, used by the login screens and the Docker health check. `passkeys` says whether this address can use them, `diagnostics` whether exports can be uploaded |
 | `POST` | `/login/passkey/options` | | WebAuthn request options with a fresh challenge (valid 5 min, once), no username. `404` where [passkeys](#passkeys) do not work. 10 passkey requests a minute per IP |
 | `POST` | `/login/passkey` | | `{ "credential" }`, what `navigator.credentials.get` answered as JSON. Sets the cookie like `/login`, `401` when the passkey is unknown or does not check out |
 | `POST` | `/api/register` | | `{ "code", "username", "password", "displayName"? }` signs up with an [invite code](#invite-codes), `201` with the account. `404` for any invalid code, `409` username taken |
@@ -468,6 +480,10 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/admin/backups` | admin | The nightly backups, newest first: `[{ name, size, createdAt }]` |
 | `GET` | `/api/admin/backups/:name` | admin | Downloads one of them. `404` for any name that is not exactly one of the list |
 | `POST` | `/api/admin/restore` | admin | The backup file as the body (`application/octet-stream`, at most 1 GB). `202` once it is checked and staged, applied on the next start. `400` for anything but a NeoPin database |
+| `POST` | `/api/diagnostics` | ✓ | A [diagnostics](#diagnostics) zip as the body (`application/zip`, at most 5 MB). `201` with `{ "url", "expiresAt" }`, `400` for anything but a zip, `404` with `DIAGNOSTICS=off`, `429` after 10 an hour per IP |
+| `GET` | `/diagnostics/:id.zip` | link | The export, for anyone with the link until it expires, then `404` |
+| `GET` | `/api/admin/diagnostics` | admin | The exports still valid, newest first: `{ id, username, deviceId, size, createdAt, expiresAt }` |
+| `DELETE` | `/api/admin/diagnostics/:id` | admin | Deletes one. `204`, else `404` |
 | `PUT` | `/api/avatar` | ✓ | Sets the account's profile picture: JPEG, PNG or WebP, at most 16 KB |
 | `DELETE` | `/api/avatar` | ✓ | Removes it again |
 | `GET` | `/avatars/:userId` | ✓ | The picture. Its URL changes with every new one, so it is cached for good |
