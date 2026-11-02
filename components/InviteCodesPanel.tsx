@@ -13,9 +13,12 @@ type Props = {
   groups: Group[];
 };
 
-// The clipboard module is native; a build without it falls back to the share sheet.
+// The clipboard module is native; a build without it falls back to the share sheet. Asked for
+// first: on a build without it, loading expo-clipboard itself took the app down.
 async function copyText(text: string): Promise<boolean> {
   try {
+    const { requireOptionalNativeModule } = require("expo-modules-core");
+    if (!requireOptionalNativeModule("ExpoClipboard")) return false;
     const Clipboard = require("expo-clipboard");
     await Clipboard.setStringAsync(text);
     return true;

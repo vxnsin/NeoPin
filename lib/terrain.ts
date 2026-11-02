@@ -46,12 +46,11 @@ export const TERRAIN_SCRIPT = `var TERRAIN = ${JSON.stringify({
         return;
       }
       if (!map.getSource("terrain-dem")) map.addSource("terrain-dem", demSource());
-      // MapLibre draws the shading in lower quality when it shares the source with the terrain;
-      // the second source fetches the same URLs, which the browser cache answers.
-      if (!map.getSource("hillshade-dem")) map.addSource("hillshade-dem", demSource());
+      // One source for ground and shading: a second one decoded every tile twice, which made
+      // slower phones stutter. The shading is a little softer this way.
       var label = firstLabel(map);
       if (!map.getLayer("hillshade")) {
-        map.addLayer({ id: "hillshade", type: "hillshade", source: "hillshade-dem", paint: dark
+        map.addLayer({ id: "hillshade", type: "hillshade", source: "terrain-dem", paint: dark
           ? { "hillshade-shadow-color": "#05070b", "hillshade-highlight-color": "#3a465e", "hillshade-accent-color": "#0d1119", "hillshade-exaggeration": 0.45 }
           : { "hillshade-shadow-color": "#5b6577", "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#8a93a5", "hillshade-exaggeration": 0.3 } },
           map.getLayer("building") ? "building" : label);
@@ -81,15 +80,27 @@ export const TERRAIN_SCRIPT = `var TERRAIN = ${JSON.stringify({
     // MapLibre places the markers when the camera moves, but lifts the camera onto the ground under
     // the map centre only later, while drawing the frame: over hills every pin trails a frame behind
     // and wobbles, and a DEM tile that arrives later leaves it at the old height. So in 3D every
-    // marker and popup is placed again after each frame, without pixel snapping (snapping every
-    // frame stutters), and a pin behind a hill stays fully drawn instead of blinking.
+    // marker and popup is placed again after a frame, without pixel snapping (snapping every
+    // frame stutters), and a pin behind a hill stays fully drawn instead of blinking. Only after
+    // frames where the camera or the ground changed, or markers came and went: placing all of
+    // them on every frame made slower phones lag.
     var terrainSettled = new WeakSet();
     function followTerrain(map, items) {
-      var was = false;
+      var was = false, lastView = "", lastCount = -1, groundChanged = false;
+      map.on("sourcedata", function (e) { if (e.sourceId === "terrain-dem") groundChanged = true; });
       map.on("render", function () {
         var on = !!map.getTerrain();
         if (!on && !was) return;
-        items().forEach(function (item) {
+        var list = items();
+        if (on && was) {
+          var c = map.getCenter();
+          var view = [c.lng.toFixed(7), c.lat.toFixed(7), map.getZoom().toFixed(4), map.getPitch().toFixed(2), map.getBearing().toFixed(2)].join();
+          if (view === lastView && list.length === lastCount && !groundChanged) return;
+          lastView = view;
+        }
+        lastCount = list.length;
+        groundChanged = false;
+        list.forEach(function (item) {
           if (!item) return;
           if (on && !terrainSettled.has(item)) {
             terrainSettled.add(item);

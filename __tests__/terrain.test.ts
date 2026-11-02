@@ -46,6 +46,9 @@ function fakeMap(pitch = 0) {
     touchPitch: { enable: () => (gestures.touchPitch = true), disable: () => (gestures.touchPitch = false) },
     getBearing: () => 20,
     getPitch: () => map.pitch,
+    center: { lng: 11, lat: 47.5 },
+    getCenter: () => map.center,
+    getZoom: () => 12,
     on: (event: string, fn: (e: any) => void) => { (listeners[event] ||= []).push(fn); },
     off: (event: string, fn: (e: any) => void) => { listeners[event] = (listeners[event] || []).filter((f) => f !== fn); },
     isSourceLoaded: () => true,
@@ -106,9 +109,10 @@ function script(): Script {
 test("the terrain comes from the free Terrarium tiles, credited, and only up to z12", () => {
   const map = fakeMap();
   script().applyTerrain(map, true, false);
-  for (const id of ["terrain-dem", "hillshade-dem"]) {
-    expect(map.sources[id]).toEqual({ type: "raster-dem", tiles: [TERRAIN_TILES], encoding: "terrarium", tileSize: 256, maxzoom: 12, attribution: TERRAIN_CREDIT });
-  }
+  expect(map.sources["terrain-dem"]).toEqual({ type: "raster-dem", tiles: [TERRAIN_TILES], encoding: "terrarium", tileSize: 256, maxzoom: 12, attribution: TERRAIN_CREDIT });
+  // Ground and shading share the one source, each tile is decoded once.
+  expect(map.sources["hillshade-dem"]).toBeUndefined();
+  expect(map.layers.find((l) => l.id === "hillshade")).toMatchObject({ source: "terrain-dem" });
   expect(TERRAIN_TILES).toBe("https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png");
   expect(map.getTerrain()).toEqual({ source: "terrain-dem", exaggeration: TERRAIN_EXAGGERATION });
   expect(TERRAIN_EXAGGERATION).toBeCloseTo(1.3);
@@ -238,23 +242,38 @@ function fakeMarker() {
   };
 }
 
-test("in 3D every marker is placed again after each frame, off it is left to MapLibre", () => {
+test("in 3D the markers are placed again after frames that moved something, off it is left to MapLibre", () => {
   const map = fakeMap();
   let terrain: unknown = null;
   map.getTerrain = () => terrain;
   const pin = fakeMarker();
-  script().followTerrain(map, () => [pin, null]);
+  const items: any[] = [pin, null];
+  script().followTerrain(map, () => items);
   map.fire("render", {});
   expect(pin.log).toEqual([]);
   terrain = { source: "terrain-dem" };
   map.fire("render", {});
   map.fire("render", {});
-  // Set up once: no pixel snapping, fully drawn behind hills; then placed on every frame.
+  // Set up once: no pixel snapping, fully drawn behind hills; then placed again when the camera moved.
   expect(pin.log).toEqual(["subpixel true", "opacity 1,1", "place", "place"]);
+  // A frame where nothing moved costs nothing: that was what made slower phones lag.
+  map.fire("render", {});
+  map.fire("render", {});
+  expect(pin.log).toHaveLength(4);
+  // The camera moves, the ground arrives, a marker comes: placed again each time.
+  map.center = { lng: 11.001, lat: 47.5 };
+  map.fire("render", {});
+  map.fire("sourcedata", { sourceId: "terrain-dem" });
+  map.fire("render", {});
+  const other = fakeMarker();
+  items.push(other);
+  map.fire("render", {});
+  expect(pin.log.slice(4)).toEqual(["place", "place", "place"]);
+  expect(other.log).toEqual(["subpixel true", "opacity 1,1", "place"]);
   terrain = null;
   map.fire("render", {});
   map.fire("render", {});
-  expect(pin.log.slice(4)).toEqual(["subpixel false", "opacity ", "place"]);
+  expect(pin.log.slice(7)).toEqual(["subpixel false", "opacity ", "place"]);
 });
 
 test("every marker on the map page stands upright on its point", () => {
