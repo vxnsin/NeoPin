@@ -31,6 +31,23 @@ export function distanceM(a: Fix, b: Fix): number {
   return 12_742_000 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// While the app is open the foreground watch and the background task both get every fix the
+// system makes, with the same time. Only the first of them sends it as the live position.
+let lastLive: Fix | null = null;
+
+export function firstTimeLive(fix: Fix): boolean {
+  // The still-beat repeats the spot without a time of its own: that is always news.
+  if (fix.recordedAt == null) return true;
+  const last = lastLive;
+  if (last?.recordedAt != null && Math.abs(last.recordedAt - fix.recordedAt) < 1_000 && distanceM(last, fix) < 2) return false;
+  lastLive = fix;
+  return true;
+}
+
+export function resetLiveFixes() {
+  lastLive = null;
+}
+
 // Servers that can take fixes collected offline say so in their login reply.
 export const BATCH_FEATURE = "positionBatch";
 const BATCH_SIZE = 100;
