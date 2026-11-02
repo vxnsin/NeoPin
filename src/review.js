@@ -175,7 +175,7 @@ function accountStamp(userId) {
   const db = getDb();
   const places = db.prepare("SELECT id, name, kind, lat, lon, radius_m FROM places WHERE user_id = ? ORDER BY id").all(userId);
   const feeds = Number(db.prepare("SELECT MAX(updated_at) AS stamp FROM transit_feeds").get().stamp ?? 0);
-  return JSON.stringify([ALGO, places, feeds, config.transit, !!config.roadMatchUrl, lookupEnabled()]);
+  return JSON.stringify([ALGO, places, feeds, config.transit, config.roadMatch, !!config.roadMatchUrl, lookupEnabled()]);
 }
 
 // Everything a day is made from: which fixes of which device, the dismissed stops, the

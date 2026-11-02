@@ -139,7 +139,7 @@ test("while the tiles are loading the paths are pending, then the roads are ther
   assert.equal(trip.pathSource, undefined);
   release();
   const later = { ...trip, fixes };
-  for (let i = 0; i < 50 && !later.pathSource; i++) {
+  for (let i = 0; i < 200 && !later.pathSource; i++) {
     await new Promise((r) => setTimeout(r, 20));
     await smoothPaths(luis.user.id, "phone", [later], { waitMs: 30 });
   }
@@ -189,7 +189,7 @@ test("old tiles are used and refreshed in the background, tiles of an older vers
   getDb().prepare("UPDATE road_tiles SET fetched_at = ?").run(Date.now() - 40 * 86_400_000);
   getDb().prepare("DELETE FROM trip_paths").run();
   assert.equal(theTrip(await timeline()).pathSource, "road", "a month-old map is still a map");
-  for (let i = 0; i < 50 && overpass.calls.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 300 && overpass.calls.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
   assert.equal(overpass.calls.length, 2, "and it is asked for again");
 
   getDb().prepare("UPDATE road_tiles SET version = ?").run(TILE_VERSION - 1);

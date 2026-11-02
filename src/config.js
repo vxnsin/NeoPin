@@ -85,8 +85,11 @@ export const config = {
   // way of every trip it is asked about.
   roadMatchUrl:
     process.env.ROAD_MATCH_URL === "off" ? null : process.env.ROAD_MATCH_URL || "https://routing.openstreetmap.de/routed-{profile}",
-  // Where the own matcher gets its roads, an Overpass API asked for one map tile at a time; it
-  // only learns which areas were visited. ROADS=off asks nothing (stored tiles are still used).
+  // Points per match request. The public FOSSGIS servers refuse more than ten (TooBig); an own
+  // OSRM takes 100 by default (--max-matching-size).
+  roadMatchMaxCoords: Math.max(4, Math.floor(Number(process.env.ROAD_MATCH_MAX_COORDS)) || 10),
+  // Where the own matcher gets its roads, an Overpass API asked for a few map tiles at a time;
+  // it only learns which areas were visited. ROADS=off asks nothing (stored tiles are still used).
   roadDataUrl: envOff("ROADS") ? null : process.env.ROADS_URL || "https://overpass-api.de/api/interpreter",
   // Stored road tiles are asked for again after this many days.
   roadTileDays: Number(process.env.ROAD_TILE_DAYS) || 30,
