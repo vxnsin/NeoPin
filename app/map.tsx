@@ -1187,12 +1187,17 @@ export default function MapScreen() {
         }}
       />
 
-      {/* The 3D switch on the map, above the bar or the timeline panel; the settings have it too. */}
+      {/* The 3D switch on the map, top right under the status bar (and under the setup banner):
+          down by the bar or the timeline panel it slid under them while they moved. The settings
+          have it too. */}
       {startGone && (
         <Pressable
           style={[
             styles.map3d,
-            { bottom: timelineOpen ? panelHeight + 12 : insets.bottom + 12 + 68 + 12, backgroundColor: map3d ? c.secondary : c.raised },
+            {
+              top: insets.top + 12 + (creds && !tourOpen && showSetupBanner(creds.user, setupDismissed) ? 64 : 0),
+              backgroundColor: map3d ? c.secondary : c.raised,
+            },
           ]}
           onPress={() => changeMap3d(!map3d)}
           hitSlop={6}
