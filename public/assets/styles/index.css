@@ -320,6 +320,11 @@ body.is-timeline .maplibregl-popup {
   padding: 12px 14px 4px;
 }
 
+/* A day that went uphill gets a fourth tile, "climbed": two by two, so "1 h 45 min" stays on a line. */
+.tl-summary--climb {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .tl-summary div {
   display: grid;
   padding: 8px 10px;
@@ -426,6 +431,50 @@ body.is-timeline .maplibregl-popup {
   color: var(--text-muted);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+}
+
+.seg__climb {
+  white-space: nowrap;
+}
+
+/* The ups and downs of a trip: a small area in the trip's colour, its highest and lowest metres
+   beside it. */
+.seg__profile {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 6px;
+  height: 36px;
+}
+
+.seg__profile svg {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: visible;
+}
+
+.seg__profile-area {
+  fill: var(--mode, var(--text-muted));
+  fill-opacity: 0.16;
+}
+
+.seg__profile-line {
+  fill: none;
+  stroke: var(--mode, var(--text-muted));
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.seg__profile-range {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-align: right;
 }
 
 .seg__coords {

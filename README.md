@@ -140,6 +140,8 @@ Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 | `ROADS_URL` | `https://overpass-api.de/api/interpreter` | Overpass API the road tiles come from. It learns which areas were visited, not the trips. Your own Overpass is best for regular use |
 | `ROAD_TILE_DAYS` | `30` | Stored road tiles are asked for again after this many days |
 | `ROAD_MATCH_URL` | `https://routing.openstreetmap.de/routed-{profile}` | OSRM server for `ROAD_MATCH=osrm`. `{profile}` becomes `car`, `bike` or `foot`. It sees the whole way of every trip it is asked about. `off` still turns road matching off, as before |
+| `ELEVATION` | on | The height of the ground under every fix, for the timeline, the review and the map, see [Heights](#heights). `off` turns it off |
+| `ELEVATION_URL` | `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png` | Where the Terrarium elevation tiles come from, `{z}`, `{x}` and `{y}` are filled in. They are kept in `elevation/` next to the database |
 | `ROAD_MATCH_MAX_COORDS` | `10` | Points per match request. The public servers refuse more than 10; your own OSRM takes 100 (its `--max-matching-size`), then trips are sent with every fix |
 | `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
 | `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
@@ -263,6 +265,24 @@ The fixes are thinned first (closer than 25 m to the last one kept, or a repeat,
 
 **Data.** The roads, and with them every snapped path, are [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors, available under the [Open Database License](https://opendatacommons.org/licenses/odbl/) (ODbL). Name that source wherever you show the paths to others.
 
+## Heights
+
+Every stored fix gets the height of the ground under it, so the map shows how high someone is (`412 m`), a trip in the timeline its metres up and down with a small elevation profile, and the review the metres climbed. The GPS altitude a phone sends along (`altitude`, `altitudeAccuracy`) is kept as it came but not shown: it wobbles by tens of metres and differs from phone to phone, the ground does not.
+
+The ground comes from the free Terrain Tiles of AWS Open Data in the Terrarium format, no key needed: a tile of zoom 12 covers some 6 by 6 km, is fetched once in the background (a couple of tiles a second at most, a failed one is tried again ten minutes later) and kept in `elevation/12/x/y.png` next to the database, where it is read between its four nearest pixels. Fixes from before (or from while a tile was on its way) get their height when their day is opened in the timeline or the review. A tile request carries nothing but the tile's number, an area of 6 km. `ELEVATION=off` turns it off, `ELEVATION_URL` points at another source in the same format.
+
+<details>
+<summary><b>API</b></summary>
+<br>
+
+- `dataResponse`, `GET /api/getData` and `GET /api/devices`: `position.altitude`, the ground in whole metres, or `null` while it is not known.
+- `GET /api/timeline`: every trip has `ascentM` and `descentM` (smoothed over 50 m of way, ups and downs under 3 m left out) and `elevation: [[distanceM, altitudeM], ...]`, at most 200 points along the trip; every stay `altitudeM`; `summary.ascentM` adds up the trips. All `null` (and `elevation` empty) while no heights are known, and for stretches without fixes.
+- `GET /api/review`: `ascentM`, the metres climbed, and `highestM: { altitudeM, name }`, the highest stay (`name` is `null` for an unnamed one). Both `null` without heights.
+
+</details>
+
+Terrain: [Mapzen](https://www.mapzen.com/), [AWS Open Data](https://registry.opendata.aws/terrain-tiles/) (SRTM, GMTED2010, ETOPO1, NED, and others, see their [attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)).
+
 ## Review
 
 A week (Monday to Sunday) or a calendar month in numbers: distance, time on the move, trips and stops, a map of everywhere you went, the most visited places and the most ridden lines.
@@ -289,12 +309,14 @@ A week (Monday to Sunday) or a calendar month in numbers: distance, time on the 
   days: [{ date, km, movingMinutes }],
   path: [[lat, lon], ...],                      // all trips, thinned to at most 600 points
   previous: { distanceKm, movingMinutes } | null,
-  empty }
+  empty,
+  ascentM,                                      // metres climbed, null without heights
+  highestM: { altitudeM, name } | null }        // the highest stay, see Heights
 ```
 
 Every day is that day's own timeline, built as `GET /api/timeline` builds it: from the device with the most fixes that day (the main device on a tie), with dismissed stops, corrected modes, answered rides and place names. Invisible stretches count, as in the own timeline. Distances and minutes are those of the trips, without stretches that had no fixes. Only the own review, the admin reads anyone's with `userId`; a shared timeline does not share the review.
 
-Finished days are kept in `review_days` with a stamp of what they were made of (the fixes of each device, dismissed stops, corrections, ride answers, own places, timetable data), so a month answers from the store and a change shows on the next request. Today and days still waiting for place names or paths are built every time.
+Finished days are kept in `review_days` with a stamp of what they were made of (the fixes of each device and how many know their height, dismissed stops, corrections, ride answers, own places, timetable data), so a month answers from the store and a change shows on the next request. Today and days still waiting for place names or paths are built every time.
 
 </details>
 
@@ -349,8 +371,8 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 |:--|:--|
 | `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true, "features": ["positionBatch", "find", "rideQuestion"] }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
-| `{ "type": "updatePosition", "latitude", "longitude", "battery"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }` |
-| `{ "type": "positionBatch", "points": [...] }` | Up to 100 fixes taken while the phone had no connection, each `{ latitude, longitude, recordedAt?, accuracy?, speed? }`. Stored at their own time |
+| `{ "type": "updatePosition", "latitude", "longitude", "battery"?, "recordedAt"?, "accuracy"?, "speed"?, "altitude"?, "altitudeAccuracy"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }`. `altitude` (−1000 to 20000) and `altitudeAccuracy` (0 to 10000) are the GPS height in metres, kept but not shown, see [Heights](#heights) |
+| `{ "type": "positionBatch", "points": [...] }` | Up to 100 fixes taken while the phone had no connection, each `{ latitude, longitude, recordedAt?, accuracy?, speed?, altitude?, altitudeAccuracy? }`. Stored at their own time. A message may be up to 32 KiB |
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
@@ -375,7 +397,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
 | `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |
 | `{ "type": "rideQuestion", "rideId", "transit", "at" }` | The server thinks you are riding this line right now, answer with `POST /api/rides/answer`, see [Transit data](#transit-data) |
-| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `battery` is `null` until the device reported one, and stays the last reading (with its `updatedAt`) while the device is offline |
+| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `position` is `{ latitude, longitude, altitude }`, `altitude` the ground in metres or `null`. `battery` is `null` until the device reported one, and stays the last reading (with its `updatedAt`) while the device is offline |
 
 </details>
 
@@ -432,7 +454,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"?, "userId"? }`, asks one or all devices and answers with the list. An offline device is woken with a push when [push](#push-notifications) is set up: `202` when it has not answered in time |
 | `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
-| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
+| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths); trips and stays carry their [heights](#heights). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
 | `GET` | `/api/review` | ✓ | `period`, `date`, `tz` or `timeZone`: a week or month in numbers, see [Review](#review). The admin adds `userId` |
 | `GET` `PUT` | `/api/me/review-notifications` | ✓ | `{ "enabled" }`: whether the [review](#review) comes as a notification, on by default |
 | `GET` `PUT` | `/api/timeline/sharing` | ✓ | `{ "mode": "off" \| "groups" \| "selected", "users", "groups" }`: who may read your timeline. `400` for people or groups you share nothing with |

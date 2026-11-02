@@ -115,7 +115,7 @@ test("linked devices are listed after a restart with their last stored position"
   assert.equal(device.deviceId, "phone");
   assert.equal(device.status, "offline");
   assert.equal(device.deviceType, "tablet");
-  assert.deepEqual(device.position, { latitude: 48.1, longitude: 11.5 });
+  assert.deepEqual(device.position, { latitude: 48.1, longitude: 11.5, altitude: null });
   assert.equal(device.lastPing, "2025-06-10T09:00:00.000Z");
 });
 

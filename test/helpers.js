@@ -22,6 +22,8 @@ config.placeFallbackUrl = null;
 config.roadMatch = "off";
 config.roadMatchUrl = null;
 config.roadDataUrl = null;
+// Nor the real elevation tiles, test/elevation.test.js brings its own.
+config.elevationUrl = null;
 // Tests log in a lot, and scrypt makes every login slow enough to count.
 config.loginRateLimit.max = 30;
 config.passkeyRateLimit.max = 60;

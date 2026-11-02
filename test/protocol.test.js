@@ -69,7 +69,7 @@ test("position updates reach the other devices of the same account", async () =>
   const update = await a.next();
   assert.equal(update.type, "dataResponse");
   const deviceB = update.devices.find((d) => d.deviceId === "b");
-  assert.deepEqual(deviceB.position, { latitude: 48.1, longitude: 11.5 });
+  assert.deepEqual(deviceB.position, { latitude: 48.1, longitude: 11.5, altitude: null });
   assert.ok(deviceB.lastPing);
 });
 
@@ -99,7 +99,7 @@ test("pingDevices asks the other devices for a location and answers with the lis
 
   let reply = await asker.next();
   while (!reply.devices.find((d) => d.deviceId === "target")?.position) reply = await asker.next();
-  assert.deepEqual(reply.devices.find((d) => d.deviceId === "target").position, { latitude: 1, longitude: 2 });
+  assert.deepEqual(reply.devices.find((d) => d.deviceId === "target").position, { latitude: 1, longitude: 2, altitude: null });
 });
 
 test("dashboard login issues a session cookie and rejects wrong passwords", async () => {
@@ -196,5 +196,5 @@ test("sendPing over HTTP asks a device and answers with the list", async () => {
   phone.send({ type: "updatePosition", latitude: 3, longitude: 4 });
   const res = await asked;
   assert.equal(res.status, 200);
-  assert.deepEqual((await res.json()).devices[0].position, { latitude: 3, longitude: 4 });
+  assert.deepEqual((await res.json()).devices[0].position, { latitude: 3, longitude: 4, altitude: null });
 });

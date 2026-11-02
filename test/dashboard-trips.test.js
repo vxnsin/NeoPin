@@ -8,7 +8,20 @@ const load = (name, names) => {
   const file = new URL(`../public/assets/scripts/${name}`, import.meta.url);
   return vm.runInNewContext(`${fs.readFileSync(file, "utf8")}\n({ ${names.join(", ")} });`);
 };
-const trips = load("trips.js", ["MODES", "MODE_CHOICES", "badgeColors", "tripColor", "tripIcon", "rideLabel", "stillPending", "segmentIndex", "safeColor"]);
+const trips = load("trips.js", [
+  "MODES",
+  "MODE_CHOICES",
+  "badgeColors",
+  "tripColor",
+  "tripIcon",
+  "rideLabel",
+  "stillPending",
+  "segmentIndex",
+  "safeColor",
+  "altitudeText",
+  "climbText",
+  "profileShape",
+]);
 const hidden = load("hidden.js", ["HIDDEN_FOREVER", "HIDE_CHOICES", "minutesUntilMorning", "hiddenLabel"]);
 // Results come from another realm, a JSON round trip makes them comparable.
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -91,4 +104,40 @@ test("the label says how long the hiding lasts", () => {
   assert.equal(hidden.hiddenLabel(hidden.HIDDEN_FOREVER, now), "Hidden until you turn it off");
   assert.match(hidden.hiddenLabel(new Date(2026, 9, 28, 14, 35).getTime(), now), /^Hidden until \d/);
   assert.match(hidden.hiddenLabel(new Date(2026, 9, 29, 7, 0).getTime(), now), /^Hidden until tomorrow, /);
+});
+
+test("heights read as metres, and nothing shows without them", () => {
+  assert.equal(trips.altitudeText(412.4), "412 m");
+  assert.equal(trips.altitudeText(2962), "2,962 m");
+  assert.equal(trips.altitudeText(null), "");
+  assert.equal(trips.climbText({ ascentM: 120, descentM: 30 }), "↑ 120 m · ↓ 30 m");
+  assert.equal(trips.climbText({ ascentM: 0, descentM: 45 }), "↓ 45 m");
+  assert.equal(trips.climbText({ ascentM: 0, descentM: 0 }), "");
+  // An older server sends no heights at all.
+  assert.equal(trips.climbText({ type: "trip" }), "");
+});
+
+test("the elevation profile fills its box from the lowest to the highest point", () => {
+  assert.equal(trips.profileShape([]), null);
+  assert.equal(trips.profileShape(undefined), null);
+  assert.equal(trips.profileShape([[0, 500]]), null);
+  const shape = trips.profileShape(
+    [
+      [0, 500],
+      [500, 600],
+      [1000, 550],
+    ],
+    200,
+    36
+  );
+  assert.equal(shape.low, 500);
+  assert.equal(shape.high, 600);
+  assert.equal(shape.line, "M0 36 L100 2 L200 19");
+  assert.equal(shape.area, "M0 36 L100 2 L200 19 L200 36 L0 36 Z");
+  // A rise of 4 m stays a small bump in the middle.
+  const flat = trips.profileShape([
+    [0, 500],
+    [100, 504],
+  ]);
+  assert.deepEqual(flat.line.split(" ").filter((_, i) => i % 2).map(Number), [20.7, 17.3]);
 });
