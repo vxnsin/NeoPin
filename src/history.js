@@ -19,9 +19,21 @@ export function distanceM(aLat, aLon, bLat, bLon) {
   return 12_742_000 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// A fix this close in time and space to one stored already is that one again: the app's
+// foreground watch and its background task both report what the GPS gave them.
+const REPEAT_MS = 2_000;
+const REPEAT_M = 2;
+
+function storedAlready(userId, deviceId, lat, lon, ts) {
+  return getDb()
+    .prepare("SELECT lat, lon FROM positions WHERE user_id = ? AND device_id = ? AND ts BETWEEN ? AND ?")
+    .all(userId, deviceId, ts - REPEAT_MS, ts + REPEAT_MS)
+    .some((row) => distanceM(row.lat, row.lon, lat, lon) < REPEAT_M);
+}
+
 // ts is when the GPS took the fix, so fixes sent later (after a dead spot) land at
-// the right time. Those older than the newest stored one go in as they are, without
-// disturbing the thinning of the live ones.
+// the right time. Those older than the newest stored one go in as they are (unless
+// stored already), without disturbing the thinning of the live ones.
 export function recordPosition(userId, deviceId, lat, lon, ts = Date.now(), { accuracy = null, speed = null } = {}) {
   if (accuracy !== null && accuracy > MAX_ACCURACY_M) return false;
   const key = `${userId}:${deviceId}`;
@@ -33,6 +45,7 @@ export function recordPosition(userId, deviceId, lat, lon, ts = Date.now(), { ac
     if (gap < MIN_GAP_MS) return false;
     if (gap < HEARTBEAT_MS && moved < MIN_MOVE_M) return false;
   }
+  if (backfill && storedAlready(userId, deviceId, lat, lon, ts)) return false;
   getDb()
     .prepare("INSERT INTO positions (user_id, device_id, ts, lat, lon, accuracy, speed) VALUES (?, ?, ?, ?, ?, ?, ?)")
     .run(userId, deviceId, ts, lat, lon, accuracy, speed);
