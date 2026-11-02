@@ -19,6 +19,8 @@ config.placeLookupUrl = null;
 config.placeFallbackUrl = null;
 // Nor the real OSRM, test/paths.test.js brings its own.
 config.roadMatchUrl = null;
+// Nor the real elevation tiles, test/elevation.test.js brings its own.
+config.elevationUrl = null;
 // Tests log in a lot, and scrypt makes every login slow enough to count.
 config.loginRateLimit.max = 30;
 config.passkeyRateLimit.max = 60;

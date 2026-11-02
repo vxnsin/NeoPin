@@ -925,6 +925,19 @@
   grid-column: span 3;
 }
 
+.rv-stat--wide {
+  grid-column: span 6;
+}
+
+/* Where the highest stay was. */
+.rv-stat__note {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rv-stat span:first-child {
   color: var(--text-muted);
   font-size: 11.5px;

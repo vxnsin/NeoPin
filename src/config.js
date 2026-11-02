@@ -83,6 +83,15 @@ export const config = {
   transitDir: path.resolve(rootDir, process.env.TRANSIT_DIR || path.join(path.dirname(process.env.DATABASE_PATH || "data/neopin.db"), "transit")),
   // The regions that get timetables are cells of about this size around where the users have been.
   transitRegionKm: Number(process.env.TRANSIT_REGION_KM) || 30,
+  // The height of the ground under every stored fix, from Terrarium elevation tiles (AWS Open
+  // Data, no key), kept next to the database once fetched. "off" turns it off.
+  elevation: !["off", "false", "no", "0"].includes((process.env.ELEVATION ?? "").trim().toLowerCase()),
+  // Where the tiles come from; {z}, {x} and {y} are filled in.
+  elevationUrl:
+    process.env.ELEVATION_URL === "off"
+      ? null
+      : process.env.ELEVATION_URL || "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  elevationDir: path.resolve(rootDir, path.join(path.dirname(process.env.DATABASE_PATH || "data/neopin.db"), "elevation")),
   // Push notifications through Firebase Cloud Messaging: the service account key of the Firebase
   // project, as a file or inline JSON. Without either, push is off.
   fcmServiceAccountFile: envOrNull("FCM_SERVICE_ACCOUNT_FILE"),

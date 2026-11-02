@@ -3,7 +3,8 @@ import chalk from "chalk";
 import { config } from "./config.js";
 import { getDb } from "./db.js";
 import { getUser, listUsers } from "./accounts.js";
-import { distanceM, dismissedVisits, positionsBetween } from "./history.js";
+import { elevationEnabled } from "./elevation.js";
+import { distanceM, dismissedVisits, fixesBetween, positionsBetween } from "./history.js";
 import { addNotification } from "./notifications.js";
 import { lookupEnabled, namePlaces } from "./places.js";
 import { smoothPaths } from "./paths.js";
@@ -17,8 +18,8 @@ import { TRIP_MODES, matchTransit } from "./transitMatch.js";
 // stamp of everything they were made from, so a month is quick and a change shows the next time.
 
 export const REVIEW_PERIODS = ["week", "month"];
-// Raise when what a day holds changes: every stored day is built again.
-const ALGO = 1;
+// Raise when what a day holds changes: every stored day is built again. 2: heights.
+const ALGO = 2;
 const MAX_PATH_POINTS = 600;
 const DAY_PATH_POINTS = 300;
 const TOP_PLACES = 5;
@@ -149,13 +150,16 @@ function deviceIdsOf(userId) {
     .map((r) => r.id);
 }
 
-// How many fixes each device has in the range, and its newest row: a fix sent in later changes it.
+// How many fixes each device has in the range, its newest row and how many know their ground: a
+// fix sent in later changes it, and so does a height that came in with its elevation tile.
 function deviceCounts(userId, devices, from, to) {
-  const count = getDb().prepare("SELECT COUNT(*) AS n, MAX(id) AS last FROM positions WHERE user_id = ? AND device_id = ? AND ts >= ? AND ts < ?");
+  const count = getDb().prepare(
+    "SELECT COUNT(*) AS n, MAX(id) AS last, COUNT(ground) AS ground FROM positions WHERE user_id = ? AND device_id = ? AND ts >= ? AND ts < ?"
+  );
   return devices
     .map((deviceId) => {
       const row = count.get(userId, deviceId, from, to);
-      return { deviceId, n: Number(row.n), last: Number(row.last ?? 0) };
+      return { deviceId, n: Number(row.n), last: Number(row.last ?? 0), ground: Number(row.ground) };
     })
     .filter((d) => d.n > 0);
 }
@@ -175,7 +179,7 @@ function accountStamp(userId) {
   const db = getDb();
   const places = db.prepare("SELECT id, name, kind, lat, lon, radius_m FROM places WHERE user_id = ? ORDER BY id").all(userId);
   const feeds = Number(db.prepare("SELECT MAX(updated_at) AS stamp FROM transit_feeds").get().stamp ?? 0);
-  return JSON.stringify([ALGO, places, feeds, config.transit, !!config.roadMatchUrl, lookupEnabled()]);
+  return JSON.stringify([ALGO, places, feeds, config.transit, !!config.roadMatchUrl, lookupEnabled(), elevationEnabled()]);
 }
 
 // Everything a day is made from: which fixes of which device, the dismissed stops, the
@@ -268,6 +272,13 @@ export function summarizeDay(segments) {
     place.ms += visit.durationMs;
     places.set(key, place);
   }
+  // The highest stay, by the ground under it.
+  let highest = null;
+  for (const visit of visits) {
+    if (visit.altitudeM === null || visit.altitudeM === undefined) continue;
+    if (!highest || visit.altitudeM > highest.altitudeM) highest = { altitudeM: visit.altitudeM, name: visit.place?.name ?? null };
+  }
+  const climbed = trips.filter((t) => t.ascentM !== null && t.ascentM !== undefined);
   return {
     m: trips.reduce((sum, t) => sum + t.distanceM, 0),
     ms: trips.reduce((sum, t) => sum + t.durationMs, 0),
@@ -278,6 +289,8 @@ export function summarizeDay(segments) {
     places: [...places.values()],
     spots: visits.map((v) => [round5(v.lat), round5(v.lon)]),
     path: simplifyPath(path, DAY_PATH_POINTS),
+    ascent: climbed.length ? climbed.reduce((sum, t) => sum + t.ascentM, 0) : null,
+    highest,
   };
 }
 
@@ -285,7 +298,7 @@ const EMPTY_DAY = summarizeDay([]);
 
 // The day as the own timeline shows it, and whether a place name or a path is still on its way.
 async function buildDay(userId, deviceId, from, to, tzOffsetMin) {
-  const points = positionsBetween(userId, deviceId, from, to);
+  const points = fixesBetween(userId, deviceId, from, to);
   const timeline = buildTimeline(points, { dismissed: dismissedVisits(userId, deviceId, from, to) });
   const [places, paths] = await Promise.all([
     namePlaces(userId, timeline.segments, { tzOffsetMin }),
@@ -420,6 +433,8 @@ export async function buildReview(userId, { period = "week", date = null, zone =
   }
 
   const previous = totals(previousDays);
+  const climbed = days.filter((d) => d.ascent !== null && d.ascent !== undefined);
+  const highest = days.reduce((best, d) => (d.highest && (!best || d.highest.altitudeM > best.altitudeM) ? d.highest : best), null);
   return {
     period,
     from,
@@ -444,6 +459,8 @@ export async function buildReview(userId, { period = "week", date = null, zone =
     ),
     previous: previous.trips || previous.stops ? { distanceKm: round1(previous.m / 1000), movingMinutes: Math.round(previous.ms / 60_000) } : null,
     empty: sum.trips === 0 && sum.stops === 0,
+    ascentM: climbed.length ? climbed.reduce((total, d) => total + d.ascent, 0) : null,
+    highestM: highest,
   };
 }
 

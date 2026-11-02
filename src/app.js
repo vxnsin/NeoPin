@@ -40,6 +40,7 @@ import {
   detachSocket,
   getDevice,
   onlineDevices,
+  placed,
   removeDevice,
   statusOf,
   serializeDevices,
@@ -67,7 +68,8 @@ import {
 import { createInvite, getInviteCode, inviteSummary, inviteView, listInvites, registerWithCode, revokeInvite } from "./invites.js";
 import { addNotification, markRead, notificationsFor } from "./notifications.js";
 import { alertRecipients, alertSettings, observePresence, saveAlertSettings } from "./alerts.js";
-import { daysWithData, dismissVisit, dismissedVisits, positionsBetween, recordPosition, restoreVisit } from "./history.js";
+import { daysWithData, dismissVisit, dismissedVisits, fixesBetween, recordPosition, restoreVisit } from "./history.js";
+import { onGround, startElevation, stopElevation } from "./elevation.js";
 import { FIND_PUSH_COOLDOWN_MS, createFinder } from "./find.js";
 import { fcmEnabled, sendData, sendNotification, sendWakeUp } from "./fcm.js";
 import { RIDE_ANSWERS, answerRide } from "./rideAnswers.js";
@@ -138,6 +140,10 @@ const Position = t.object({
   longitude: t.number().min(-180).max(180),
 });
 
+// Where a device is, as the server tells it: with the ground there in metres (from the elevation
+// tiles, not the GPS), null while it is not known or ELEVATION is off.
+const PlacedPosition = Position.extend({ altitude: t.number().nullable() });
+
 const DeviceType = t.enum(["phone", "tablet", "desktop"]);
 
 // What the app reports about its battery: the charge in percent and whether it is plugged in.
@@ -151,7 +157,7 @@ const Device = t.object({
   userId: t.number(),
   groupIds: t.array(t.number()),
   owner: t.object({ username: t.string(), displayName: t.string() }),
-  position: Position.nullable(),
+  position: PlacedPosition.nullable(),
   lastPing: t.string().nullable(),
   status: t.enum(["online", "offline"]),
   battery: Battery.extend({ updatedAt: t.string() }).nullable(),
@@ -191,7 +197,7 @@ const LinkedDevice = t.object({
   primary: t.boolean(),
   status: t.enum(["online", "offline"]),
   lastPing: t.string().nullable(),
-  position: Position.nullable(),
+  position: PlacedPosition.nullable(),
 });
 
 // Where a visit was: an own place (named or confirmed) or a guess from OpenStreetMap.
@@ -225,6 +231,8 @@ const Visit = t.object({
   lon: t.number(),
   pointCount: t.number(),
   place: VisitPlace.nullable(),
+  // The ground there (m), null while not known.
+  altitudeM: t.number().nullable(),
 });
 
 const TransitStop = t.object({ name: t.string(), lat: t.number(), lon: t.number() });
@@ -259,6 +267,11 @@ const Trip = t.object({
   // Where `path` comes from when it is not the fixes themselves: the line's course between
   // the stops, or the fixes snapped to the roads.
   pathSource: t.enum(["line", "road"]).optional(),
+  // Metres up and down along the ground (smoothed, ups and downs under 3 m left out) and the
+  // profile, [distanceM, altitudeM] at most 200 times. Null and [] while no heights are known.
+  ascentM: t.number().nullable(),
+  descentM: t.number().nullable(),
+  elevation: t.array(t.array(t.number())),
 });
 
 const Timeline = t.object({
@@ -269,6 +282,7 @@ const Timeline = t.object({
     distanceM: t.number(),
     movingMs: t.number(),
     pointCount: t.number(),
+    ascentM: t.number().nullable(),
   }),
   segments: t.array(t.union(Visit, Trip)),
   // Some place names are still being looked up, a reload in a few seconds has them.
@@ -297,6 +311,9 @@ const Review = t.object({
   path: t.array(t.array(t.number())),
   previous: t.object({ distanceKm: t.number(), movingMinutes: t.number() }).nullable(),
   empty: t.boolean(),
+  // Metres climbed on the trips, and the highest stay; null without heights.
+  ascentM: t.number().nullable(),
+  highestM: t.object({ altitudeM: t.number(), name: t.string().nullable() }).nullable(),
 });
 
 const Message = t.object({ message: t.string() });
@@ -314,6 +331,10 @@ const FixDetails = {
   recordedAt: t.int().min(0).optional(),
   accuracy: t.number().min(0).max(100_000).optional(),
   speed: t.number().min(-1).max(200).optional(),
+  // Height above sea level from the GPS and how exact it is (m). Only kept as it came: the clients
+  // are shown the ground under the fix, from the elevation tiles.
+  altitude: t.number().min(-1000).max(20_000).optional(),
+  altitudeAccuracy: t.number().min(0).max(10_000).optional(),
 };
 
 // The phone's time of a fix, unless its clock is off: then the server's.
@@ -322,7 +343,12 @@ function fixTime(recordedAt, now = Date.now()) {
   return Math.min(recordedAt, now);
 }
 
-const fixExtras = (fix) => ({ accuracy: fix.accuracy ?? null, speed: fix.speed >= 0 ? fix.speed : null });
+const fixExtras = (fix) => ({
+  accuracy: fix.accuracy ?? null,
+  speed: fix.speed >= 0 ? fix.speed : null,
+  altitude: fix.altitude ?? null,
+  altitudeAccuracy: fix.altitudeAccuracy ?? null,
+});
 
 // Everything a client may send over the socket. Anything else closes it with 1007.
 const ClientMessage = t.discriminated("type", {
@@ -338,7 +364,7 @@ const ClientMessage = t.discriminated("type", {
   // The battery rides along with a position; on its own it comes when only the charge changed.
   updatePosition: Position.extend({ type: t.literal("updatePosition"), battery: Battery.optional(), ...FixDetails }),
   // Fixes the app collected while it had no connection, oldest first. At most 100 per
-  // message, so a batch stays below the socket's 16 KiB.
+  // message, so a batch stays below the socket's 32 KiB, heights included.
   positionBatch: t.object({ type: t.literal("positionBatch"), points: t.array(Position.extend(FixDetails)).max(100) }),
   updateBattery: Battery.extend({ type: t.literal("updateBattery") }),
   locationError: t.object({ type: t.literal("locationError"), message: t.string().max(500).optional() }),
@@ -592,6 +618,13 @@ export function createApp({ gracefulShutdown = true } = {}) {
   // Android push for everyone who was out and about (see src/review.js).
   const reviewJob = createReviewJob({ push: pushToAndroid, changed: notifyNotifications });
 
+  // The ground under the fixes, from elevation tiles fetched in the background. A tile a live
+  // position waited for sends the devices out again, now with their height.
+  const stopGroundWatch = onGround(({ live }) => {
+    if (live) broadcastDevices();
+  });
+  startElevation();
+
   // Arrived at or left one of the person's alert places: a notification for everyone they chose,
   // with a push to their Android phones. The time is the server's (TZ), the data carries `at`.
   function checkPresence(userId, deviceId, fix) {
@@ -741,7 +774,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
         deviceType: live?.deviceType ?? link.deviceType,
         status: statusOf(live),
         lastPing: live?.lastPing ?? null,
-        position: live?.position ?? null,
+        position: placed(live?.position),
       };
     });
   }
@@ -1644,7 +1677,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
           if (!range) throw problem(400, "bad-date", "date has to look like 2025-01-31");
           // The fixes and dismissed stops from while the owner was invisible are not for others.
           const spans = full ? [] : hiddenFromOthers(userId, range.from, range.to);
-          const points = withoutSpans(positionsBetween(userId, ctx.query.deviceId, range.from, range.to), spans);
+          const points = withoutSpans(fixesBetween(userId, ctx.query.deviceId, range.from, range.to), spans);
           // All dismissed stops still shape the stays; the answer leaves out those of the spans.
           const allDismissed = dismissedVisits(userId, ctx.query.deviceId, range.from, range.to);
           const dismissed = withoutSpans(allDismissed, spans);
@@ -2038,7 +2071,7 @@ export function createApp({ gracefulShutdown = true } = {}) {
 
   app.ws(
     "/",
-    { origins: "*", message: ClientMessage, maxMessage: 16 * 1024, heartbeat: config.heartbeatMs },
+    { origins: "*", message: ClientMessage, maxMessage: 32 * 1024, heartbeat: config.heartbeatMs },
     (socket, ctx) => {
       let account = null;
       let deviceId = null;
@@ -2244,6 +2277,8 @@ export function createApp({ gracefulShutdown = true } = {}) {
       clearInterval(sweep);
       clearInterval(rideSweep);
       reviewJob.stop();
+      stopGroundWatch();
+      stopElevation();
       broadcastTimer = null;
     },
   };
