@@ -250,6 +250,8 @@ export type Visit = {
   pointCount: number;
   // Servers from before place names leave it out.
   place?: VisitPlace | null;
+  // The ground height of the stop in metres; servers from before heights leave it out.
+  altitudeM?: number | null;
 };
 
 export type TripMode = "walking" | "cycling" | "driving" | "transit";
@@ -284,6 +286,11 @@ export type Trip = {
   gap?: boolean;
   // Only with mode "transit", and even then missing when no line could be matched.
   transit?: TransitInfo | null;
+  // Metres up and down on the way, and the height profile as [distanceM, altitudeM] along it.
+  // Servers from before heights leave them out.
+  ascentM?: number | null;
+  descentM?: number | null;
+  elevation?: [number, number][] | null;
 };
 
 // What a trip is corrected to; "auto" drops the correction and the server guesses again.
@@ -294,7 +301,8 @@ export type Segment = Visit | Trip;
 export type Timeline = {
   date: string;
   deviceId: string;
-  summary: { visits: number; distanceM: number; movingMs: number; pointCount: number };
+  // ascentM: metres climbed that day, from servers that know heights.
+  summary: { visits: number; distanceM: number; movingMs: number; pointCount: number; ascentM?: number | null };
   segments: Segment[];
   // Some place names are still being looked up, asking again in a few seconds has them.
   placesPending?: boolean;
@@ -679,6 +687,9 @@ export async function unlinkDevice(auth: DeviceAuth, deviceId: string): Promise<
 }
 
 // A week (Monday to Sunday) or a calendar month, built by the server from the own timeline.
+// The highest point of a review period.
+export type HighestPoint = { altitudeM: number; name: string | null };
+
 export type ReviewModeTotals = { km: number; minutes: number };
 
 export type ReviewLine = { kind: TransitKind; line: string; color: string | null; rides: number };
@@ -707,6 +718,9 @@ export type Review = {
   path: [number, number][];
   previous: { distanceKm: number; movingMinutes: number } | null;
   empty: boolean;
+  // Metres climbed and the highest point reached; null from servers from before heights.
+  ascentM: number | null;
+  highest: HighestPoint | null;
 };
 
 // `date` is any day in the period; without one the server takes the last finished period. The answer

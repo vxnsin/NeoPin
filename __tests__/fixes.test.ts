@@ -45,13 +45,45 @@ test("unknown or impossible values stay out, the server would close the socket",
   expect(toFix(location({ accuracy: 200_000, speed: 900 }, 0))).toEqual({ latitude: 49.79, longitude: 9.95 });
 });
 
-test("older fixes go out in batches of 100, the newest as a normal update", () => {
+test("a fix carries its GPS height in whole metres, unknown heights stay out", () => {
+  expect(toFix(location({ altitude: 412.6, altitudeAccuracy: 4.4 }))).toEqual({
+    latitude: 49.79,
+    longitude: 9.95,
+    recordedAt: 1_700_000_000_000,
+    altitude: 413,
+    altitudeAccuracy: 4,
+  });
+  expect(toFix(location({ altitude: 412.6, altitudeAccuracy: -1 }))).toEqual({
+    latitude: 49.79,
+    longitude: 9.95,
+    recordedAt: 1_700_000_000_000,
+    altitude: 413,
+  });
+  expect(toFix(location({ altitude: null, altitudeAccuracy: 3 }))).toEqual({ latitude: 49.79, longitude: 9.95, recordedAt: 1_700_000_000_000 });
+  expect(toFix(location({ altitude: 40_000 }))).toEqual({ latitude: 49.79, longitude: 9.95, recordedAt: 1_700_000_000_000 });
+});
+
+test("older fixes go out in batches of 75, the newest as a normal update", () => {
   const older = Array.from({ length: 150 }, (_, i) => fix(i));
   const live = { type: "updatePosition", ...fix(200) };
   const messages = reportMessages(older, live, ["positionBatch"]);
   expect(messages.map((m) => m.type)).toEqual(["positionBatch", "positionBatch", "updatePosition"]);
-  expect(messages[0].points).toHaveLength(100);
-  expect(messages[1].points).toHaveLength(50);
+  expect(messages[0].points).toHaveLength(75);
+  expect(messages[1].points).toHaveLength(75);
+});
+
+test("a full batch of fixes with heights stays below the server's 16 KiB", () => {
+  const precise = Array.from({ length: 200 }, (_, i) => ({
+    latitude: 49.791234567890123,
+    longitude: 9.951234567890123,
+    recordedAt: 1_700_000_000_000 + i,
+    accuracy: 12.345678901234567,
+    speed: 1.4123456789012345,
+    altitude: 4123,
+    altitudeAccuracy: 123,
+  }));
+  const [batch] = reportMessages(precise, null, ["positionBatch"]);
+  expect(JSON.stringify(batch).length).toBeLessThan(16 * 1024);
 });
 
 test("a server without batches only gets the newest fix", () => {

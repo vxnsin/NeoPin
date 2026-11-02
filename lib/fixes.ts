@@ -1,17 +1,27 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { LocationObject } from "expo-location";
 import type { Message } from "./SocketClient";
+import { fixAltitude } from "./altitude";
 
 // One GPS fix as the server takes it. recordedAt is when the phone took it, so a fix
-// sent later still lands at the right time in the timeline.
-export type Fix = { latitude: number; longitude: number; recordedAt?: number; accuracy?: number; speed?: number };
+// sent later still lands at the right time in the timeline. The GPS height (whole metres)
+// goes along; servers from before heights drop it.
+export type Fix = {
+  latitude: number;
+  longitude: number;
+  recordedAt?: number;
+  accuracy?: number;
+  speed?: number;
+  altitude?: number;
+  altitudeAccuracy?: number;
+};
 
 // The server closes the socket on values outside these, so those are left out.
 const MAX_ACCURACY_M = 100_000;
 const MAX_SPEED_MS = 200;
 
 export function toFix(location: LocationObject): Fix {
-  const { latitude, longitude, accuracy, speed } = location.coords;
+  const { latitude, longitude, accuracy, speed, altitude, altitudeAccuracy } = location.coords;
   return {
     latitude,
     longitude,
@@ -19,6 +29,7 @@ export function toFix(location: LocationObject): Fix {
     // iOS reports -1 when it does not know.
     ...(accuracy != null && accuracy >= 0 && accuracy <= MAX_ACCURACY_M && { accuracy }),
     ...(speed != null && speed >= 0 && speed <= MAX_SPEED_MS && { speed }),
+    ...fixAltitude(altitude, altitudeAccuracy),
   };
 }
 
@@ -50,7 +61,9 @@ export function resetLiveFixes() {
 
 // Servers that can take fixes collected offline say so in their login reply.
 export const BATCH_FEATURE = "positionBatch";
-const BATCH_SIZE = 100;
+// The server takes up to 100 per batch, but a message has to stay below its 16 KiB; with
+// the height along, 100 fixes at full GPS precision would not.
+const BATCH_SIZE = 75;
 
 // What goes out for the fixes of one report: the older ones as batches (history only),
 // the newest as a normal update so the map moves. Servers without batches only get
