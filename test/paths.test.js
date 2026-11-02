@@ -122,9 +122,11 @@ beforeEach(async () => {
   s = await startServer();
   luis = await s.account("luis");
   osrm = await fakeOsrm();
+  config.roadMatch = "osrm";
   config.roadMatchUrl = osrm.url;
 });
 afterEach(async () => {
+  config.roadMatch = "off";
   config.roadMatchUrl = null;
   await osrm.close();
   await s.stop();

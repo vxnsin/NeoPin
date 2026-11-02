@@ -2,11 +2,13 @@ import { config } from "./config.js";
 import { getDb } from "./db.js";
 import { distanceM } from "./history.js";
 import { userAgent } from "./overpass.js";
+import { matchOnRoads } from "./roads/index.js";
 
 // Trips drawn along the way they really went. With the Balanced or Battery profile of the
 // app a fix comes every 15 s or every 2 minutes, and straight lines between them cut every
 // corner. A recognised line follows its own course from the timetable; everything else is
-// snapped to the roads by an OSRM match service (car, bike or foot). The result replaces the
+// snapped to the roads (car, bike or foot): by the server's own matcher on OpenStreetMap roads
+// (roads/, the default) or by an OSRM match service (ROAD_MATCH=osrm). The result replaces the
 // trip's path, so every client draws it without knowing about it, and is cached per trip.
 
 // OSRM answers at most this many coordinates per match, longer trips go in pieces.
@@ -23,7 +25,8 @@ const RETRY_MS = 10 * 60_000;
 // Raised whenever snapping gets better: a path stored by an older version, also "no path",
 // counts as not cached and the trip is matched again. 2: detours and pieces (1.7.1). 3: radii
 // within the public servers' limit, trips with vague fixes had been stored as "no path".
-export const PATH_ALGO = 3;
+// 5: the own matcher (roads/).
+export const PATH_ALGO = 5;
 const PROFILES = { walking: "foot", cycling: "bike", driving: "car" };
 
 // The public FOSSGIS servers allow one request a second; a queue keeps to that.
@@ -268,6 +271,23 @@ export async function snapToRoads(fixes, profile) {
   return [[fixes[0].lat, fixes[0].lon], ...path, [fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon]];
 }
 
+// The trip on the roads by the own matcher (roads/), or null. As with OSRM, the visit centres
+// at both ends are left out of the matching and joined to the path afterwards.
+export async function snapOwn(fixes, profile) {
+  const inner = fixes.length > 3 ? fixes.slice(1, -1) : fixes;
+  const match = await matchOnRoads(inner, profile);
+  if (!match) return null;
+  const path = [[fixes[0].lat, fixes[0].lon], ...match.path, [fixes[fixes.length - 1].lat, fixes[fixes.length - 1].lon]];
+  return path.filter((p, i) => i === 0 || p[0] !== path[i - 1][0] || p[1] !== path[i - 1][1]);
+}
+
+// Which matcher snaps the trips, or null when none does.
+function matcher() {
+  if (config.roadMatch === "own") return snapOwn;
+  if (config.roadMatch === "osrm" && config.roadMatchUrl) return snapToRoads;
+  return null;
+}
+
 // ---- cache ----
 
 function cachedPath(userId, deviceId, trip, profile) {
@@ -295,7 +315,7 @@ function lookup(userId, deviceId, trip, profile) {
   if (!inFlight.has(key)) {
     inFlight.set(
       key,
-      snapToRoads(trip.fixes, profile)
+      matcher()(trip.fixes, profile)
         .then((path) => storePath(userId, deviceId, trip, profile, path))
         .catch((error) => {
           failedAt.set(key, Date.now());
@@ -320,7 +340,7 @@ export async function smoothPaths(userId, deviceId, segments, { waitMs = 3_000, 
       trip.pathSource = "line";
       continue;
     }
-    const profile = config.roadMatchUrl ? profileFor(trip) : null;
+    const profile = matcher() ? profileFor(trip) : null;
     if (!profile) continue;
     const cached = cachedPath(userId, deviceId, trip, profile);
     if (cached !== undefined) {
