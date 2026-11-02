@@ -72,6 +72,9 @@ export const config = {
   // or foot. It sees the whole way of every trip it is asked about. "off" turns it off.
   roadMatchUrl:
     process.env.ROAD_MATCH_URL === "off" ? null : process.env.ROAD_MATCH_URL || "https://routing.openstreetmap.de/routed-{profile}",
+  // Points per match request. The public FOSSGIS servers refuse more than ten (TooBig); an own
+  // OSRM takes 100 by default (--max-matching-size).
+  roadMatchMaxCoords: Math.max(4, Math.floor(Number(process.env.ROAD_MATCH_MAX_COORDS)) || 10),
   // Bus, tram and train lines in the timeline, from GTFS timetables. "off" turns it off.
   transit: !["off", "false", "no", "0"].includes((process.env.TRANSIT ?? "").trim().toLowerCase()),
   // The Mobility Database catalog: which feeds exist, what each covers, where to get it.
