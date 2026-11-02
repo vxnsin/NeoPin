@@ -545,8 +545,10 @@ function syncMarkers() {
 
 function popupHtml(device) {
   const state = freshness(device);
+  // The ground there, from the server's elevation tiles; nothing while it does not know it.
+  const height = device.position ? altitudeText(device.position.altitude) : "";
   const coords = device.position
-    ? `${device.position.latitude.toFixed(5)}, ${device.position.longitude.toFixed(5)}`
+    ? `${device.position.latitude.toFixed(5)}, ${device.position.longitude.toFixed(5)}${height ? ` · ${height}` : ""}`
     : "No position yet";
   return `
     <div class="popup">

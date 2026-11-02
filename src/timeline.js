@@ -1,3 +1,4 @@
+import { altitudeOfStay, elevationOf } from "./elevation.js";
 import { distanceM } from "./history.js";
 
 // Turns a day of position fixes into what Google Timeline shows: the places you
@@ -130,7 +131,17 @@ function visitSegment(points) {
   const c = centroid(points);
   const start = points[0].ts;
   const end = points[points.length - 1].ts;
-  return { type: "visit", start, end, durationMs: end - start, lat: c.lat, lon: c.lon, pointCount: points.length };
+  return {
+    type: "visit",
+    start,
+    end,
+    durationMs: end - start,
+    lat: c.lat,
+    lon: c.lon,
+    pointCount: points.length,
+    // The ground there, null while no fix of the stay knows it.
+    altitudeM: altitudeOfStay(points),
+  };
 }
 
 export function tripSegment(points) {
@@ -145,6 +156,8 @@ export function tripSegment(points) {
     distanceM: Math.round(distance),
     mode: modeFor(movingKmh(points, distance)),
     path: points.map((p) => [p.lat, p.lon]),
+    // Up and down along the ground under the fixes, and its profile.
+    ...elevationOf(points, distanceM),
   };
   // The fixes with their times, for telling a bus ride from a drive. Not part of the JSON.
   Object.defineProperty(trip, "fixes", { value: points, enumerable: false });
@@ -156,7 +169,8 @@ export function tripSegment(points) {
 function gapSegment(a, b) {
   const distance = distanceM(a.lat, a.lon, b.lat, b.lon);
   if (distance < MIN_TRIP_M) return null;
-  return { ...tripSegment([a, b]), gap: true };
+  // Nobody knows the ground in between.
+  return { ...tripSegment([a, b]), ascentM: null, descentM: null, elevation: [], gap: true };
 }
 
 // The fixes of one way between two stops, split where the phone went silent.
@@ -267,6 +281,8 @@ export function buildTimeline(rawPoints, { dismissed = [] } = {}) {
       distanceM: trips.reduce((s, t) => s + t.distanceM, 0),
       movingMs: trips.reduce((s, t) => s + t.durationMs, 0),
       pointCount: points.length,
+      // Metres climbed on the trips, null when none of them knows its heights.
+      ascentM: trips.some((t) => t.ascentM !== null) ? trips.reduce((s, t) => s + (t.ascentM ?? 0), 0) : null,
     },
   };
 }

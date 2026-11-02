@@ -53,7 +53,20 @@ function statsHtml(data) {
       <div class="rv-stat"><span>Trips</span><strong>${data.trips}</strong></div>
       <div class="rv-stat"><span>Stops</span><strong>${data.stops}</strong></div>
       <div class="rv-stat"><span>New places</span><strong>${data.newPlaces}</strong></div>
+      ${heightsHtml(data)}
     </div>`;
+}
+
+// Metres climbed and the highest stay, only when the server knows the heights and it went uphill.
+function heightsHtml(data) {
+  if (!(data.ascentM >= 1)) return "";
+  const top = data.highestM;
+  const highest = top
+    ? `<div class="rv-stat rv-stat--big"><span>Highest stay</span><strong>${esc(altitudeText(top.altitudeM))}</strong>${
+        top.name ? `<span class="rv-stat__note">${esc(top.name)}</span>` : ""
+      }</div>`
+    : "";
+  return `<div class="rv-stat rv-stat--big${top ? "" : " rv-stat--wide"}"><span>Climbed</span><strong>${esc(altitudeText(data.ascentM))}</strong></div>${highest}`;
 }
 
 // One bar per day; the week names its days, the month numbers them.
