@@ -3,7 +3,8 @@ import * as Location from "expo-location";
 import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
 import { readBattery } from "@/lib/battery";
-import { firstTimeLive, holdFixes, reportMessages, takeHeldFixes, toFix, type Fix } from "@/lib/fixes";
+import { logBattery, logEvent, logFix, type FixSource } from "@/lib/diagnostics";
+import { BATCH_FEATURE, firstTimeLive, holdFixes, reportMessages, takeHeldFixes, toFix, type Fix } from "@/lib/fixes";
 import type { Message } from "@/lib/SocketClient";
 import { reportInterval } from "@/lib/reportInterval";
 import { loadSettings } from "@/lib/settings";
@@ -26,17 +27,20 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
 // Sends the newest of these fixes as the live position, the older ones as history. It uses the shared
 // socket if it is alive, or a short-lived connection of our own. Without a connection everything is
 // held on the phone for the next one.
-export async function reportFixes(fixes: Fix[]): Promise<void> {
+export async function reportFixes(fixes: Fix[], source: FixSource = "background"): Promise<void> {
   const latest = fixes.pop();
   if (!latest) return;
 
   const battery = await readBattery();
+  logBattery(battery);
   const live = { type: "updatePosition", ...latest, ...(battery && { battery }) };
 
   if (socket.connected) {
     const older = [...(await takeHeldFixes()), ...fixes];
     // With the app open the foreground watch may have sent this very fix already.
-    reportMessages(older, firstTimeLive(latest) ? live : null, socket.features).forEach((msg) => socket.emit(msg));
+    const first = firstTimeLive(latest);
+    logReport(source, older, latest, first ? "live" : "dup", socket.features);
+    reportMessages(older, first ? live : null, socket.features).forEach((msg) => socket.emit(msg));
     return;
   }
 
@@ -46,12 +50,25 @@ export async function reportFixes(fixes: Fix[]): Promise<void> {
   await loadSettings();
   const older = [...(await takeHeldFixes()), ...fixes];
   try {
-    await pushOnce(creds, (features) => reportMessages(older, live, features));
+    await pushOnce(creds, (features) => {
+      logReport(source, older, latest, "live", features);
+      return reportMessages(older, live, features);
+    });
   } catch (err: any) {
     // No connection right now: everything waits on the phone for the next one.
+    logEvent("socket", { event: "push-failed", reason: err?.message ?? "unknown" });
+    logReport(source, older, latest, "held", []);
     await holdFixes([...older, latest]);
     console.warn("Background push failed:", err?.message);
   }
+}
+
+// For the diagnostics log: the older fixes go out as history where the server takes batches, are
+// dropped where it does not, and wait on the phone without a connection.
+function logReport(source: FixSource, older: Fix[], latest: Fix, outcome: "live" | "dup" | "held", features: readonly string[]) {
+  const history = outcome === "held" ? "held" : features.includes(BATCH_FEATURE) ? "batch" : null;
+  if (history) older.forEach((fix) => logFix(source, fix, history));
+  logFix(source, latest, outcome);
 }
 
 // Logs in, sends what messagesFor returns for the server's features, and closes again.

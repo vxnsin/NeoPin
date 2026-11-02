@@ -46,3 +46,9 @@ export function updateLabel(): string | null {
   const version = Constants.expoConfig?.version;
   return [version ? `v${version}` : null, where || null, id ? id.slice(0, 8) : "built-in"].filter(Boolean).join(" · ");
 }
+
+// The developer settings (diagnostics export) are for the preview channel and development only,
+// store builds never show or log them.
+export function isDeveloperBuild(): boolean {
+  return __DEV__ || Updates.channel === "preview";
+}

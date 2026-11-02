@@ -5,6 +5,8 @@ export type Message = Record<string, any>;
 export type MessageListener = (data: Message) => void;
 export type StatusListener = (connected: boolean) => void;
 export type RejectedListener = () => void;
+// What happened to the connection, for the diagnostics log: event and why.
+export type TraceListener = (event: string, detail?: Record<string, string | number>) => void;
 export type ConnectOptions = { autoReconnect?: boolean };
 
 const HEARTBEAT_MS = 25_000;
@@ -34,6 +36,7 @@ export class SocketClient {
   private listeners: MessageListener[] = [];
   private statusListeners: StatusListener[] = [];
   private rejectedListeners: RejectedListener[] = [];
+  private traceListeners: TraceListener[] = [];
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -111,6 +114,17 @@ export class SocketClient {
     };
   }
 
+  onTrace(listener: TraceListener): () => void {
+    this.traceListeners.push(listener);
+    return () => {
+      this.traceListeners = this.traceListeners.filter((l) => l !== listener);
+    };
+  }
+
+  private trace(event: string, detail?: Record<string, string | number>) {
+    this.traceListeners.forEach((listener) => listener(event, detail));
+  }
+
   private open(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (!this.credentials) return reject(new Error("No credentials"));
@@ -138,6 +152,7 @@ export class SocketClient {
         fn();
       };
       const authTimer = setTimeout(() => {
+        this.trace("error", { reason: "Authentication timed out" });
         settle(() => reject(new Error("Authentication timed out")));
         ws.close();
       }, AUTH_TIMEOUT_MS);
@@ -162,11 +177,13 @@ export class SocketClient {
             this.retries = 0;
             this.everConnected = true;
             this.setConnected(true);
+            this.trace("connected", { features: this.features.length });
             this.startHeartbeat();
             this.flushQueue();
             settle(resolve);
           } else {
             this.closedManually = true;
+            this.trace("auth-failed");
             this.markRejected();
             settle(() => reject(new Error("Authentication failed")));
             ws.close();
@@ -179,6 +196,7 @@ export class SocketClient {
       };
 
       ws.onerror = () => {
+        this.trace("error", { reason: "Could not reach the server" });
         settle(() => reject(new Error("Could not reach the server")));
       };
 
@@ -187,6 +205,7 @@ export class SocketClient {
         this.socket = null;
         this.stopHeartbeat();
         this.setConnected(false);
+        this.trace("closed", { code: event.code, reason: event.reason || "" });
         if (event.code === CLOSE_POLICY) this.markRejected();
         settle(() => reject(new Error(event.reason || `Connection closed (${event.code})`)));
 
@@ -208,6 +227,7 @@ export class SocketClient {
     this.clearReconnectTimer();
     this.retries += 1;
     const delay = Math.min(1000 * 2 ** this.retries, MAX_BACKOFF_MS);
+    this.trace("reconnect", { attempt: this.retries, delayMs: delay });
     console.log(`WebSocket lost, reconnecting in ${delay / 1000}s (attempt ${this.retries})`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;

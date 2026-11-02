@@ -6,6 +6,7 @@ import { toFix } from "@/lib/fixes";
 import { createDedupe, parsePushAction } from "@/lib/pushPayload";
 import { handleRidePush } from "@/lib/ridePush";
 import { reportFixes } from "@/tasks/LocationTask";
+import { logEvent } from "@/lib/diagnostics";
 
 export const PUSH_TASK = "neopin-push-wakeup";
 
@@ -45,11 +46,12 @@ async function currentPosition(): Promise<Location.LocationObject | null> {
 export async function handlePush(payload: unknown): Promise<void> {
   if (await handleRidePush(payload)) return;
   const action = parsePushAction(payload);
+  logEvent("push", { type: action?.type ?? "other" });
   if (action?.type !== "requestLocation" || !firstTime(action.id)) return;
   const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
   if (permission?.status !== "granted") return;
   const position = await currentPosition();
-  if (position) await reportFixes([toFix(position)]);
+  if (position) await reportFixes([toFix(position)], "push");
 }
 
 // Defined at module level so it exists when Android starts the JS without the app (data-only push).

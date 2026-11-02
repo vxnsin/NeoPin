@@ -2,6 +2,7 @@ import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
 import { readBattery, serverTakesBattery, watchBattery } from "@/lib/battery";
 import { distanceM, firstTimeLive, toFix, type Fix } from "@/lib/fixes";
+import { logBattery, logFix } from "@/lib/diagnostics";
 
 type Emitter = { emit: (msg: Message) => void };
 
@@ -34,6 +35,7 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
   const send = async (fix: Fix) => {
     lastSent = Date.now();
     const battery = await readBattery();
+    logBattery(battery);
     // Reporting may have stopped while the battery was read, a logout for example.
     if (cancelled) return;
     target.emit({ type: "updatePosition", ...fix, ...(battery && { battery }) });
@@ -47,12 +49,18 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
       movedAt = lastFixAt;
     }
     // The background task may have sent this very fix already.
-    if (firstTimeLive(fix)) send(fix);
-    else lastSent = Date.now();
+    if (firstTimeLive(fix)) {
+      logFix("foreground", fix, "live");
+      send(fix);
+    } else {
+      logFix("foreground", fix, "dup");
+      lastSent = Date.now();
+    }
   };
 
   // A phone on the charger may not move at all, its battery still changes.
   const stopBattery = watchBattery((battery) => {
+    logBattery(battery);
     if (serverTakesBattery()) target.emit({ type: "updateBattery", ...battery });
   });
 
@@ -64,6 +72,7 @@ export function startPositionReporting(target: Emitter, options: ReportingOption
     if (lastFix && now - movedAt > STILL_AFTER_MS && now - lastFixAt < STILL_REFRESH_MS) {
       // Still at the same spot: that spot as of now, the GPS stays off.
       const { recordedAt, speed, ...here } = lastFix;
+      logFix("still", here, "live");
       send(here);
       return;
     }
