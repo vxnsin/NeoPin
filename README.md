@@ -44,7 +44,7 @@ flowchart LR
 
 The app signs in once with a username and password and gets a device token. From then on it keeps a WebSocket open and sends its position whenever it moves; fixes taken without a connection follow later in one batch, so the history has no holes. The server keeps the live map in memory, stores the history in SQLite and pushes every change to the phones and dashboards that may see it.
 
-On Android a foreground service keeps reporting while the app is closed, on iOS the system wakes a background location task on movement. How often is up to you: Battery saver (every 2 minutes or 100 m), Balanced (15 s or 10 m) or Precise. Maps are vector tiles from [OpenFreeMap](https://openfreemap.org) on MapLibre, light or dark with the system.
+On Android a foreground service keeps reporting while the app is closed, on iOS the system wakes a background location task on movement. How often is up to you: Battery saver (every 2 minutes or 100 m), Balanced (15 s or 10 m) or Precise. Maps are vector tiles from [OpenFreeMap](https://openfreemap.org) on MapLibre, light or dark with the system. The 3D switch adds mountains and buildings; the terrain comes from the [AWS Open Data Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) (Mapzen, SRTM and others).
 
 ### Your days, afterwards
 

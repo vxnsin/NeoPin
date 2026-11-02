@@ -33,9 +33,10 @@ export const REPORTING_PRESETS: Record<
 
 const SETTINGS_KEY = "settings";
 
-type Settings = { reporting: ReportingPreset };
+// map3d: terrain, hillshading and buildings on the map; off by default, it loads more map data.
+type Settings = { reporting: ReportingPreset; map3d: boolean };
 
-let settings: Settings = { reporting: "balanced" };
+let settings: Settings = { reporting: "balanced", map3d: false };
 let loaded = false;
 let listeners: ((s: Settings) => void)[] = [];
 
@@ -50,6 +51,7 @@ export async function loadSettings(): Promise<Settings> {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed.reporting in REPORTING_PRESETS) settings = { ...settings, reporting: parsed.reporting };
+      if (typeof parsed.map3d === "boolean") settings = { ...settings, map3d: parsed.map3d };
     }
   } catch {
     // keep defaults
@@ -66,6 +68,20 @@ export function getReportingPreset(): ReportingPreset {
 export async function setReportingPreset(preset: ReportingPreset) {
   settings = { ...settings, reporting: preset };
   syncInterval();
+  listeners.forEach((fn) => fn(settings));
+  try {
+    await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // best effort
+  }
+}
+
+export function getMap3d(): boolean {
+  return settings.map3d;
+}
+
+export async function setMap3d(on: boolean) {
+  settings = { ...settings, map3d: on };
   listeners.forEach((fn) => fn(settings));
   try {
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));

@@ -127,7 +127,10 @@ import {
 } from "@/lib/groups";
 import {
   REPORTING_PRESETS,
+  getMap3d,
   getReportingPreset,
+  loadSettings,
+  setMap3d,
   setReportingPreset,
   type ReportingPreset,
 } from "@/lib/settings";
@@ -266,6 +269,7 @@ export default function MapScreen() {
   const [panelRest, setPanelRest] = useState<number | null>(null);
   const [mapTap, setMapTap] = useState<{ index: number; n: number } | null>(null);
   const [preset, setPreset] = useState<ReportingPreset>(getReportingPreset());
+  const [map3d, setMap3dShown] = useState(getMap3d());
   // "Find me": the running search, my own fix and where my phone points while it runs.
   const [find, setFind] = useState<FindState | null>(null);
   const [myFix, setMyFix] = useState<FindFix | null>(null);
@@ -528,6 +532,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     loadGroupFilter().then(setGroupFilter);
+    loadSettings().then((s) => setMap3dShown(s.map3d));
   }, []);
 
   useEffect(() => {
@@ -678,6 +683,14 @@ export default function MapScreen() {
   useEffect(() => {
     if (webViewLoaded) post({ type: "theme", dark: theme.isDark });
   }, [webViewLoaded, theme.isDark, post]);
+
+  // The first message only sets up the map as it was left: no tilt animation on opening.
+  const map3dSent = useRef(false);
+  useEffect(() => {
+    if (!webViewLoaded) return;
+    post({ type: "map3d", on: map3d, instant: !map3dSent.current });
+    map3dSent.current = true;
+  }, [webViewLoaded, map3d, post]);
 
   useEffect(() => {
     if (!webViewLoaded) return;
@@ -832,6 +845,11 @@ export default function MapScreen() {
   const avatarOfUser = (userId: number): string | null | undefined =>
     groups.flatMap((group) => group.members).find((member) => member.id === userId)?.avatarUrl ??
     devices.find((d) => d.userId === userId && d.avatarUrl)?.avatarUrl;
+
+  const changeMap3d = (on: boolean) => {
+    setMap3dShown(on);
+    setMap3d(on).catch(() => {});
+  };
 
   const changePreset = async (next: ReportingPreset) => {
     setPreset(next);
@@ -1168,6 +1186,23 @@ export default function MapScreen() {
           }
         }}
       />
+
+      {/* The 3D switch on the map, above the bar or the timeline panel; the settings have it too. */}
+      {startGone && (
+        <Pressable
+          style={[
+            styles.map3d,
+            { bottom: timelineOpen ? panelHeight + 12 : insets.bottom + 12 + 68 + 12, backgroundColor: map3d ? c.secondary : c.raised },
+          ]}
+          onPress={() => changeMap3d(!map3d)}
+          hitSlop={6}
+          accessibilityRole="switch"
+          accessibilityLabel="3D map"
+          accessibilityState={{ checked: map3d }}
+        >
+          <Text style={[styles.map3dText, { color: map3d ? c.onSecondary : c.primary }]}>3D</Text>
+        </Pressable>
+      )}
 
       {/* The device bar, like the one at the bottom of Apple's Find My. */}
       {!timelineOpen && (
@@ -1519,6 +1554,27 @@ export default function MapScreen() {
               </View>
               <Text style={[styles.presetHint, { color: c.muted }]}>{REPORTING_PRESETS[preset].description}</Text>
 
+              <Text style={[styles.sectionTitle, { color: c.muted }]}>Map</Text>
+              <Pressable
+                style={[styles.switchRow, { backgroundColor: c.subtle, marginTop: 0 }]}
+                onPress={() => changeMap3d(!map3d)}
+                accessibilityRole="switch"
+                accessibilityLabel="3D map"
+                accessibilityState={{ checked: map3d }}
+              >
+                <MaterialIcons name="terrain" size={20} color={c.primary} />
+                <Text style={[styles.groupsEntryText, { color: c.primary }]}>3D map</Text>
+                <Switch
+                  value={map3d}
+                  onValueChange={changeMap3d}
+                  trackColor={{ true: c.secondary, false: c.raised }}
+                  thumbColor={map3d ? c.onSecondary : undefined}
+                />
+              </Pressable>
+              <Text style={[styles.presetHint, { color: c.muted }]}>
+                Mountains and buildings in 3D. Tilt with two fingers, turn by twisting. Loads more map data.
+              </Text>
+
               {myDevices.length > 1 ? (
                 <>
                   <Text style={[styles.sectionTitle, { color: c.muted }]}>Main device</Text>
@@ -1665,6 +1721,8 @@ const styles = StyleSheet.create({
   barTitle: { fontSize: 17, fontWeight: "700" },
   stack: { flexDirection: "row", alignItems: "center" },
   gear: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  map3d: { position: "absolute", right: 12, width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", ...shadow },
+  map3dText: { fontSize: 14, fontWeight: "800", letterSpacing: 0.3 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 },
   metaDot: { width: 7, height: 7, borderRadius: 4 },
   sheetHost: { flex: 1, justifyContent: "flex-end" },
