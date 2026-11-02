@@ -3,7 +3,7 @@ import * as Location from "expo-location";
 import { AppState } from "react-native";
 import { currentDeviceType } from "@/lib/deviceType";
 import { readBattery } from "@/lib/battery";
-import { holdFixes, reportMessages, takeHeldFixes, toFix, type Fix } from "@/lib/fixes";
+import { firstTimeLive, holdFixes, reportMessages, takeHeldFixes, toFix, type Fix } from "@/lib/fixes";
 import type { Message } from "@/lib/SocketClient";
 import { reportInterval } from "@/lib/reportInterval";
 import { loadSettings } from "@/lib/settings";
@@ -35,7 +35,8 @@ export async function reportFixes(fixes: Fix[]): Promise<void> {
 
   if (socket.connected) {
     const older = [...(await takeHeldFixes()), ...fixes];
-    reportMessages(older, live, socket.features).forEach((msg) => socket.emit(msg));
+    // With the app open the foreground watch may have sent this very fix already.
+    reportMessages(older, firstTimeLive(latest) ? live : null, socket.features).forEach((msg) => socket.emit(msg));
     return;
   }
 

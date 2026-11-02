@@ -94,3 +94,17 @@ test("an older server gets nothing, the held fixes do not pile up", async () => 
   expect(emit).not.toHaveBeenCalled();
   expect(await takeHeldFixes()).toEqual([]);
 });
+
+test("a fix both reporters get is sent live only once", () => {
+  const { firstTimeLive, resetLiveFixes } = require("../lib/fixes");
+  resetLiveFixes();
+  const fix = { latitude: 50.2918, longitude: 11.4531, recordedAt: 1_000_000 };
+  expect(firstTimeLive(fix)).toBe(true);
+  expect(firstTimeLive({ ...fix })).toBe(false);
+  expect(firstTimeLive({ ...fix, recordedAt: 1_000_400 })).toBe(false);
+  expect(firstTimeLive({ ...fix, recordedAt: 1_015_000 })).toBe(true);
+  expect(firstTimeLive({ ...fix, latitude: 50.2928, recordedAt: 1_015_000 })).toBe(true);
+  // The still-beat has no time of its own and always goes out.
+  expect(firstTimeLive({ latitude: 50.2918, longitude: 11.4531 })).toBe(true);
+  expect(firstTimeLive({ latitude: 50.2918, longitude: 11.4531 })).toBe(true);
+});
