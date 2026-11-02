@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import useThemeManager from "@/hooks/useThemeManager";
 import LineBadge from "@/components/LineBadge";
 import ReviewMap from "@/components/ReviewMap";
+import { formatAltitude } from "@/lib/altitude";
 import { fetchReview, type Review, type ReviewPeriod } from "@/lib/api";
 import { readCredentials, type StoredCredentials } from "@/lib/socket";
 import { MODE_COLORS, MODE_ICONS, MODE_LABELS, PLACE_ICONS, PLACE_LABELS, TRANSIT_ICONS, TRANSIT_LABELS } from "@/lib/timeline";
@@ -257,6 +258,34 @@ function ReviewBody({ review }: { review: Review }) {
           <Text style={[styles.changeText, { color: c.muted }]}>{plural(review.stops, "stop")}</Text>
         </View>
       </View>
+
+      {/* Servers from before heights send neither, then the row stays out. */}
+      {(!!review.ascentM || review.highest) && (
+        <View style={styles.tiles}>
+          {!!review.ascentM && (
+            <View style={[styles.tile, { backgroundColor: c.subtle }]}>
+              <Text style={[styles.heroLabel, { color: c.muted }]}>Climbed</Text>
+              <Text style={[styles.tileValue, { color: c.primary }]} numberOfLines={1} adjustsFontSizeToFit>
+                {formatAltitude(review.ascentM)}
+              </Text>
+              <Text style={[styles.changeText, { color: c.muted }]}>uphill in total</Text>
+            </View>
+          )}
+          {review.highest && (
+            <View style={[styles.tile, { backgroundColor: c.subtle }]}>
+              <Text style={[styles.heroLabel, { color: c.muted }]}>Highest point</Text>
+              <Text style={[styles.tileValue, { color: c.primary }]} numberOfLines={1} adjustsFontSizeToFit>
+                {formatAltitude(review.highest.altitudeM)}
+              </Text>
+              {!!review.highest.name && (
+                <Text style={[styles.changeText, { color: c.muted }]} numberOfLines={1}>
+                  {review.highest.name}
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+      )}
 
       <Section title="Day by day">
         <View style={styles.chart} accessibilityLabel={`Distance per day, most ${formatKm(Math.max(0, ...bars.map((b) => b.km)))}`}>

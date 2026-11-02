@@ -9,6 +9,8 @@ import useThemeManager from "@/hooks/useThemeManager";
 import Avatar from "@/components/Avatar";
 import PlacePicker from "@/components/PlacePicker";
 import LineBadge from "@/components/LineBadge";
+import ElevationProfile from "@/components/ElevationProfile";
+import { climbLabel, climbText, formatAltitude, readAltitude, readClimb } from "@/lib/altitude";
 import {
   fetchTimeline,
   fetchTimelineDays,
@@ -427,6 +429,23 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
       </View>
     ) : null;
 
+  // Up and down and the small profile under a trip, from servers that know heights. A stretch
+  // without fixes has no way to measure.
+  const tripHeights = (trip: Trip) => {
+    if (trip.gap) return null;
+    const climb = climbText(trip.ascentM, trip.descentM);
+    return (
+      <>
+        {climb && <Text style={[styles.cardMeta, { color: c.muted }]}>{climb}</Text>}
+        <ElevationProfile elevation={trip.elevation} color={tripColor(trip)} />
+      </>
+    );
+  };
+  const tripClimbLabel = (trip: Trip) => {
+    const label = trip.gap ? null : climbLabel(trip.ascentM, trip.descentM);
+    return label ? `, ${label}` : "";
+  };
+
   const chip = (active: boolean) => ({ backgroundColor: active ? c.secondary : c.subtle });
   const chipText = (active: boolean) => ({ color: active ? c.onSecondary : c.primary });
 
@@ -586,6 +605,8 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
           <Stat value={formatDistance(summary.distanceM)} label="Distance" />
           <Stat value={formatDuration(summary.movingMs)} label="Moving" />
           <Stat value={String(summary.visits)} label={summary.visits === 1 ? "Stop" : "Stops"} />
+          {/* Servers from before heights send no climb; a flat day has nothing to say either. */}
+          {!!readClimb(summary.ascentM) && <Stat value={formatAltitude(readClimb(summary.ascentM)!)} label="Climbed" />}
         </View>
       )}
 
@@ -635,7 +656,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                   accessibilityLabel={
                     segment.type === "visit"
                       ? `${visitTitle(segment, numbers.get(index))}, ${time}, ${formatDuration(segment.durationMs)}`
-                      : `${tripTitle(segment)}, ${formatDistance(segment.distanceM)}, ${time}`
+                      : `${tripTitle(segment)}, ${formatDistance(segment.distanceM)}, ${time}${tripClimbLabel(segment)}`
                   }
                 >
                   <View style={styles.rail}>
@@ -658,6 +679,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                         </Text>
                         <Text style={[styles.cardMeta, { color: c.muted }]}>
                           {time} · {formatDuration(segment.durationMs)}
+                          {readAltitude(segment.altitudeM) !== null ? ` · ${formatAltitude(readAltitude(segment.altitudeM)!)}` : ""}
                         </Text>
                         {kind && segment.place ? (
                           <View style={styles.kindRow}>
@@ -691,6 +713,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                       <Text style={[styles.cardMeta, { color: c.muted }]}>
                         {formatDuration(segment.durationMs)} · {time}
                       </Text>
+                      {tripHeights(segment)}
                     </View>
                   ) : (
                     <View style={[styles.tripRow, { backgroundColor: active ? c.subtle : "transparent" }]}>
@@ -700,6 +723,7 @@ export default function TimelinePanel({ creds, devices, avatarFor, post, height,
                       <Text style={[styles.cardMeta, { color: c.muted }]}>
                         {formatDuration(segment.durationMs)} · {time}
                       </Text>
+                      {tripHeights(segment)}
                     </View>
                   )}
                 </Pressable>

@@ -203,7 +203,18 @@ describe("reading the answer", () => {
   };
 
   test("a full answer comes through as it is", () => {
-    expect(readReview(full, "week", "2026-10-19")).toEqual(full);
+    // From a server from before heights: no climb, no highest point.
+    expect(readReview(full, "week", "2026-10-19")).toEqual({ ...full, ascentM: null, highest: null });
+  });
+
+  test("the climb and the highest point come along from servers that know heights", () => {
+    const review = readReview({ ...full, ascentM: 1240.4, highestM: { altitudeM: 612.3, name: "Festung Marienberg" } }, "week", "2026-10-19");
+    expect(review.ascentM).toBe(1240);
+    expect(review.highest).toEqual({ altitudeM: 612, name: "Festung Marienberg" });
+    const odd = readReview({ ...full, ascentM: -5, highestM: { altitudeM: "high", name: "X" } }, "week", "2026-10-19");
+    expect(odd.ascentM).toBeNull();
+    expect(odd.highest).toBeNull();
+    expect(readReview({ ...full, highestM: { altitudeM: 300, name: " " } }, "week", "2026-10-19").highest).toEqual({ altitudeM: 300, name: null });
   });
 
   test("missing or odd fields become nothing, never a crash", () => {
