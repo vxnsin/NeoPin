@@ -266,3 +266,17 @@ test("groupsChanged reaches the listeners", async () => {
   ws.receive({ type: "groupsChanged" });
   expect(received).toEqual([{ type: "groupsChanged" }]);
 });
+
+test("traces connects, drops with their code and the reconnects, for the diagnostics log", async () => {
+  const client = new SocketClient();
+  const traced: [string, unknown][] = [];
+  client.onTrace((event, detail) => traced.push([event, detail]));
+  const ws = await connectAndAuthenticate(client);
+  ws.drop();
+  expect(traced).toEqual([
+    ["connected", { features: 0 }],
+    ["closed", { code: 1006, reason: "" }],
+    ["reconnect", { attempt: 1, delayMs: 2000 }],
+  ]);
+  client.close();
+});

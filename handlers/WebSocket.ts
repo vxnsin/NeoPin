@@ -2,6 +2,7 @@ import * as Location from "expo-location";
 import type { Message } from "@/lib/SocketClient";
 import { noteServerDevices, readBattery } from "@/lib/battery";
 import { toFix } from "@/lib/fixes";
+import { logError, logFix } from "@/lib/diagnostics";
 import { askRide } from "@/lib/ridePush";
 import { parseRideQuestion } from "@/lib/rides";
 
@@ -28,8 +29,11 @@ export function registerHandlers(ws: Socket) {
           });
 
           const battery = await readBattery();
-          ws.emit({ type: "updatePosition", ...toFix(position), ...(battery && { battery }) });
+          const fix = toFix(position);
+          logFix("request", fix, "live");
+          ws.emit({ type: "updatePosition", ...fix, ...(battery && { battery }) });
         } catch (error: any) {
+          logError("requestLocation", error);
           ws.emit({
             type: "locationError",
             message: error?.message || "Unknown error",

@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { setReportInterval } from "@/lib/reportInterval";
+import { logEvent } from "@/lib/diagnostics";
 
 export type ReportingPreset = "battery" | "balanced" | "precise";
 
@@ -66,6 +67,7 @@ export function getReportingPreset(): ReportingPreset {
 }
 
 export async function setReportingPreset(preset: ReportingPreset) {
+  logEvent("preset", { from: settings.reporting, to: preset });
   settings = { ...settings, reporting: preset };
   syncInterval();
   listeners.forEach((fn) => fn(settings));

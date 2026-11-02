@@ -39,6 +39,7 @@ import { panelSnaps } from "@/lib/sheetSnap";
 import PasswordForm from "@/components/PasswordForm";
 import HideSection from "@/components/HideSection";
 import MyDevicesSection from "@/components/MyDevicesSection";
+import DeveloperSection from "@/components/DeveloperSection";
 import FindSheet from "@/components/FindSheet";
 import RideSheet from "@/components/RideSheet";
 import { FIND_MESSAGES, reduceFind, type FindFix, type FindState } from "@/lib/find";
@@ -1664,6 +1665,9 @@ export default function MapScreen() {
                   <MaterialIcons name="chevron-right" size={22} color={c.muted} />
                 </Pressable>
               )}
+
+              {/* Preview and development builds only, it renders nothing elsewhere. */}
+              <DeveloperSection auth={creds} />
 
               <PasswordForm auth={creds} onChanged={passwordChanged} />
 

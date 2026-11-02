@@ -116,6 +116,18 @@ export async function loginRequest(
   );
 }
 
+// The diagnostics zip of the preview build (lib/diagnosticsZip) goes to the own server, which answers
+// with a link that works for a week. A slow uplink gets more time than the usual requests.
+export async function uploadDiagnosticsRequest(auth: DeviceAuth, zip: Uint8Array): Promise<{ url: string; expiresAt: string }> {
+  return json(
+    await request(
+      `${httpBase(auth.serverIp)}/api/diagnostics`,
+      { method: "POST", headers: { ...deviceHeaders(auth), "Content-Type": "application/zip" }, body: zip as unknown as BodyInit },
+      60_000
+    )
+  );
+}
+
 // Best effort: the token is dropped locally either way.
 export async function logoutRequest(auth: DeviceAuth): Promise<void> {
   try {

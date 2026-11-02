@@ -121,6 +121,14 @@ Builds are configured in `eas.json`.
 
 JavaScript changes reach installed apps with EAS Update, no new build needed. Native changes (a new module, a permission, Firebase) need a new build.
 
+### Diagnostics in preview builds
+
+Builds on the `preview` channel (and development) keep a small log on the phone and show a Developer section in the settings. **Export diagnostics** packs it into a zip, uploads it to your own server and opens the share sheet with a link that works for 7 days, ready to paste into a chat. **Clear log** starts it over. Store builds keep no log and show no section.
+
+The zip holds `summary.json` (device model and OS, app, update and runtime version, preset, permissions, battery drain per hour, fixes per hour by source, duplicate rate, reconnects), `events.jsonl` (every logged event), `errors.txt` and `settings.json`. The log keeps at most 2000 events or 512 KB.
+
+It never holds a position: a fix is logged with its accuracy, speed, age and the distance to the previous fix, never its coordinates. Keys like `token`, `password`, `latitude` or `serverIp` are dropped, and error texts are scrubbed of bearer tokens, long ids and coordinate pairs. The only account detail in it is the username. The server side, including `DIAGNOSTICS=off`, is in the [server README](https://github.com/vxnsin/NeoPin/blob/Server/README.md#diagnostics).
+
 ## Push notifications (Android)
 
 Push uses Firebase Cloud Messaging. It wakes a phone without a connection when someone asks for its position or wants to find that person, and it delivers group invitations, arrival alerts, ride questions and the review. Without the Firebase config the app builds and runs as before, it just gets no push.

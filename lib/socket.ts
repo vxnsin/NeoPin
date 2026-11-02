@@ -1,4 +1,6 @@
 import { SocketClient } from "@/lib/SocketClient";
+import { installDiagnostics } from "@/lib/diagnosticsCapture";
+import { logEvent } from "@/lib/diagnostics";
 import { registerHandlers } from "@/handlers/WebSocket";
 import { readCredentials } from "@/lib/credentials";
 import { sendHeldFixes } from "@/lib/fixes";
@@ -12,7 +14,11 @@ export type { StoredCredentials } from "@/lib/credentials";
 // iOS location task all share this instance, so the server only ever sees a
 // single connection per device.
 // The login carries the report interval, so the saved preset has to be loaded first.
+// The diagnostics log of preview builds starts with the first module that needs the socket.
+installDiagnostics();
+
 export const socket = new SocketClient(loadSettings);
+socket.onTrace((event, detail) => logEvent("socket", { event, ...detail }));
 registerHandlers(socket);
 socket.onMessage(holdFindRequest);
 // Fixes the background task could not deliver go out as soon as the socket is back.
