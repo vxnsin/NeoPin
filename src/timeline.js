@@ -19,12 +19,15 @@ function centroid(points) {
   };
 }
 
+// GPS jumps are left out, and so is one fix twice (within 2 s and 2 m): the app can report it
+// from its foreground watch and its background task, and older servers stored both.
 function dropJumps(points) {
   const out = [];
   for (const p of points) {
     const prev = out[out.length - 1];
     if (prev) {
       const dt = (p.ts - prev.ts) / 1000;
+      if (dt <= 2 && distanceM(prev.lat, prev.lon, p.lat, p.lon) < 2) continue;
       if (dt > 0 && distanceM(prev.lat, prev.lon, p.lat, p.lon) / dt > MAX_SPEED_MS) continue;
     }
     out.push(p);
