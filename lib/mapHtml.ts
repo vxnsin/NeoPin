@@ -1,5 +1,6 @@
 import { CLUSTER_RADIUS_PX, CLUSTER_SCRIPT } from "@/lib/cluster";
 import { STALE_AFTER_MS, STATE_COLORS } from "@/lib/devices";
+import { TERRAIN_CREDIT, TERRAIN_SCRIPT } from "@/lib/terrain";
 
 // OpenFreeMap serves vector tiles without an API key, the same styles as the dashboard.
 export const MAP_STYLES = {
@@ -20,7 +21,8 @@ const BAR_HEIGHT = 96;
 // { type: "routePaths", segments } to swap in smoother lines for the same day without moving the map,
 // { type: "routeBottom", bottom } when the panel over the map changes its height,
 // { type: "routeFocus", index } to zoom to one segment (null for the whole day)
-// and { type: "routeClear" } to go back to the live pins. The map answers a tap on
+// and { type: "routeClear" } to go back to the live pins. { type: "map3d", on } tilts the map into
+// 3D (terrain, hillshading, buildings) and back, without animation when it brings { instant: true }. The map answers a tap on
 // a stop or a line with { type: "segment", index }. A route may bring its own top padding
 // ({ top }): the small map of the review has no bar or panel over it (barHeight 0).
 export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEIGHT): string {
@@ -116,7 +118,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
 </head>
 <body>
   <div id="map"></div>
-  <div class="credit">© OpenStreetMap · OpenFreeMap</div>
+  <div class="credit">© OpenStreetMap · OpenFreeMap<span id="terrain-credit" hidden> · ${TERRAIN_CREDIT}</span></div>
   <script>
     var STYLES = ${JSON.stringify(MAP_STYLES)};
     var STALE_MS = ${STALE_AFTER_MS};
@@ -132,6 +134,9 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
     var PX_PER_DEG_Z18 = 512 * Math.pow(2, 18) / 360;
     var STATE_RANK = { online: 0, stale: 1, offline: 2 };
     ${CLUSTER_SCRIPT}
+    ${TERRAIN_SCRIPT}
+    // Flat until the app says otherwise; it remembers the switch per phone.
+    var threeD = false;
     // The day shown by the timeline: { segments, bottom, top, active }.
     var route = null;
     var stops = [];
@@ -320,7 +325,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
           var el = document.createElement("button");
           el.className = "pin";
           el.addEventListener("click", function (e) { e.stopPropagation(); select(id); });
-          entry = markers[id] = { el: el, key: "", marker: new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, -8] }).setLngLat(lngLat).addTo(map) };
+          entry = markers[id] = { el: el, key: "", marker: new maplibregl.Marker({ element: el, pitchAlignment: "viewport", rotationAlignment: "viewport", anchor: "bottom", offset: [0, -8] }).setLngLat(lngLat).addTo(map) };
         }
         entry.marker.setLngLat(lngLat);
         if (entry.key !== key) {
@@ -402,14 +407,17 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
         var id = group.keys.join("|");
         live[id] = true;
         var members = group.keys.map(function (k) { return byKey[k]; });
-        var at = map.unproject([group.x, group.y]);
+        // The middle of the members on the ground, not under their screen middle: tilted over hills
+        // that point could be on a slope far behind them, and the cluster would swing off on turning.
+        var at = [0, 0];
+        members.forEach(function (d) { at[0] += d.position.longitude / members.length; at[1] += d.position.latitude / members.length; });
         var sig = members.map(function (d) { return keyOf(d) + state(d) + (d.avatar ? d.avatar.length + d.avatar.slice(-24) : ""); }).join("|");
         var entry = clusters[id];
         if (!entry) {
           var el = document.createElement("button");
           el.className = "cluster";
           el.addEventListener("click", function (e) { e.stopPropagation(); openCluster(id); });
-          entry = clusters[id] = { el: el, sig: "", members: members, marker: new maplibregl.Marker({ element: el }).setLngLat(at).addTo(map) };
+          entry = clusters[id] = { el: el, sig: "", members: members, marker: new maplibregl.Marker({ element: el, pitchAlignment: "viewport", rotationAlignment: "viewport" }).setLngLat(at).addTo(map) };
         }
         entry.members = members;
         entry.marker.setLngLat(at);
@@ -482,15 +490,15 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
     }
     function fitRoute(index) {
       if (!route) return;
-      var bounds = new maplibregl.LngLatBounds();
-      var any = false;
+      var points = [];
       route.segments.forEach(function (s) {
         if (index !== null && index !== undefined && s.index !== index) return;
-        if (s.type === "visit") { bounds.extend([s.lon, s.lat]); any = true; }
-        else s.path.forEach(function (p) { bounds.extend(lngLat(p)); any = true; });
+        if (s.type === "visit") points.push([s.lon, s.lat]);
+        else s.path.forEach(function (p) { points.push(lngLat(p)); });
       });
-      if (!any) return;
-      map.fitBounds(bounds, { padding: routePadding(), maxZoom: 16.5, duration: 600 });
+      if (!points.length) return;
+      // Tilted in 3D, every point of the line has to fit, not only the corners of its box.
+      fitPoints(map, points, routePadding(), 16.5, 600);
     }
     function setActive(index) {
       route.active = index;
@@ -510,7 +518,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
             dot.className = "tstop";
             dot.style.background = s.color;
             dot.addEventListener("click", function (e) { e.stopPropagation(); tellSegment(s.index); });
-            stops.push({ index: s.index, el: dot, marker: new maplibregl.Marker({ element: dot }).setLngLat([p.lon, p.lat]).addTo(map) });
+            stops.push({ index: s.index, el: dot, marker: new maplibregl.Marker({ element: dot, pitchAlignment: "viewport", rotationAlignment: "viewport" }).setLngLat([p.lon, p.lat]).addTo(map) });
           });
           return;
         }
@@ -518,7 +526,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
         el.className = "stop";
         el.textContent = String(s.number);
         el.addEventListener("click", function (e) { e.stopPropagation(); tellSegment(s.index); });
-        stops.push({ index: s.index, el: el, marker: new maplibregl.Marker({ element: el }).setLngLat([s.lon, s.lat]).addTo(map) });
+        stops.push({ index: s.index, el: el, marker: new maplibregl.Marker({ element: el, pitchAlignment: "viewport", rotationAlignment: "viewport" }).setLngLat([s.lon, s.lat]).addTo(map) });
       });
       document.getElementById("map").classList.add("route-mode");
       removeLines();
@@ -532,6 +540,25 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
       document.getElementById("map").classList.remove("route-mode");
     }
     map.on("style.load", drawLines);
+    map.on("style.load", function () { if (threeD) set3d(true, false); });
+    watchPitch(map);
+    // Every marker stands upright on its point (pitch and rotation follow the screen); pins hang from
+    // their tip (anchor bottom), round stops and the own dot sit centred on it.
+    followTerrain(map, function () {
+      var all = [selfMarker];
+      Object.keys(markers).forEach(function (id) { all.push(markers[id].marker); });
+      Object.keys(clusters).forEach(function (id) { all.push(clusters[id].marker); });
+      stops.forEach(function (s) { all.push(s.marker); });
+      if (popup.isOpen()) all.push(popup);
+      if (clusterPopup.isOpen()) all.push(clusterPopup);
+      return all;
+    });
+    function set3d(on, move, instant) {
+      threeD = on;
+      document.getElementById("terrain-credit").hidden = !on;
+      try { applyTerrain(map, on, dark); } catch (e) { /* the style is still loading, style.load tries again */ }
+      if (move) tiltCamera(map, on, instant);
+    }
     map.on("click", function (e) {
       if (!route || !map.getLayer("route-line")) return;
       var box = [[e.point.x - 10, e.point.y - 10], [e.point.x + 10, e.point.y + 10]];
@@ -543,7 +570,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
       if (!selfMarker) {
         var el = document.createElement("div");
         el.className = "self";
-        selfMarker = new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map);
+        selfMarker = new maplibregl.Marker({ element: el, pitchAlignment: "viewport", rotationAlignment: "viewport" }).setLngLat([lng, lat]).addTo(map);
         map.jumpTo({ center: [lng, lat], zoom: 13 });
       } else {
         selfMarker.setLngLat([lng, lat]);
@@ -572,6 +599,7 @@ export function buildMapHtml(dark: boolean, bottomInset = 0, barHeight = BAR_HEI
           fitRoute(route.active);
         }
         else if (data.type === "routeClear") clearRoute();
+        else if (data.type === "map3d" && !!data.on !== threeD) set3d(!!data.on, true, !!data.instant);
         else if (data.type === "theme" && data.dark !== dark) {
           dark = data.dark;
           document.documentElement.classList.toggle("dark", dark);
