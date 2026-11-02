@@ -235,6 +235,39 @@ class FitControl {
 map.addControl(new FitControl(), "bottom-right");
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
+// 3D (terrain.js): off unless this browser switched it on.
+let threeD = false;
+const terrainControl = new TerrainControl(() => {
+  set3d(!threeD, true);
+  store3d(threeD);
+});
+map.addControl(terrainControl, "bottom-right");
+const mapCreditEl = document.querySelector(".map-credit");
+
+function set3d(on, move, instant = false) {
+  threeD = on;
+  terrainControl.setOn(on);
+  mapCreditEl.textContent = "© OpenStreetMap · OpenFreeMap" + (on ? " · " + TERRAIN.credit : "");
+  try {
+    applyTerrain(map, on, window.neopinTheme.get() === "dark");
+  } catch {
+    // The style is still loading, style.load tries again.
+  }
+  if (move) tiltCamera(map, on, instant);
+}
+map.on("style.load", () => {
+  if (threeD) set3d(true, false);
+});
+watchPitch(map);
+followTerrain(map, () => [
+  ...[...markers.values()].map((entry) => entry.marker),
+  ...[...clusterMarkers.values()].map((entry) => entry.marker),
+  ...(typeof tl !== "undefined" ? tl.markers : []),
+  ...(popup.isOpen() ? [popup] : []),
+  ...(clusterPopup.isOpen() ? [clusterPopup] : []),
+]);
+if (stored3d()) set3d(true, true, true);
+
 // The OpenFreeMap styles name a few fill patterns their sprite does not have.
 // An empty image keeps the console clean instead of warning on every tile.
 map.on("styleimagemissing", (event) => {
@@ -290,8 +323,17 @@ function fitBoundsTo(bounds, padding, duration, maxZoom = 15) {
   map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
   const camera = map.cameraForBounds(bounds, { padding, maxZoom });
   map.setPadding(kept);
+  if (!camera) return;
+  // Tilted in 3D the flat measure is off: near things grow, far ones shrink (terrain.js).
+  if (terrainPitch >= 1) {
+    const corners = [bounds.getNorthWest(), bounds.getNorthEast(), bounds.getSouthEast(), bounds.getSouthWest()];
+    const tilted = tiltedCamera(map, corners, padding, { center: bounds.getCenter(), zoom: camera.zoom }, maxZoom);
+    map.easeTo({ center: tilted.center, zoom: tilted.zoom, pitch: terrainPitch, padding, duration });
+    if (!terrainReady(map)) refitWhenTerrain(map, () => fitBoundsTo(bounds, padding, duration, maxZoom));
+    return;
+  }
   // With the padding set, the middle of the bounds belongs in the middle of the free area.
-  if (camera) map.easeTo({ center: bounds.getCenter(), zoom: camera.zoom, padding, duration });
+  map.easeTo({ center: bounds.getCenter(), zoom: camera.zoom, padding, duration });
 }
 
 function located() {
@@ -429,7 +471,7 @@ function updateClusters() {
         current.held = false;
         placeCluster(current);
       });
-      entry = { marker: new maplibregl.Marker({ element: el }).setLngLat([lng, lat]).addTo(map), el, key: "", members, held: false };
+      entry = { marker: new maplibregl.Marker({ element: el, ...UPRIGHT }).setLngLat([lng, lat]).addTo(map), el, key: "", members, held: false };
       clusterMarkers.set(key, entry);
     }
     entry.members = members;
@@ -517,7 +559,7 @@ function syncMarkers() {
         event.stopPropagation();
         select(id, { zoomIn: false });
       });
-      const marker = new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, -8] }).setLngLat(lngLat).addTo(map);
+      const marker = new maplibregl.Marker({ element: el, anchor: "bottom", offset: [0, -8], ...UPRIGHT }).setLngLat(lngLat).addTo(map);
       entry = { marker, el, key: "" };
       markers.set(id, entry);
     }
