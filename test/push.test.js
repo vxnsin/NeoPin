@@ -232,7 +232,7 @@ test("an offline device that answers the wake-up gives the refreshed list", asyn
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.message, "Location request sent to phone");
-  assert.deepEqual(body.devices.find((d) => d.deviceId === "phone").position, { latitude: 5, longitude: 6 });
+  assert.deepEqual(body.devices.find((d) => d.deviceId === "phone").position, { latitude: 5, longitude: 6, altitude: null });
 });
 
 test("an offline device that stays silent gets a 202", async () => {

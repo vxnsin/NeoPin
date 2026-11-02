@@ -9,6 +9,7 @@ import { resetHistoryState } from "../src/history.js";
 import { resetPlaceLookups } from "../src/places.js";
 import { resetTransitMatches } from "../src/transitMatch.js";
 import { resetPaths } from "../src/paths.js";
+import { resetRoadTiles } from "../src/roads/fetch.js";
 
 config.locationWaitMs = 100;
 // The real Firebase key in a local .env must not leak into tests, test/push.test.js brings its own.
@@ -17,8 +18,12 @@ config.fcmServiceAccountJson = null;
 // Tests never ask the real Overpass, test/places.test.js brings its own.
 config.placeLookupUrl = null;
 config.placeFallbackUrl = null;
-// Nor the real OSRM, test/paths.test.js brings its own.
+// Nor the real OSRM or road tiles, test/paths.test.js and test/roads.test.js bring their own.
+config.roadMatch = "off";
 config.roadMatchUrl = null;
+config.roadDataUrl = null;
+// Nor the real elevation tiles, test/elevation.test.js brings its own.
+config.elevationUrl = null;
 // Tests log in a lot, and scrypt makes every login slow enough to count.
 config.loginRateLimit.max = 30;
 config.passkeyRateLimit.max = 60;
@@ -32,6 +37,7 @@ export async function startServer() {
   resetHistoryState();
   resetPlaceLookups();
   resetPaths({ spacing: 0 });
+  resetRoadTiles({ spacing: 0 });
   resetTransitMatches();
   const server = createApp({ gracefulShutdown: false });
   const http = await server.app.listen(0, "127.0.0.1");

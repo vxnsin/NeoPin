@@ -196,6 +196,8 @@ function emptyShape(review) {
     path: [],
     previous: null,
     empty: true,
+    ascentM: null,
+    highestM: null,
   };
 }
 

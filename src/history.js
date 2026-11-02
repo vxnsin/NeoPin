@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { getDb } from "./db.js";
+import { elevationEnabled, fillGround } from "./elevation.js";
 
 // Stored fixes are thinned out: a new one only when the device moved or a while has passed.
 // On the move a fix every few seconds is kept, so a bus ride keeps its curves.
@@ -19,10 +20,31 @@ export function distanceM(aLat, aLon, bLat, bLon) {
   return 12_742_000 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+// A fix this close in time and space to one stored already is that one again: the app's
+// foreground watch and its background task both report what the GPS gave them.
+const REPEAT_MS = 2_000;
+const REPEAT_M = 2;
+
+function storedAlready(userId, deviceId, lat, lon, ts) {
+  return getDb()
+    .prepare("SELECT lat, lon FROM positions WHERE user_id = ? AND device_id = ? AND ts BETWEEN ? AND ?")
+    .all(userId, deviceId, ts - REPEAT_MS, ts + REPEAT_MS)
+    .some((row) => distanceM(row.lat, row.lon, lat, lon) < REPEAT_M);
+}
+
 // ts is when the GPS took the fix, so fixes sent later (after a dead spot) land at
-// the right time. Those older than the newest stored one go in as they are, without
-// disturbing the thinning of the live ones.
-export function recordPosition(userId, deviceId, lat, lon, ts = Date.now(), { accuracy = null, speed = null } = {}) {
+// the right time. Those older than the newest stored one go in as they are (unless
+// stored already), without
+// disturbing the thinning of the live ones. `altitude` and `altitudeAccuracy` (m) are what the
+// GPS said and are kept as they came; the clients show the ground under the fix instead.
+export function recordPosition(
+  userId,
+  deviceId,
+  lat,
+  lon,
+  ts = Date.now(),
+  { accuracy = null, speed = null, altitude = null, altitudeAccuracy = null } = {}
+) {
   if (accuracy !== null && accuracy > MAX_ACCURACY_M) return false;
   const key = `${userId}:${deviceId}`;
   const prev = last.get(key);
@@ -33,9 +55,13 @@ export function recordPosition(userId, deviceId, lat, lon, ts = Date.now(), { ac
     if (gap < MIN_GAP_MS) return false;
     if (gap < HEARTBEAT_MS && moved < MIN_MOVE_M) return false;
   }
-  getDb()
-    .prepare("INSERT INTO positions (user_id, device_id, ts, lat, lon, accuracy, speed) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .run(userId, deviceId, ts, lat, lon, accuracy, speed);
+  if (backfill && storedAlready(userId, deviceId, lat, lon, ts)) return false;
+  const { lastInsertRowid } = getDb()
+    .prepare(
+      "INSERT INTO positions (user_id, device_id, ts, lat, lon, accuracy, speed, altitude, altitude_accuracy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(userId, deviceId, ts, lat, lon, accuracy, speed, altitude, altitudeAccuracy);
+  fillGround([{ id: Number(lastInsertRowid), lat, lon, ground: null }]);
   if (!backfill) last.set(key, { ts, lat, lon });
   return true;
 }
@@ -43,15 +69,25 @@ export function recordPosition(userId, deviceId, lat, lon, ts = Date.now(), { ac
 export function positionsBetween(userId, deviceId, from, to) {
   return getDb()
     .prepare(
-      "SELECT ts, lat, lon, accuracy, speed FROM positions WHERE user_id = ? AND device_id = ? AND ts >= ? AND ts < ? ORDER BY ts"
+      "SELECT id, ts, lat, lon, accuracy, speed, ground FROM positions WHERE user_id = ? AND device_id = ? AND ts >= ? AND ts < ? ORDER BY ts"
     )
     .all(userId, deviceId, from, to);
+}
+
+// The fixes of a day someone opens, with the ground under them. Those without it (from before
+// the tiles came, or before this was switched on) get it now where the tile is here, the rest
+// once the missing tiles came in the background. With ELEVATION off no height counts.
+export function fixesBetween(userId, deviceId, from, to) {
+  const points = positionsBetween(userId, deviceId, from, to);
+  if (elevationEnabled()) fillGround(points);
+  else for (const p of points) p.ground = null;
+  return points;
 }
 
 export function lastPosition(userId, deviceId) {
   return (
     getDb()
-      .prepare("SELECT ts, lat, lon FROM positions WHERE user_id = ? AND device_id = ? ORDER BY ts DESC LIMIT 1")
+      .prepare("SELECT ts, lat, lon, ground FROM positions WHERE user_id = ? AND device_id = ? ORDER BY ts DESC LIMIT 1")
       .get(userId, deviceId) ?? null
   );
 }

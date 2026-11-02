@@ -66,3 +66,41 @@ function segmentIndex(segments, segment) {
   if (!segment) return -1;
   return segments.findIndex((s) => s.type === segment.type && s.start === segment.start);
 }
+
+// ---- heights ----
+// The server gives the ground under the fixes, null where it does not know it (an older server,
+// ELEVATION off, the tile still on its way); then nothing about heights is shown.
+
+const isMetres = (value) => typeof value === "number" && Number.isFinite(value);
+
+// "412 m", "2,962 m"
+function altitudeText(metres) {
+  return isMetres(metres) ? `${Math.round(metres).toLocaleString("en-GB")} m` : "";
+}
+
+// "↑ 120 m · ↓ 30 m" for a trip that went up or down, "" for a flat one or without heights.
+function climbText(trip) {
+  const up = isMetres(trip?.ascentM) && trip.ascentM >= 1 ? `↑ ${altitudeText(trip.ascentM)}` : "";
+  const down = isMetres(trip?.descentM) && trip.descentM >= 1 ? `↓ ${altitudeText(trip.descentM)}` : "";
+  return [up, down].filter(Boolean).join(" · ");
+}
+
+// The outline of a trip's elevation profile in a width × height box, as an SVG path that is
+// closed along the bottom, and its lowest and highest metres. Null without two points. A small
+// rise does not fill the box: it stretches over at least `minRangeM`.
+function profileShape(elevation, width = 200, height = 36, minRangeM = 40) {
+  const points = Array.isArray(elevation) ? elevation.filter((p) => Array.isArray(p) && isMetres(p[0]) && isMetres(p[1])) : [];
+  if (points.length < 2) return null;
+  const heights = points.map((p) => p[1]);
+  const low = Math.min(...heights);
+  const high = Math.max(...heights);
+  const range = Math.max(minRangeM, high - low);
+  const base = low - (range - (high - low)) / 2;
+  const first = points[0][0];
+  const span = points[points.length - 1][0] - first || 1;
+  const top = 2;
+  const round = (value) => Math.round(value * 10) / 10;
+  const xy = points.map(([d, h]) => [round(((d - first) / span) * width), round(top + (1 - (h - base) / range) * (height - top))]);
+  const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x} ${y}`).join(" ");
+  return { line, area: `${line} L${width} ${height} L0 ${height} Z`, low, high };
+}

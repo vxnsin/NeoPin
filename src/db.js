@@ -180,6 +180,16 @@ const SCHEMA = `
     created_at INTEGER NOT NULL,
     PRIMARY KEY (user_id, device_id, start, profile)
   );
+  CREATE TABLE IF NOT EXISTS road_tiles (
+    layer TEXT NOT NULL,
+    z INTEGER NOT NULL,
+    x INTEGER NOT NULL,
+    y INTEGER NOT NULL,
+    fetched_at INTEGER NOT NULL,
+    version INTEGER NOT NULL,
+    data BLOB NOT NULL,
+    PRIMARY KEY (layer, z, x, y)
+  );
   CREATE TABLE IF NOT EXISTS trip_modes (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     device_id TEXT NOT NULL,
@@ -362,6 +372,11 @@ export function initDb(file = config.dbPath) {
   const positionColumns = db.prepare("PRAGMA table_info(positions)").all().map((c) => c.name);
   if (!positionColumns.includes("accuracy")) db.exec("ALTER TABLE positions ADD COLUMN accuracy REAL");
   if (!positionColumns.includes("speed")) db.exec("ALTER TABLE positions ADD COLUMN speed REAL");
+  // The height the GPS said and how exact it was, as they came, and the ground under the fix
+  // from the elevation tiles (src/elevation.js), NULL until its tile is here.
+  if (!positionColumns.includes("altitude")) db.exec("ALTER TABLE positions ADD COLUMN altitude REAL");
+  if (!positionColumns.includes("altitude_accuracy")) db.exec("ALTER TABLE positions ADD COLUMN altitude_accuracy REAL");
+  if (!positionColumns.includes("ground")) db.exec("ALTER TABLE positions ADD COLUMN ground REAL");
   // Until when the account hides its devices from everyone else, ms since the epoch. NULL is visible.
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "hidden_until")) {
     db.exec("ALTER TABLE users ADD COLUMN hidden_until INTEGER");

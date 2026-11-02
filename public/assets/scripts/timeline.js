@@ -269,12 +269,30 @@ function focusSegment(index, { scroll = false, fold = true } = {}) {
 // Panel
 
 function renderSummary(summary) {
+  // Metres climbed, only on a day that went uphill and whose heights the server knows.
+  const climbed = summary.ascentM >= 1 ? altitudeText(summary.ascentM) : "";
   return `
-    <div class="tl-summary">
+    <div class="tl-summary${climbed ? " tl-summary--climb" : ""}">
       <div><strong>${esc(formatDistance(summary.distanceM))}</strong><span>distance</span></div>
       <div><strong>${esc(summary.movingMs ? formatDuration(summary.movingMs) : "0 min")}</strong><span>moving</span></div>
       <div><strong>${summary.visits}</strong><span>${summary.visits === 1 ? "stop" : "stops"}</span></div>
+      ${climbed ? `<div><strong>${esc(climbed)}</strong><span>climbed</span></div>` : ""}
     </div>`;
+}
+
+// The ups and downs of a trip as a small filled area, nothing without heights.
+function profileHtml(segment) {
+  const shape = profileShape(segment.elevation);
+  if (!shape) return "";
+  const label = `Elevation from ${altitudeText(shape.low)} to ${altitudeText(shape.high)}`;
+  return `
+    <span class="seg__profile" role="img" aria-label="${esc(label)}" title="${esc(label)}">
+      <svg viewBox="0 0 200 36" preserveAspectRatio="none" aria-hidden="true">
+        <path class="seg__profile-area" d="${shape.area}" />
+        <path class="seg__profile-line" d="${shape.line}" vector-effect="non-scaling-stroke" />
+      </svg>
+      <span class="seg__profile-range"><span>${esc(altitudeText(shape.high))}</span><span>${esc(altitudeText(shape.low))}</span></span>
+    </span>`;
 }
 
 // "10" on the line's own colours; lines without colours get a quiet badge.
@@ -287,6 +305,7 @@ function lineBadge(transit) {
 
 function tripHtml(segment, index, times) {
   const duration = formatDuration(segment.durationMs);
+  const climb = segment.gap ? "" : climbText(segment);
   const transit = segment.transit;
   let title;
   if (segment.gap) title = `<span class="seg__title">No data · ${esc(formatDistance(segment.distanceM))}</span>`;
@@ -303,7 +322,8 @@ function tripHtml(segment, index, times) {
         <span class="seg__badge seg__badge--trip"><svg class="icon"><use href="${tripIcon(segment)}" /></svg></span>
         <span class="seg__text">
           ${title}
-          <span class="seg__meta">${esc(times)} · ${esc(duration)}</span>
+          <span class="seg__meta">${esc(times)} · ${esc(duration)}${climb ? ` · <span class="seg__climb">${esc(climb)}</span>` : ""}</span>
+          ${segment.gap ? "" : profileHtml(segment)}
         </span>
       </button>
       <div class="mode-chooser" data-chooser="${index}" hidden></div>

@@ -35,7 +35,7 @@ flowchart LR
     D[🌐 Dashboard] -- "POST /login" --> S
     D <-- "live over WebSocket" --> S
     S -. "push (optional)" .-> F[Firebase Cloud Messaging]
-    S -. "place names · timetables · road paths (optional)" .-> O[Overpass · GTFS · OSRM]
+    S -. "place names · road tiles · timetables (optional)" .-> O[Overpass · GTFS · OSRM]
 ```
 
 Everyone has an account: a username and a password, created by the admin in the dashboard or by signing up with an [invite code](#invite-codes). A phone logs in with it once, gets a token and sends its position whenever it moves. The server keeps the latest position of every device in memory and pushes each change to all phones and dashboards, at most twice a second. Hit refresh and it asks every device for a fresh fix.
@@ -135,7 +135,14 @@ Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 | `TRANSIT_CATALOG_URL` | the [Mobility Database](https://mobilitydatabase.org) catalog CSV | Which GTFS feeds exist and what each covers |
 | `TRANSIT_DIR` | `data/transit` | Where the catalog and the downloaded feeds are kept, next to the database |
 | `TRANSIT_REGION_KM` | `30` | Size of the regions that get timetable data, around wherever the accounts have been |
-| `ROAD_MATCH_URL` | `https://routing.openstreetmap.de/routed-{profile}` | OSRM server that snaps trips to the roads, see [Smoother paths](#smoother-paths). `{profile}` becomes `car`, `bike` or `foot`. It sees the whole way of every trip it is asked about. Point it at your own OSRM or set `off` |
+| `ROAD_MATCH` | `own` | How trips are snapped to the roads, see [Smoother paths](#smoother-paths): `own` (the server's own matcher, nothing outside sees a trip), `osrm` (an OSRM server at `ROAD_MATCH_URL`) or `off` |
+| `ROADS` | on | The roads for the own matcher, from OpenStreetMap through Overpass. `off` asks for nothing; tiles already stored are still used |
+| `ROADS_URL` | `https://overpass-api.de/api/interpreter` | Overpass API the road tiles come from. It learns which areas were visited, not the trips. Your own Overpass is best for regular use |
+| `ROAD_TILE_DAYS` | `30` | Stored road tiles are asked for again after this many days |
+| `ROAD_MATCH_URL` | `https://routing.openstreetmap.de/routed-{profile}` | OSRM server for `ROAD_MATCH=osrm`. `{profile}` becomes `car`, `bike` or `foot`. It sees the whole way of every trip it is asked about. `off` still turns road matching off, as before |
+| `ELEVATION` | on | The height of the ground under every fix, for the timeline, the review and the map, see [Heights](#heights). `off` turns it off |
+| `ELEVATION_URL` | `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png` | Where the Terrarium elevation tiles come from, `{z}`, `{x}` and `{y}` are filled in. They are kept in `elevation/` next to the database |
+| `ROAD_MATCH_MAX_COORDS` | `10` | Points per match request. The public servers refuse more than 10; your own OSRM takes 100 (its `--max-matching-size`), then trips are sent with every fix |
 | `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
 | `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
 | `PUSH_WAIT_MS` | `20000` | How long asking an offline phone for its location waits for the answer |
@@ -244,11 +251,37 @@ The server also watches a ride while it is on. Per device it keeps the stored fi
 With the Balanced profile the app reports every 15 s, with Battery every 2 minutes, and straight lines between those fixes cut through every corner. So the timeline draws trips along the way they really went:
 
 - A recognised bus, tram or train ride follows the line's own course from its timetable, from the boarding to the alighting stop.
-- Walks, bike rides, drives and buses without a known course are snapped to the roads by an [OSRM](https://project-osrm.org) match service with the foot, bike or car profile. Trams, trains and ferries without a course keep their fixes.
+- Walks, bike rides, drives and buses without a known course are snapped to the roads with the foot, bike or car profile, by the server itself. Trams, trains and ferries without a course keep their fixes.
 
-The server replaces the trip's `path` with that course and says where it came from in `pathSource` (`line` or `road`); without it the path is the fixes themselves. Distances still come from the fixes. A match that is much longer than the fixes is a detour the phone never made and is not used. Results are cached per trip; a day that is still being matched says `pathsPending`, and a reload a few seconds later has the rest.
+The server replaces the trip's `path` with that course and says where it came from in `pathSource` (`line` or `road`); without it the path is the fixes themselves. Distances still come from the fixes. Results are cached per trip; a day that is still being matched says `pathsPending`, and a reload a few seconds later has the rest.
 
-**Privacy.** Unlike the place lookup, which only sees single spots, the routing service sees the whole way of every trip it matches. The default is the public OSRM of [FOSSGIS](https://routing.openstreetmap.de), which logs requests (see its privacy statement). It gets the coordinates and the seconds between the fixes, not the date or the account, and not the centres of the stays at both ends of a trip. Run your own [OSRM](https://github.com/Project-OSRM/osrm-backend) and point `ROAD_MATCH_URL` at it, or set it to `off` and the fixes are drawn as they are. FOSSGIS allows light use only: one request a second (the server keeps to it), a valid user agent, and attribution: the routes are based on [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors.
+**How the roads are matched.** The server has its own map matcher (`src/roads/`), nothing outside sees a trip. It needs the roads around a trip, and gets them from [OpenStreetMap](https://www.openstreetmap.org) through an Overpass API (`ROADS_URL`), one map tile of about 1.5 km at a time (zoom 14), up to twelve tiles per query, one query after the other. A tile is asked for the first time a trip touches it, kept in SQLite (the ways with their nodes, delta-coded and deflated, a few dozen KB a tile) and asked again after `ROAD_TILE_DAYS`; in the meantime the old one is used. A trip that is new to the server is pending until its tiles are there; when Overpass is busy the tiles are tried again after 10 minutes, then 20, 40 and so on up to 6 hours. From the tiles a graph is built per match: every way the profile may use (cars keep off footpaths, cycleways and steps and respect one-way streets and roundabouts; bikes keep off motorways and motorroads; walkers off motorways and trunk roads and anything marked `foot=no` or `access=no`), connected where ways share a node.
+
+The fixes are thinned first (closer than 25 m to the last one kept, or a repeat, adds nothing). Then a hidden Markov model after Newson and Krumm ("Hidden Markov Map Matching Through Noise and Sparseness", 2009) picks the roads: every fix gets up to eight candidate spots on the roads within twice its accuracy (15 to 80 m); a spot is likely when it is close to the fix (Gaussian, σ = the accuracy, 5 to 20 m), a step from one spot to the next when the way along the roads (Dijkstra, up to 3 × the straight distance + 500 m, and no faster than the profile can go) is about as long as the straight line between the two fixes (exponential, β = 20 m + 5 % of the distance). Viterbi finds the likeliest chain of spots, and the path follows the roads between them, also along roads between sparse fixes. Where no road leads on, or a fix is far from every road (a field, a square), the chain ends, that part keeps its fixes, and a new chain starts with the next fix that is near a road. A chain whose roads are much longer than its fixes is a detour the phone never made and keeps its fixes, and a trip of which less than half fits the roads is not snapped. A drive of 25 km with a few hundred fixes takes well under a second once its tiles are stored. Long trips are matched in sections of at most 36 tiles, which bounds the memory a match takes.
+
+`ROAD_MATCH=osrm` sends the trips to an [OSRM](https://project-osrm.org) match service at `ROAD_MATCH_URL` instead. The public servers match at most ten points at a time, so a trip is thinned to a point every 120 m or so plus its turns and sent in overlapping windows, at most about 20 requests per trip. A match that is much longer than the fixes is not used.
+
+**Privacy.** With the own matcher, Overpass only learns which map tiles were visited, not the way, the times or the account, and the stored tiles are reused for everybody. Overpass servers you run yourself are best for regular use: the public ones are meant for light use and are often full. Point `ROADS_URL` at your own [Overpass](https://github.com/drolbr/Overpass-API) or set `ROADS=off` (only tiles already stored are used then). An OSRM routing service, on the other hand, sees the whole way of every trip it matches. The public OSRM of [FOSSGIS](https://routing.openstreetmap.de) logs requests (see its privacy statement); it gets the coordinates and the seconds between the fixes, not the date or the account, and not the centres of the stays at both ends of a trip. FOSSGIS allows light use only: one request a second (the server keeps to it) and a valid user agent. `ROAD_MATCH=off` draws the fixes as they are.
+
+**Data.** The roads, and with them every snapped path, are [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors, available under the [Open Database License](https://opendatacommons.org/licenses/odbl/) (ODbL). Name that source wherever you show the paths to others.
+
+## Heights
+
+Every stored fix gets the height of the ground under it, so the map shows how high someone is (`412 m`), a trip in the timeline its metres up and down with a small elevation profile, and the review the metres climbed. The GPS altitude a phone sends along (`altitude`, `altitudeAccuracy`) is kept as it came but not shown: it wobbles by tens of metres and differs from phone to phone, the ground does not.
+
+The ground comes from the free Terrain Tiles of AWS Open Data in the Terrarium format, no key needed: a tile of zoom 12 covers some 6 by 6 km, is fetched once in the background (a couple of tiles a second at most, a failed one is tried again ten minutes later) and kept in `elevation/12/x/y.png` next to the database, where it is read between its four nearest pixels. Fixes from before (or from while a tile was on its way) get their height when their day is opened in the timeline or the review. A tile request carries nothing but the tile's number, an area of 6 km. `ELEVATION=off` turns it off, `ELEVATION_URL` points at another source in the same format.
+
+<details>
+<summary><b>API</b></summary>
+<br>
+
+- `dataResponse`, `GET /api/getData` and `GET /api/devices`: `position.altitude`, the ground in whole metres, or `null` while it is not known.
+- `GET /api/timeline`: every trip has `ascentM` and `descentM` (smoothed over 50 m of way, ups and downs under 3 m left out) and `elevation: [[distanceM, altitudeM], ...]`, at most 200 points along the trip; every stay `altitudeM`; `summary.ascentM` adds up the trips. All `null` (and `elevation` empty) while no heights are known, and for stretches without fixes.
+- `GET /api/review`: `ascentM`, the metres climbed, and `highestM: { altitudeM, name }`, the highest stay (`name` is `null` for an unnamed one). Both `null` without heights.
+
+</details>
+
+Terrain: [Mapzen](https://www.mapzen.com/), [AWS Open Data](https://registry.opendata.aws/terrain-tiles/) (SRTM, GMTED2010, ETOPO1, NED, and others, see their [attribution](https://github.com/tilezen/joerd/blob/master/docs/attribution.md)).
 
 ## Review
 
@@ -276,12 +309,14 @@ A week (Monday to Sunday) or a calendar month in numbers: distance, time on the 
   days: [{ date, km, movingMinutes }],
   path: [[lat, lon], ...],                      // all trips, thinned to at most 600 points
   previous: { distanceKm, movingMinutes } | null,
-  empty }
+  empty,
+  ascentM,                                      // metres climbed, null without heights
+  highestM: { altitudeM, name } | null }        // the highest stay, see Heights
 ```
 
 Every day is that day's own timeline, built as `GET /api/timeline` builds it: from the device with the most fixes that day (the main device on a tie), with dismissed stops, corrected modes, answered rides and place names. Invisible stretches count, as in the own timeline. Distances and minutes are those of the trips, without stretches that had no fixes. Only the own review, the admin reads anyone's with `userId`; a shared timeline does not share the review.
 
-Finished days are kept in `review_days` with a stamp of what they were made of (the fixes of each device, dismissed stops, corrections, ride answers, own places, timetable data), so a month answers from the store and a change shows on the next request. Today and days still waiting for place names or paths are built every time.
+Finished days are kept in `review_days` with a stamp of what they were made of (the fixes of each device and how many know their height, dismissed stops, corrections, ride answers, own places, timetable data), so a month answers from the store and a change shows on the next request. Today and days still waiting for place names or paths are built every time.
 
 </details>
 
@@ -336,8 +371,8 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 |:--|:--|
 | `{ "type": "authenticate", "deviceId", "token", "deviceType"? }` | `{ "successful": true, "features": ["positionBatch", "find", "rideQuestion"] }`, then a `dataResponse` |
 | `{ "type": "authenticate", "viewer": true }` | Same for the dashboard, needs its session cookie and origin |
-| `{ "type": "updatePosition", "latitude", "longitude", "battery"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }` |
-| `{ "type": "positionBatch", "points": [...] }` | Up to 100 fixes taken while the phone had no connection, each `{ latitude, longitude, recordedAt?, accuracy?, speed? }`. Stored at their own time |
+| `{ "type": "updatePosition", "latitude", "longitude", "battery"?, "recordedAt"?, "accuracy"?, "speed"?, "altitude"?, "altitudeAccuracy"? }` | Stored and broadcast. `battery` is `{ "level": 0–100, "charging" }`. `altitude` (−1000 to 20000) and `altitudeAccuracy` (0 to 10000) are the GPS height in metres, kept but not shown, see [Heights](#heights) |
+| `{ "type": "positionBatch", "points": [...] }` | Up to 100 fixes taken while the phone had no connection, each `{ latitude, longitude, recordedAt?, accuracy?, speed?, altitude?, altitudeAccuracy? }`. Stored at their own time. A message may be up to 32 KiB |
 | `{ "type": "updateBattery", "level", "charging" }` | Only the battery changed, stored and broadcast |
 | `{ "type": "pingDevices" }` | `requestLocation` to every other device, then `dataResponse` |
 | `{ "type": "getData" }` | `dataResponse` from memory |
@@ -362,7 +397,7 @@ Connect to `/` and send JSON. The first message has to be `authenticate`. The ap
 | `{ "type": "findPosition", "session", "latitude", "longitude", "accuracy", "heading", "at" }` | Where the other side is right now |
 | `{ "type": "findEnded", "session", "reason" }` | `declined`, `timeout`, `answered` (on another device), `disconnected`, `offline`, `unavailable`, `replaced` or `ended` |
 | `{ "type": "rideQuestion", "rideId", "transit", "at" }` | The server thinks you are riding this line right now, answer with `POST /api/rides/answer`, see [Transit data](#transit-data) |
-| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `battery` is `null` until the device reported one, and stays the last reading (with its `updatedAt`) while the device is offline |
+| `{ "type": "dataResponse", "devices": [...] }` | `{ deviceId, userId, owner, position, lastPing, status, battery, ... }` per device, after every change. `position` is `{ latitude, longitude, altitude }`, `altitude` the ground in metres or `null`. `battery` is `null` until the device reported one, and stays the last reading (with its `updatedAt`) while the device is offline |
 
 </details>
 
@@ -419,7 +454,7 @@ The dashboard session is an HttpOnly, SameSite=Strict cookie named `neopin_sessi
 | `GET` | `/api/getData` | ✓ | All devices |
 | `POST` | `/api/sendPing` | ✓ | `{ "deviceId"?, "userId"? }`, asks one or all devices and answers with the list. An offline device is woken with a push when [push](#push-notifications) is set up: `202` when it has not answered in time |
 | `PUT` `DELETE` | `/api/push-token` | device | `{ "token", "platform" }` registers the FCM token of this device, `DELETE` forgets it. `204` |
-| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
+| `GET` | `/api/timeline` · `/api/timeline/days` | ✓ | Stays and trips of a device per day, and the days that have data. Trip paths follow roads and lines where known, see [Smoother paths](#smoother-paths); trips and stays carry their [heights](#heights). `userId` reads a timeline [shared](#shared-timelines) with you, `403` otherwise |
 | `GET` | `/api/review` | ✓ | `period`, `date`, `tz` or `timeZone`: a week or month in numbers, see [Review](#review). The admin adds `userId` |
 | `GET` `PUT` | `/api/me/review-notifications` | ✓ | `{ "enabled" }`: whether the [review](#review) comes as a notification, on by default |
 | `GET` `PUT` | `/api/timeline/sharing` | ✓ | `{ "mode": "off" \| "groups" \| "selected", "users", "groups" }`: who may read your timeline. `400` for people or groups you share nothing with |
@@ -466,6 +501,7 @@ src/
 ├─ transitMatch.js which line a trip was, corrections
 ├─ overpass.js     one queue for every Overpass query
 ├─ paths.js        trips along the line's course or snapped to the roads
+├─ roads/          own map matcher: OSM road tiles, graph, HMM matching
 ├─ devices.js      in-memory device registry
 ├─ sessions.js     dashboard sessions
 ├─ rateLimit.js    counter for wrong device tokens

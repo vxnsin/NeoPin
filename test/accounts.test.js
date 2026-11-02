@@ -135,7 +135,7 @@ test("people in a shared group see each other's devices, with their owner", asyn
   luisPhone.send({ type: "updatePosition", latitude: 10, longitude: 20 });
   await luisPhone.next();
   const after = await list(anna.cookie);
-  assert.deepEqual(after.find((d) => d.owner.username === "luis").position, { latitude: 10, longitude: 20 });
+  assert.deepEqual(after.find((d) => d.owner.username === "luis").position, { latitude: 10, longitude: 20, altitude: null });
   assert.equal(after.find((d) => d.owner.username === "anna").position, null, "the same device name under two accounts stays two devices");
   assert.equal(after[0].groupIds.length, 1);
 

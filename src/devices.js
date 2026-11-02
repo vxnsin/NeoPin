@@ -2,6 +2,7 @@ import { getUser, inferDeviceType, isHidden, linkedDevices, listUsers, publicUse
 import { forgetBattery, lastBattery, lastPosition, recordBattery } from "./history.js";
 import { sharedGroupIds, visibleUserIds } from "./groups.js";
 import { config } from "./config.js";
+import { elevationEnabled, groundAt } from "./elevation.js";
 
 // In-memory device registry. A device belongs to one account and is known by that
 // account and its name, so two people may both own an "iPhone". A record outlives
@@ -62,6 +63,14 @@ export function detachSocket(userId, deviceId, socket) {
   return true;
 }
 
+// A position as the clients get it: with the ground there in metres (rounded), null while its
+// elevation tile is still on the way (the devices go out again once it came) or ELEVATION is off.
+export function placed(position, ground = null) {
+  if (!position) return null;
+  const height = !elevationEnabled() ? null : (ground ?? groundAt(position.latitude, position.longitude, { live: true }));
+  return { latitude: position.latitude, longitude: position.longitude, altitude: height === null ? null : Math.round(height) };
+}
+
 export function updatePosition(userId, deviceId, latitude, longitude) {
   const device = devices.get(keyOf(userId, deviceId));
   if (!device) return null;
@@ -119,7 +128,7 @@ export function serializeDevices(viewer) {
         deviceId: link.deviceId,
         userId: user.id,
         owner: { username: owner.username, displayName: owner.displayName },
-        position: live?.position ?? (stored ? { latitude: stored.lat, longitude: stored.lon } : null),
+        position: live?.position ? placed(live.position) : stored ? placed({ latitude: stored.lat, longitude: stored.lon }, stored.ground) : null,
         lastPing: live?.lastPing ?? (stored ? new Date(stored.ts).toISOString() : null),
         status: statusOf(live),
         // The last reading stays with an offline device, the clients show it as old.
@@ -141,7 +150,7 @@ export function serializeDevices(viewer) {
       deviceId: d.id,
       userId: d.userId,
       owner: { username: owner?.username ?? "", displayName: owner?.displayName ?? "" },
-      position: d.position,
+      position: placed(d.position),
       lastPing: d.lastPing,
       status: statusOf(d),
       battery: d.battery ?? null,
