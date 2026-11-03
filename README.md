@@ -144,7 +144,9 @@ Then set these in `.env` and connect the app to `wss://neopin.example.com`:
 | `ROAD_MATCH_FALLBACK` | on | With `ROAD_MATCH=own`: a trip whose road tiles are not there yet, or that the own matcher cannot put on its roads, is snapped by OSRM at `ROAD_MATCH_URL`. `off` keeps those trips on their fixes, and nothing but the tile source sees anything |
 | `ELEVATION` | on | The height of the ground under every fix, for the timeline, the review and the map, see [Heights](#heights). `off` turns it off |
 | `ELEVATION_URL` | `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png` | Where the Terrarium elevation tiles come from, `{z}`, `{x}` and `{y}` are filled in. They are kept in `elevation/` next to the database |
-| `ROAD_MATCH_MAX_COORDS` | `10` | Points per match request. The public servers refuse more than 10; your own OSRM takes 100 (its `--max-matching-size`), then trips are sent with every fix |
+| `ROAD_MATCH_MAX_COORDS` | `10`, `100` for your own | Points per match request. The public servers refuse more than 10; your own OSRM takes 100 (its `--max-matching-size`), then trips are sent with every fix. A `ROAD_MATCH_URL` on a host without a dot (a Compose service), `localhost` or a private address counts as your own and gets 100 without this |
+| `OSRM_REGION` | `europe/germany/bayern/oberfranken` | Docker Compose only: the [Geofabrik](https://download.geofabrik.de) extract the [local OSRM](#local-osrm) is built from |
+| `OSRM_REFRESH_DAYS` | `30` | Docker Compose only: after how many days the local OSRM looks for a newer extract |
 | `FCM_SERVICE_ACCOUNT_FILE` | off | Path to the Firebase service account key, see [Push notifications](#push-notifications). `off` or unset turns push off |
 | `FCM_SERVICE_ACCOUNT_JSON` | off | The same key as inline JSON, for setups without a file. The inline JSON wins when both are set |
 | `PUSH_WAIT_MS` | `20000` | How long asking an offline phone for its location waits for the answer |
@@ -265,11 +267,55 @@ A trip whose tiles are not there after a second and a half is snapped by OSRM at
 
 The fixes are thinned first (closer than 25 m to the last one kept, or a repeat, adds nothing). A fix that is far off the way between its neighbours and would have taken more than a profile's pace to get to (4 m/s on foot) is a spike and left out; a walk's fixes up to 30 s apart are averaged with their neighbours, so the noise between houses, which throws fixes from one side of the street to the next way over, evens out. Then a hidden Markov model after Newson and Krumm ("Hidden Markov Map Matching Through Noise and Sparseness", 2009) picks the roads: every fix gets up to eight candidate spots on the roads within three times its accuracy (15 to 80 m); a spot is likely when it is close to the fix (Gaussian, σ = the accuracy, 5 to 20 m), a step from one spot to the next when the way along the roads (Dijkstra, up to 3 × the straight distance + 500 m, and no faster than the profile can go) is about as long as the straight line between the two fixes (exponential, β = 20 m + 5 % of the distance). Viterbi finds the likeliest chain of spots, and the path follows the roads between them, also along roads between sparse fixes. A spot that only goes out and back again (up to 40 m on foot, 25 m by car), a fix put a little behind the one before or a little up a side street, is left out of the path, so it does not zigzag. Where no road leads on, one or two fixes are left out and the chain goes on with the next; after that, or where a fix is far from every road (a field, a square), the chain ends, that part keeps its fixes, and a new chain starts with the next fix that is near a road. A chain whose roads are much longer than its fixes is a detour the phone never made and keeps its fixes, and a trip of which less than half fits the roads is not snapped. A drive of 25 km with a few hundred fixes takes well under a second once its tiles are stored. Long trips are matched in sections of at most 36 tiles, which bounds the memory a match takes.
 
-`ROAD_MATCH=osrm` sends the trips to an [OSRM](https://project-osrm.org) match service at `ROAD_MATCH_URL` instead. The public servers match at most ten points at a time, so a trip is thinned to a point every 120 m or so plus its turns and sent in overlapping windows, at most about 20 requests per trip. A match that is much longer than the fixes is not used.
+`ROAD_MATCH=osrm` sends the trips to an [OSRM](https://project-osrm.org) match service at `ROAD_MATCH_URL` instead. The public servers match at most ten points at a time, so a trip is thinned to a point every 120 m or so plus its turns and sent in overlapping windows, at most about 20 requests per trip. A match that is much longer than the fixes is not used. With an OSRM of your own (see [Local OSRM](#local-osrm)) a trip goes in windows of 100 fixes, and nothing leaves the server.
 
 **Privacy.** With the own matcher, the tile source only learns which map tiles were visited, not the way, the times or the account, and the stored tiles are reused for everybody. OpenFreeMap is free, needs no key and allows apps to download areas of up to 3,000 tiles with at most four requests at a time and their own user agent ([terms](https://openfreemap.org/tos/)); the server keeps to that, and a trip is a few dozen tiles. You can also run the tiles yourself ([OpenFreeMap](https://github.com/hyperknot/openfreemap) is open source) or an [Overpass](https://github.com/drolbr/Overpass-API), and point `ROADS_URL` there, or set `ROADS=off` (only tiles already stored are used then). An OSRM routing service, on the other hand, sees the whole way of every trip it matches, also the trips it stands in for while the tiles load; `ROAD_MATCH_FALLBACK=off` keeps them on the server. The public OSRM of [FOSSGIS](https://routing.openstreetmap.de) logs requests (see its privacy statement); it gets the coordinates and the seconds between the fixes, not the date or the account, and not the centres of the stays at both ends of a trip. FOSSGIS allows light use only: one request a second (the server keeps to it) and a valid user agent. `ROAD_MATCH=off` draws the fixes as they are.
 
 **Data.** The roads, and with them every snapped path, are [OpenStreetMap](https://www.openstreetmap.org/copyright) data, © OpenStreetMap contributors, available under the [Open Database License](https://opendatacommons.org/licenses/odbl/) (ODbL); the vector tiles are © [OpenMapTiles](https://openmaptiles.org/), served by [OpenFreeMap](https://openfreemap.org). Name these sources wherever you show the paths to others: "OpenFreeMap © OpenMapTiles © OpenStreetMap contributors", as the map does.
+
+## Local OSRM
+
+The compose file comes with an optional OSRM of your own: the [OSRM](https://project-osrm.org) routing engine (open source, BSD licence) for the car, bike and foot profiles, built from an [OpenStreetMap](https://www.openstreetmap.org) extract of your region. Use it for `ROAD_MATCH=osrm` when no trip should leave the server, not even to the public FOSSGIS servers or the tile source, or as the stand-in for the own matcher instead of the public servers. The own matcher alone is lighter (a few KB per map tile, no preparing) and usually matches as well; your own OSRM costs memory and disk, and in return sees nothing but your trips, takes 100 points a request and needs no tiles from outside. Away from the region it was built for it matches nothing: with `ROAD_MATCH=osrm` those trips keep their fixes.
+
+Two lines in the `.env` next to `docker-compose.yml` turn it on:
+
+```bash
+COMPOSE_PROFILES=osrm
+ROAD_MATCH_URL=http://osrm-{profile}:5000
+```
+
+Then `docker compose up -d` (or, without `COMPOSE_PROFILES`, `docker compose --profile osrm up -d`). With just these the own matcher stays in charge and your OSRM stands in while road tiles load; add `ROAD_MATCH=osrm` to let OSRM match every trip, so that nobody else sees anything. `{profile}` becomes `car`, `bike` or `foot`, the names of the services `osrm-car`, `osrm-bike` and `osrm-foot`, and such an address gets 100 points a request on its own.
+
+`osrm-download` fetches the extract of `OSRM_REGION` from [Geofabrik](https://download.geofabrik.de) and checks its MD5, `osrm-prepare` builds the data of the three profiles one after the other (`osrm-extract`, `osrm-partition`, `osrm-customize` for MLD) into the `osrm-data` volume, and then the three `osrm-routed` services start. They sit on an internal network: NeoPin reaches them, they reach nothing. `osrm-prepare` has no network at all, and only `osrm-download` goes online, to Geofabrik. NeoPin does not wait for them; at startup it says in its log whether the OSRM answers for all three profiles, and asks again every minute until it does. `docker compose logs -f osrm-download osrm-prepare` shows the progress.
+
+**Region.** `OSRM_REGION` is a path on download.geofabrik.de without `-latest.osm.pbf`, for example `europe/germany/bayern/oberfranken` (the default), `europe/germany/bayern` or `europe/germany`. Take the smallest one that holds the places you go; neighbouring regions cannot be combined here, take the one above them.
+
+**Memory and disk.** OSRM needs a lot more than the extract. These are rough estimates for all three profiles, not measurements, and depend on the OSRM version and on how dense the region's map is:
+
+| Region | Extract | Preparing: RAM (peak), time | Disk | Running: RAM |
+|:--|:--|:--|:--|:--|
+| Oberfranken | 90 MB | 1 to 2 GB, 5 to 15 min | 1 to 2 GB | about 1 GB |
+| Bayern | 820 MB | 4 to 8 GB, 30 to 90 min | 10 to 15 GB | 5 to 8 GB |
+| Germany | 4.5 GB | 15 to 30 GB, several hours | 40 to 70 GB | 25 to 40 GB |
+
+As a rule of thumb, preparing one profile takes 4 to 7 times the extract in RAM, its data on disk is 3 to 5 times the extract, and a running `osrm-routed` holds most of its data in memory; foot is the largest of the three, car the smallest. A refresh briefly keeps the old and the new data of one profile side by side. When preparing runs out of memory the container is killed and the log ends without "ready"; a swap file helps, otherwise take a smaller region.
+
+<details>
+<summary><b>Updating, switching off</b></summary>
+<br>
+
+Every `docker compose up -d` runs `osrm-download` and `osrm-prepare` again; they do nothing while the extract is younger than `OSRM_REFRESH_DAYS` (30), and once it is older they only download when Geofabrik has a newer one, and only rebuild a profile whose data is from another extract. A new build takes the place of the old one when it is done. The running servers keep the old data until they start again:
+
+```bash
+docker compose up -d
+docker compose restart osrm-car osrm-bike osrm-foot
+```
+
+`OSRM_REFRESH_DAYS=0` looks for a new extract right away. A new `OSRM_REGION` is downloaded and built on the next `up -d`. Matched trips are cached, so trips already drawn stay as they were.
+
+To switch it off, remove the two lines from `.env` and run `docker compose --profile osrm down` and then `docker compose up -d`; NeoPin is back on the public servers as the stand-in. The data stays in the volume `<project>_osrm-data` (the project is the folder name) until `docker volume rm <project>_osrm-data`. Do not use `down -v` for that, it deletes NeoPin's own volume with the database as well.
+
+</details>
 
 ## Heights
 

@@ -1,4 +1,4 @@
-import { config } from "./config.js";
+import { config, ownOsrm } from "./config.js";
 import { getDb } from "./db.js";
 import { distanceM } from "./history.js";
 import { userAgent } from "./overpass.js";
@@ -511,6 +511,40 @@ export async function smoothPaths(userId, deviceId, segments, { waitMs = 3_000, 
     if (cached?.path) Object.assign(trip, { path: cached.path, pathSource: "road" });
   }
   return { pending };
+}
+
+// Whether an OSRM of your own (the osrm profile of docker-compose.yml, say) answers for all three
+// profiles, asked once at startup and then every `retryMs` until it does or `tries` are used up:
+// a first start prepares the data for a while. One line in the log either way. The public
+// server is never asked, nor is anyone when OSRM is not used. True, false, or null for not asked.
+export async function checkOsrm({ retryMs = 60_000, tries = 180 } = {}) {
+  const url = config.roadMatchUrl;
+  if (!url || !ownOsrm(url) || !(config.roadMatch === "osrm" || fallbackOn())) return null;
+  const answers = async (profile) => {
+    try {
+      const res = await fetch(`${url.replace("{profile}", profile).replace(/\/+$/, "")}/nearest/v1/driving/0,0`, {
+        headers: { "user-agent": userAgent() },
+        signal: AbortSignal.timeout(5_000),
+      });
+      return typeof (await res.json())?.code === "string";
+    } catch {
+      return false;
+    }
+  };
+  for (let attempt = 1; ; attempt++) {
+    const profiles = ["car", "bike", "foot"];
+    const silent = (await Promise.all(profiles.map(answers))).map((ok, i) => (ok ? null : profiles[i])).filter(Boolean);
+    if (!silent.length) {
+      console.log(`Road matching: OSRM at ${url} answers for car, bike and foot, up to ${config.roadMatchMaxCoords} points a request`);
+      return true;
+    }
+    if (attempt >= tries) {
+      console.warn(`Road matching: OSRM at ${url} still does not answer for ${silent.join(", ")}, no more asking; matching tries it again with every trip`);
+      return false;
+    }
+    if (attempt === 1) console.warn(`Road matching: OSRM at ${url} does not answer for ${silent.join(", ")} yet, asking again every ${Math.round(retryMs / 1000)} s`);
+    await new Promise((resolve) => setTimeout(resolve, retryMs).unref?.());
+  }
 }
 
 export function resetPaths({ spacing = 1_000, tilesWait = 1_500 } = {}) {

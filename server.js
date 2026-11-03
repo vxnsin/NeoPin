@@ -7,6 +7,7 @@ import { pruneHistory } from "./src/history.js";
 import { createApp } from "./src/app.js";
 import { startConsole } from "./src/console.js";
 import { startTransit } from "./src/transit.js";
+import { checkOsrm } from "./src/paths.js";
 import { applyStagedRestore, beforeRestoreFile, startBackups } from "./src/backups.js";
 
 function networkIp() {
@@ -48,5 +49,6 @@ const server = createApp();
 await server.app.listen(config.port);
 banner();
 startTransit();
+checkOsrm();
 startBackups();
 startConsole(server);
