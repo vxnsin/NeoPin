@@ -836,7 +836,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: "800", letterSpacing: -0.3 },
   headerActions: { flexDirection: "row", gap: 8 },
   iconButton: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  chipScroll: { flexGrow: 0, marginBottom: 10 },
+  // A low panel must not squeeze the chip rows: they keep their height and the list below scrolls.
+  chipScroll: { flexGrow: 0, flexShrink: 0, minHeight: 36, marginBottom: 10 },
   chips: { gap: 8, alignItems: "center" },
   deviceChip: { flexDirection: "row", alignItems: "center", gap: 8, height: 36, paddingLeft: 8, paddingRight: 14, borderRadius: 18, maxWidth: 200 },
   dayChip: { height: 34, paddingHorizontal: 14, borderRadius: 17, alignItems: "center", justifyContent: "center" },
