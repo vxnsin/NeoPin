@@ -13,8 +13,17 @@ services:
       # - SECURE_COOKIES=true    # once HTTPS is in place
       # - PUBLIC_URL=https://neopin.example.com   # for passkeys behind a proxy
       # - HISTORY_DAYS=365
+      # Road matching, from the .env next to this file. Empty means the default; see "Local OSRM"
+      # in the README for ROAD_MATCH_URL=http://osrm-{profile}:5000.
+      - ROAD_MATCH=${ROAD_MATCH:-}
+      - ROAD_MATCH_URL=${ROAD_MATCH_URL:-}
+      - ROAD_MATCH_FALLBACK=${ROAD_MATCH_FALLBACK:-}
+      - ROAD_MATCH_MAX_COORDS=${ROAD_MATCH_MAX_COORDS:-}
     volumes:
       - neopin-data:/app/data
+    networks:
+      - default
+      - osrm
     restart: unless-stopped
     labels:
       - com.centurylinklabs.watchtower.enable=true
@@ -27,5 +36,148 @@ services:
   #     - /var/run/docker.sock:/var/run/docker.sock
   #   restart: unless-stopped
 
+  # Optional: an OSRM of your own for the car, bike and foot profiles of one region, see "Local
+  # OSRM" in the README. Only started with `docker compose --profile osrm up -d` (or
+  # COMPOSE_PROFILES=osrm in .env). Of these services only osrm-download goes online, to
+  # Geofabrik, for the extract.
+
+  # Fetches the Geofabrik extract of OSRM_REGION and checks its MD5. Nothing is asked while the
+  # stored one is younger than OSRM_REFRESH_DAYS, nothing downloaded while Geofabrik has the same.
+  osrm-download:
+    image: alpine:3.22
+    profiles: [osrm]
+    environment:
+      - OSRM_REGION=${OSRM_REGION:-europe/germany/bayern/oberfranken}
+      - OSRM_REFRESH_DAYS=${OSRM_REFRESH_DAYS:-30}
+    volumes:
+      - osrm-data:/data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        log() { echo "osrm-download: $$*"; }
+        region="$${OSRM_REGION#/}"
+        region="$${region%-latest.osm.pbf}"
+        url="https://download.geofabrik.de/$$region-latest.osm.pbf"
+        mkdir -p /data/src && cd /data/src
+        now=$$(date +%s)
+        fetched=$$(cat fetched 2>/dev/null || true)
+        if [ -f region.osm.pbf ] && [ "$$(cat region 2>/dev/null || true)" = "$$region" ] &&
+          [ $$((now - $${fetched:-0})) -lt $$((OSRM_REFRESH_DAYS * 86400)) ]; then
+          log "$$region is younger than $$OSRM_REFRESH_DAYS days, nothing to do"
+          exit 0
+        fi
+        for attempt in 1 2; do
+          wget -q -O region.md5 "$$url.md5" || { log "cannot get $$url.md5, is OSRM_REGION a Geofabrik path?"; exit 1; }
+          want=$$(cut -d' ' -f1 region.md5)
+          if [ -f region.osm.pbf ] && [ "$$(cat region 2>/dev/null || true)" = "$$region" ] &&
+            [ "$$(md5sum region.osm.pbf | cut -d' ' -f1)" = "$$want" ]; then
+            log "Geofabrik still has the same extract of $$region"
+            echo "$$now" > fetched
+            exit 0
+          fi
+          log "downloading $$url"
+          rm -f region.osm.pbf.part
+          wget -q -O region.osm.pbf.part "$$url"
+          if [ "$$(md5sum region.osm.pbf.part | cut -d' ' -f1)" = "$$want" ]; then
+            mv region.osm.pbf.part region.osm.pbf
+            echo "$$want" > md5
+            echo "$$region" > region
+            echo "$$now" > fetched
+            log "$$region: $$(du -h region.osm.pbf | cut -f1), checksum ok"
+            exit 0
+          fi
+          log "checksum does not match (maybe a new extract came out meanwhile), attempt $$attempt of 2"
+          rm -f region.osm.pbf.part
+        done
+        exit 1
+    restart: "no"
+
+  # Builds the car, bike and foot data (osrm-extract, -partition and -customize for MLD), each
+  # profile only when its data is from another extract. A new build goes next to the old one and
+  # takes its place when done; the routed services read it on their next start.
+  osrm-prepare:
+    image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+    profiles: [osrm]
+    depends_on:
+      osrm-download:
+        condition: service_completed_successfully
+    volumes:
+      - osrm-data:/data
+    network_mode: none
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        log() { echo "osrm-prepare: $$*"; }
+        src=/data/src/region.osm.pbf
+        want=$$(cat /data/src/md5)
+        for profile in car bike foot; do
+          case $$profile in
+            car) lua=/opt/car.lua ;;
+            bike) lua=/opt/bicycle.lua ;;
+            foot) lua=/opt/foot.lua ;;
+          esac
+          if [ "$$(cat /data/$$profile/source 2>/dev/null || true)" = "$$want" ]; then
+            log "$$profile is up to date"
+            continue
+          fi
+          started=$$(date +%s)
+          rm -rf /data/$$profile.new && mkdir -p /data/$$profile.new
+          out=/data/$$profile.new/region.osrm
+          log "$$profile: osrm-extract, the longest step"
+          osrm-extract -p $$lua -o $$out $$src
+          log "$$profile: osrm-partition"
+          osrm-partition $$out
+          log "$$profile: osrm-customize"
+          osrm-customize $$out
+          echo "$$want" > /data/$$profile.new/source
+          rm -rf /data/$$profile.old
+          if [ -d /data/$$profile ]; then mv /data/$$profile /data/$$profile.old; fi
+          mv /data/$$profile.new /data/$$profile
+          rm -rf /data/$$profile.old
+          log "$$profile ready after $$(( $$(date +%s) - started )) s, $$(du -sh /data/$$profile | cut -f1)"
+        done
+    restart: "no"
+
+  osrm-car:
+    <<: &osrm-routed
+      image: ghcr.io/project-osrm/osrm-backend:v26.10.0-debian
+      profiles: [osrm]
+      depends_on:
+        osrm-prepare:
+          condition: service_completed_successfully
+      volumes:
+        - osrm-data:/data:ro
+      # NeoPin reaches it, it reaches nothing.
+      networks:
+        - osrm
+      healthcheck:
+        test:
+          - CMD
+          - bash
+          - -c
+          - exec 3<>/dev/tcp/127.0.0.1/5000 && printf 'GET /nearest/v1/driving/0,0 HTTP/1.0\r\n\r\n' >&3 && grep -q '"code"' <&3
+        interval: 10s
+        timeout: 5s
+        retries: 3
+        start_period: 5m
+      restart: unless-stopped
+    command: osrm-routed --algorithm mld --max-matching-size 100 /data/car/region.osrm
+
+  osrm-bike:
+    <<: *osrm-routed
+    command: osrm-routed --algorithm mld --max-matching-size 100 /data/bike/region.osrm
+
+  osrm-foot:
+    <<: *osrm-routed
+    command: osrm-routed --algorithm mld --max-matching-size 100 /data/foot/region.osrm
+
+networks:
+  # No way out: the OSRM servers only ever talk to NeoPin.
+  osrm:
+    internal: true
+
 volumes:
   neopin-data:
+  osrm-data:

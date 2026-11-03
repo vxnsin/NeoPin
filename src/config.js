@@ -58,6 +58,31 @@ function roadMatchMode() {
   return "own";
 }
 
+// Whether an OSRM address is a server of your own: a name without a dot (a Compose service such
+// as osrm-car), localhost, or an address in a private network. Never the public FOSSGIS one.
+export function ownOsrm(url) {
+  let host;
+  try {
+    host = new URL(String(url).replaceAll("{profile}", "car")).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  } catch {
+    return false;
+  }
+  if (host.includes(":")) return host === "::1" || /^f[cd][0-9a-f]{2}:/.test(host);
+  if (!host.includes(".") || host === "localhost" || host.endsWith(".localhost")) return true;
+  return /^(127|10)\.\d+\.\d+\.\d+$/.test(host) || /^192\.168\.\d+\.\d+$/.test(host) || /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
+}
+
+// Points per match request unless ROAD_MATCH_MAX_COORDS says otherwise: ten for the public
+// servers (and any other one out there), 100 for an own OSRM, its --max-matching-size default.
+export function defaultMaxCoords(url) {
+  return url && ownOsrm(url) ? 100 : 10;
+}
+
+function roadMatchUrl() {
+  if (process.env.ROAD_MATCH_URL === "off") return null;
+  return process.env.ROAD_MATCH_URL || "https://routing.openstreetmap.de/routed-{profile}";
+}
+
 function roadsSource() {
   const source = (process.env.ROADS_SOURCE ?? "").trim().toLowerCase();
   if (["openfreemap", "overpass"].includes(source)) return source;
@@ -89,11 +114,10 @@ export const config = {
   roadMatch: roadMatchMode(),
   // The OSRM server for ROAD_MATCH=osrm; {profile} becomes car, bike or foot. It sees the whole
   // way of every trip it is asked about.
-  roadMatchUrl:
-    process.env.ROAD_MATCH_URL === "off" ? null : process.env.ROAD_MATCH_URL || "https://routing.openstreetmap.de/routed-{profile}",
+  roadMatchUrl: roadMatchUrl(),
   // Points per match request. The public FOSSGIS servers refuse more than ten (TooBig); an own
-  // OSRM takes 100 by default (--max-matching-size).
-  roadMatchMaxCoords: Math.max(4, Math.floor(Number(process.env.ROAD_MATCH_MAX_COORDS)) || 10),
+  // OSRM (see ownOsrm) takes 100 by default (--max-matching-size) and gets them unasked.
+  roadMatchMaxCoords: Math.max(4, Math.floor(Number(process.env.ROAD_MATCH_MAX_COORDS)) || defaultMaxCoords(roadMatchUrl())),
   // Where the own matcher gets its roads, one map tile at a time; the source only learns which
   // areas were visited. "openfreemap": the vector tiles the map is drawn from, ROADS_URL is their
   // TileJSON (or a tile URL with {z}, {x} and {y}). "overpass": an Overpass API at ROADS_URL.

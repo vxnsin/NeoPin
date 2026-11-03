@@ -21,6 +21,8 @@ jobs:
       # package-lock.json is git-ignored, so npm ci is not an option.
       - run: npm install
       - run: node --test
+      # The compose file, with and without the optional OSRM services.
+      - run: docker compose config --quiet && docker compose --profile osrm config --quiet
 
   image:
     needs: test
