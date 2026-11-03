@@ -300,3 +300,101 @@ test("viterbi starts a new chain where no road leads on", () => {
   const chains = viterbi(g, pts);
   assert.deepEqual(chains.map((c) => c.map((s) => s.index)), [[0, 1, 2], [3, 4]]);
 });
+
+// Sharp turns back (more than 150 degrees) with a leg shorter than 50 m: a zigzag.
+function zigzags(xy) {
+  let n = 0;
+  for (let i = 1; i < xy.length - 1; i++) {
+    const ux = xy[i][0] - xy[i - 1][0], uy = xy[i][1] - xy[i - 1][1];
+    const vx = xy[i + 1][0] - xy[i][0], vy = xy[i + 1][1] - xy[i][1];
+    const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+    if (lu && lv && (ux * vx + uy * vy) / (lu * lv) < -0.87 && Math.min(lu, lv) < 50) n++;
+  }
+  return n;
+}
+
+const distToLine = (line, [px, py]) => {
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const [ax, ay] = line[i - 1], [bx, by] = line[i];
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2)) : 0;
+    best = Math.min(best, Math.hypot(px - ax - dx * t, py - ay - dy * t));
+  }
+  return best;
+};
+
+// A small town: streets every 80 m, a footpath or a service road between each pair of them,
+// all joined where they cross.
+function town() {
+  const w = world();
+  const stops = Array.from({ length: 21 }, (_, i) => i * 40);
+  for (let k = 0; k <= 10; k++) {
+    w.way(stops.map((s) => [s, k * 80]));
+    w.way(stops.map((s) => [k * 80, s]));
+  }
+  for (let k = 0; k < 10; k++) w.way(stops.map((s) => [k * 80 + 40, s]), { highway: k % 2 ? "service" : "footway" });
+  return w;
+}
+
+test("a walk between houses with 20 to 40 m of GPS noise stays on its streets, without zigzags", () => {
+  // East along y = 160, north up the footpath at x = 440, east along y = 560: 1.2 km.
+  const truth = [[0, 160], [440, 160], [440, 560], [800, 560]];
+  const along = [];
+  for (let i = 1; i < truth.length; i++) {
+    const [ax, ay] = truth[i - 1], [bx, by] = truth[i];
+    const n = Math.round(Math.hypot(bx - ax, by - ay) / 21);
+    for (let k = i === 1 ? 0 : 1; k <= n; k++) along.push([ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n]);
+  }
+  const rnd = noise(11);
+  const trace = along.map(([x, y]) => {
+    const r = 20 + 20 * rnd();
+    const a = 2 * Math.PI * rnd();
+    return [x + r * Math.cos(a), y + r * Math.sin(a)];
+  });
+  // And one fix the GPS threw 90 m off, a street further east.
+  trace[30] = [along[30][0] + 90, along[30][1]];
+  const out = match(town(), "foot", trace, { accuracy: 15, every: 15 });
+  assert.ok(out.matched >= 0.9 * thinFixes(fixes(trace)).length, `${out.matched} matched`);
+  // On the ways all along, no straight lines through the houses: every point is on a street
+  // (x a multiple of 40 or y one of 80).
+  const onAWay = ([x, y]) => Math.abs(x - 40 * Math.round(x / 40)) < 0.5 || Math.abs(y - 80 * Math.round(y / 80)) < 0.5;
+  assert.ok(out.xy.every(onAWay), "only along the ways");
+  // Where the noise is as wide as the blocks, the next way over is as likely; never further.
+  assert.ok(out.xy.every((p) => distToLine(truth, p) <= 41), "never further than the next way over");
+  const sampled = [];
+  for (let i = 1; i < out.xy.length; i++) {
+    const [ax, ay] = out.xy[i - 1], [bx, by] = out.xy[i];
+    const n = Math.ceil(Math.hypot(bx - ax, by - ay) / 5);
+    for (let k = 0; k < n; k++) sampled.push([ax + ((bx - ax) * k) / n, ay + ((by - ay) * k) / n]);
+  }
+  const onTruth = sampled.filter((p) => distToLine(truth, p) <= 2).length / sampled.length;
+  assert.ok(onTruth > 0.8, `${Math.round(onTruth * 100)}% of the path on the way walked`);
+  assert.ok(zigzags(out.xy) <= 1, `${zigzags(out.xy)} zigzags`);
+  assert.ok(Math.abs(lengthOf(out.xy) - 1200) < 180, `${Math.round(lengthOf(out.xy))} m`);
+});
+
+test("a short step back on the road is noise, a real turn back is kept", () => {
+  const w = world();
+  w.way([[0, 0], [600, 0]]);
+  w.way([[300, 0], [300, 200]]);
+  // Along the street, one fix 15 m behind the one before.
+  const jitter = match(w, "foot", [[0, 3], [60, -2], [120, 3], [105, -3], [180, 2], [240, -2], [300, 3], [360, 2]], { every: 30 });
+  assert.equal(zigzags(jitter.xy), 0);
+  assert.ok(Math.abs(lengthOf(jitter.xy) - 360) < 10, `${Math.round(lengthOf(jitter.xy))} m`);
+  // Up the side street and back down, 150 m each way.
+  const back = match(w, "foot", [[200, 2], [260, -2], [300, 50], [302, 100], [298, 150], [301, 100], [299, 50], [260, 3], [200, -2]], { every: 40 });
+  assert.ok(near(back.xy, [300, 140], 15), "goes up to where the walker turned");
+});
+
+test("a field track is a car's way only where there is nothing else", () => {
+  assert.deepEqual(wayRule("car", { highway: "track" }), { oneway: 0, cost: 4, low: true });
+  assert.deepEqual(wayRule("car", { highway: "track", motor_vehicle: "yes" }), { oneway: 0 });
+  assert.deepEqual(wayRule("foot", { highway: "track" }), { oneway: 0 });
+  // A farm track alone in the fields: the car is on it.
+  const w = world();
+  w.way([[0, 0], [1000, 0]], { highway: "track" });
+  const out = match(w, "car", [[0, 5], [200, -4], [400, 3], [600, -5], [800, 4], [1000, 2]], { every: 30 });
+  assert.equal(out.matched, 6);
+  assert.ok(out.xy.every(([, y]) => Math.abs(y) < 1));
+});
