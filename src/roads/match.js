@@ -10,8 +10,9 @@ import { BACKWARD, FORWARD, segmentsNear } from "./graph.js";
 export const TUNING = {
   // Fixes closer than this to the last one kept add nothing but noise and work.
   thinM: 25,
-  // Search radius: twice what the GPS said it was accurate to, within these bounds.
-  radius: { min: 15, max: 80, unknownAccuracyM: 25 },
+  // Search radius: three times what the GPS said it was accurate to, within these bounds. Between
+  // houses a fix is often two or three times as far off as the phone thinks.
+  radius: { factor: 3, min: 15, max: 80, unknownAccuracyM: 25 },
   maxCandidates: 8,
   // Standard deviation of the GPS error (emission), from the accuracy, within these bounds.
   sigma: { min: 5, max: 20, unknownM: 10 },
@@ -25,11 +26,22 @@ export const TUNING = {
   jitterM: 12,
   // Faster than this between two fixes is not the way the phone went (with timestamps).
   maxSpeedMs: { car: 60, bike: 25, foot: 8, rail: 90 },
+  // A path that goes out and straight back this far or less is GPS noise (see withoutSpurs).
+  spurM: { car: 25, bike: 30, foot: 40, rail: 0 },
+  // Fixes in a row the chain may leave out when no road leads to them (see viterbi).
+  maxSkipped: 2,
+  // A fix at least this far off the way, and three times its accuracy, that would take more
+  // than this speed to visit is a spike (see withoutSpikes).
+  spikeM: 50,
+  spikeSpeedMs: { car: 45, bike: 12, foot: 4 },
+  // Walks are smoothed between fixes at most this far apart in time (see smoothed); sparser
+  // fixes are far enough apart that their average would cut real corners and turns.
+  smoothGapMs: { foot: 30_000 },
 };
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const hasAccuracy = (p) => Number.isFinite(p.accuracy) && p.accuracy > 0;
-export const radiusFor = (p) => clamp(2 * (hasAccuracy(p) ? p.accuracy : TUNING.radius.unknownAccuracyM), TUNING.radius.min, TUNING.radius.max);
+export const radiusFor = (p) => clamp(TUNING.radius.factor * (hasAccuracy(p) ? p.accuracy : TUNING.radius.unknownAccuracyM), TUNING.radius.min, TUNING.radius.max);
 const sigmaFor = (p) => (hasAccuracy(p) ? clamp(p.accuracy, TUNING.sigma.min, TUNING.sigma.max) : TUNING.sigma.unknownM);
 
 // Dense traces get thinned, duplicates dropped; the last fix always stays.
@@ -48,6 +60,47 @@ export function thin(points, minM = TUNING.thinM) {
   return out;
 }
 
+// Leaves out the fixes that are a spike: far off the way from the fix before to the one after,
+// further than the phone could have gone and come back in that time, while that way itself is an
+// ordinary pace. Multipath between houses throws single fixes a hundred metres off.
+export function withoutSpikes(points, profile) {
+  const pace = TUNING.spikeSpeedMs[profile];
+  if (!pace || points.length < 3) return points;
+  const out = [points[0]];
+  for (let i = 1; i < points.length - 1; i++) {
+    const a = out[out.length - 1];
+    const b = points[i];
+    const c = points[i + 1];
+    const seconds = (c.ts - a.ts) / 1000;
+    if (Number.isFinite(seconds) && seconds > 0) {
+      const ab = Math.hypot(b.x - a.x, b.y - a.y);
+      const bc = Math.hypot(c.x - b.x, c.y - b.y);
+      const ac = Math.hypot(c.x - a.x, c.y - a.y);
+      const off = (ab + bc - ac) / 2;
+      const minOff = Math.max(TUNING.spikeM, 3 * (hasAccuracy(b) ? b.accuracy : TUNING.radius.unknownAccuracyM));
+      if (off > minOff && (ab + bc) / seconds > pace && ac / seconds <= pace) continue;
+    }
+    out.push(b);
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+
+// A walk's fixes averaged with their neighbours (1:2:1) where those are near in time: GPS noise
+// between houses jumps from one side of a street to the other and on to the next way over,
+// the average of three stays near the way walked. A corner is cut a little, the roads put it back.
+export function smoothed(points, profile) {
+  const gap = TUNING.smoothGapMs[profile];
+  if (!gap || points.length < 3) return points;
+  const close = (p, q) => Number.isFinite(p.ts) && Number.isFinite(q.ts) && Math.abs(p.ts - q.ts) <= gap;
+  return points.map((p, i) => {
+    const a = points[i - 1];
+    const c = points[i + 1];
+    if (!a || !c || !close(a, p) || !close(p, c)) return p;
+    return { ...p, x: (a.x + 2 * p.x + c.x) / 4, y: (a.y + 2 * p.y + c.y) / 4 };
+  });
+}
+
 // The candidate spots of one fix: projections onto the segments around it. A projection onto
 // the end of a segment is dropped when a segment at that end comes closer (the next stretch of
 // the same road), so the few candidates left are different roads, not one road many times.
@@ -56,6 +109,8 @@ function candidatesOf(g, p) {
   // A fix far off every road within its accuracy may still be next to one: look a bit wider.
   if (!near.length) near = segmentsNear(g, p.x, p.y, TUNING.radius.max);
   if (!near.length) return [];
+  // Ways of last resort (a car on a field track) only where there is nothing else.
+  if (near.some((c) => !g.segLow[c.seg])) near = near.filter((c) => !g.segLow[c.seg]);
   const atEnd = (c) => (c.t <= 1e-9 ? g.segA[c.seg] : c.t >= 1 - 1e-9 ? g.segB[c.seg] : -1);
   const kept = near.filter((c) => {
     const v = atEnd(c);
@@ -138,7 +193,7 @@ function searchState(g) {
 
 // Where a candidate leaves its segment: [vertex, metres to get there].
 function exitsOf(g, c) {
-  const len = g.segLen[c.seg];
+  const len = g.segCost[c.seg];
   const out = [];
   if (g.segDir[c.seg] & FORWARD) out.push([g.segB[c.seg], (1 - c.t) * len]);
   if (g.segDir[c.seg] & BACKWARD) out.push([g.segA[c.seg], c.t * len]);
@@ -147,7 +202,7 @@ function exitsOf(g, c) {
 
 // Where a candidate is entered from: [vertex, metres from there to the spot].
 function entriesOf(g, c) {
-  const len = g.segLen[c.seg];
+  const len = g.segCost[c.seg];
   const out = [];
   if (g.segDir[c.seg] & FORWARD) out.push([g.segA[c.seg], c.t * len]);
   if (g.segDir[c.seg] & BACKWARD) out.push([g.segB[c.seg], (1 - c.t) * len]);
@@ -157,7 +212,7 @@ function entriesOf(g, c) {
 // Along the same segment, without leaving it, or Infinity.
 function sameSegment(g, a, b) {
   if (a.seg !== b.seg) return Infinity;
-  const len = g.segLen[a.seg];
+  const len = g.segCost[a.seg];
   const ahead = (b.t - a.t) * len;
   const dir = g.segDir[a.seg];
   if (ahead >= 0 && dir & FORWARD) return ahead;
@@ -200,7 +255,7 @@ function routesFrom(g, from, targets, bound) {
     if (wanted.has(v)) remaining--;
     for (let k = g.adjStart[v]; k < g.adjStart[v + 1]; k++) {
       const w = g.adjTo[k];
-      const nd = d + g.segLen[g.adjSeg[k]];
+      const nd = d + g.segCost[g.adjSeg[k]];
       if (nd > bound) continue;
       if (stamp[w] !== gen || nd < dist[w]) {
         stamp[w] = gen;
@@ -266,7 +321,23 @@ export function viterbi(g, points) {
     }
     steps = null;
   };
-  for (let i = 0; i < points.length; i++) {
+  // A new chain at point i: its candidates scored by how close they are.
+  const start = (i) => {
+    const cands = candidatesOf(g, points[i]);
+    const sigma = sigmaFor(points[i]);
+    return [{ index: i, cands, score: cands.map((c) => -0.5 * (c.d / sigma) ** 2), back: cands.map(() => -1) }];
+  };
+  let skipped = 0;
+  for (let i = 0; ; i++) {
+    // Fixes left out at the end, or before one far from every road, start a chain of their own.
+    if (skipped && (i === points.length || !candidatesOf(g, points[i]).length)) {
+      close();
+      i -= skipped;
+      skipped = 0;
+      steps = start(i);
+      continue;
+    }
+    if (i === points.length) break;
     const p = points[i];
     const cands = candidatesOf(g, p);
     if (!cands.length) {
@@ -300,11 +371,21 @@ export function viterbi(g, points) {
       });
     });
     if (score.every((s) => s === -Infinity)) {
-      // No road leads from the last fix to this one: end the chain, start again here.
+      // No road leads from the last fix to this one. A fix or two that the GPS put far off
+      // (between houses, beyond the search radius of the street it was on) are left out and the
+      // chain goes on with the next one. After that the chain ends, and a new one starts with
+      // the first fix left out.
+      if (skipped < TUNING.maxSkipped) {
+        skipped++;
+        continue;
+      }
       close();
-      steps = [{ index: i, cands, score: emission, back: cands.map(() => -1) }];
+      i -= skipped;
+      skipped = 0;
+      steps = start(i);
       continue;
     }
+    skipped = 0;
     // Keeps the numbers small over a long trace; only differences matter.
     const top = Math.max(...score);
     steps.push({ index: i, cands, score: score.map((s) => s - top), back });
@@ -313,14 +394,52 @@ export function viterbi(g, points) {
   return chains;
 }
 
+// Takes out the spots of a chain that are a short spur off the way between their neighbours: out
+// and back along the same road, at most spurM each way. A noisy fix a little behind the one
+// before, or a little up a side street, is put on the road there, and the way from spot to spot
+// would go there and back again; nobody walked that zigzag. One spot or two in a row, never
+// one that was kept, so a real turn back loses no more than the tip of it.
+export function withoutSpurs(g, points, chain) {
+  const maxM = TUNING.spurM[g.profile] ?? 0;
+  if (!(maxM > 0) || chain.length < 3) return chain;
+  // How much longer the way from a to c is through the spots between.
+  const detour = (a, between, c) => {
+    const pa = points[a.index], pc = points[c.index];
+    const bound = boundFor(Math.hypot(pc.x - pa.x, pc.y - pa.y)) + 2 * maxM;
+    const [direct] = routesFrom(g, a.cand, [c.cand], bound);
+    let via = 0;
+    let from = a;
+    for (const s of [...between, c]) {
+      via += routesFrom(g, from.cand, [s.cand], bound)[0];
+      from = s;
+    }
+    return via - direct;
+  };
+  const off = (d) => d > 1;
+  const short = (d) => d > 1 && d <= 2 * maxM;
+  const out = [chain[0]];
+  let k = 1;
+  while (k < chain.length - 1) {
+    const a = out[out.length - 1];
+    const b = chain[k];
+    if (short(detour(a, [b], chain[k + 1]))) k += 1;
+    // Two spots up a side street: both off the way, and the way through both short.
+    else if (k + 2 < chain.length && off(detour(a, [b], chain[k + 2])) && off(detour(a, [chain[k + 1]], chain[k + 2])) && short(detour(a, [b, chain[k + 1]], chain[k + 2]))) k += 2;
+    else out.push(chain[k++]);
+  }
+  out.push(chain[chain.length - 1]);
+  return out;
+}
+
 // The road geometry of one chain, [x, y] points, and its length.
 export function chainGeometry(g, points, chain) {
-  const out = [[chain[0].cand.x, chain[0].cand.y]];
-  for (let k = 1; k < chain.length; k++) {
-    const q = points[chain[k - 1].index];
-    const p = points[chain[k].index];
+  const spots = withoutSpurs(g, points, chain);
+  const out = [[spots[0].cand.x, spots[0].cand.y]];
+  for (let k = 1; k < spots.length; k++) {
+    const q = points[spots[k - 1].index];
+    const p = points[spots[k].index];
     const bound = boundFor(Math.hypot(p.x - q.x, p.y - q.y));
-    const part = routeGeometry(g, chain[k - 1].cand, chain[k].cand, bound);
+    const part = routeGeometry(g, spots[k - 1].cand, spots[k].cand, bound);
     for (const pt of part) {
       const last = out[out.length - 1];
       if (Math.abs(last[0] - pt[0]) > 0.05 || Math.abs(last[1] - pt[1]) > 0.05) out.push(pt);

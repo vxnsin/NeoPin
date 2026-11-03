@@ -393,6 +393,11 @@ export function initDb(file = config.dbPath) {
   if (!db.prepare("PRAGMA table_info(trip_paths)").all().some((c) => c.name === "algo")) {
     db.exec("ALTER TABLE trip_paths ADD COLUMN algo INTEGER NOT NULL DEFAULT 1");
   }
+  // Which matcher made it: "own", "osrm", or "fallback" for OSRM standing in while the own road
+  // tiles were not there yet (matched again by the own matcher once they are).
+  if (!db.prepare("PRAGMA table_info(trip_paths)").all().some((c) => c.name === "source")) {
+    db.exec("ALTER TABLE trip_paths ADD COLUMN source TEXT");
+  }
   // When the account went through the short tour of the app and of the dashboard, NULL for not yet.
   // Whoever had an account before the tours existed knows their way around already.
   if (!db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "tour_app_at")) {

@@ -58,6 +58,12 @@ function roadMatchMode() {
   return "own";
 }
 
+function roadsSource() {
+  const source = (process.env.ROADS_SOURCE ?? "").trim().toLowerCase();
+  if (["openfreemap", "overpass"].includes(source)) return source;
+  return process.env.ROADS_URL ? "overpass" : "openfreemap";
+}
+
 export const config = {
   version: pkg.version,
   commit: (process.env.NEOPIN_COMMIT || gitCommit() || "").slice(0, 40) || null,
@@ -88,9 +94,19 @@ export const config = {
   // Points per match request. The public FOSSGIS servers refuse more than ten (TooBig); an own
   // OSRM takes 100 by default (--max-matching-size).
   roadMatchMaxCoords: Math.max(4, Math.floor(Number(process.env.ROAD_MATCH_MAX_COORDS)) || 10),
-  // Where the own matcher gets its roads, an Overpass API asked for a few map tiles at a time;
-  // it only learns which areas were visited. ROADS=off asks nothing (stored tiles are still used).
-  roadDataUrl: envOff("ROADS") ? null : process.env.ROADS_URL || "https://overpass-api.de/api/interpreter",
+  // Where the own matcher gets its roads, one map tile at a time; the source only learns which
+  // areas were visited. "openfreemap": the vector tiles the map is drawn from, ROADS_URL is their
+  // TileJSON (or a tile URL with {z}, {x} and {y}). "overpass": an Overpass API at ROADS_URL.
+  // A ROADS_URL without ROADS_SOURCE is an Overpass, as before. ROADS=off asks nothing (stored
+  // tiles are still used).
+  roadsSource: roadsSource(),
+  roadDataUrl: envOff("ROADS")
+    ? null
+    : process.env.ROADS_URL || (roadsSource() === "overpass" ? "https://overpass-api.de/api/interpreter" : "https://tiles.openfreemap.org/planet"),
+  // With ROAD_MATCH=own, a trip whose road tiles are not there yet (or cannot be had) is snapped
+  // by the OSRM server at ROAD_MATCH_URL in the meantime, and again by the own matcher once they
+  // are. "off" keeps such a trip on its fixes until the tiles are there.
+  roadMatchFallback: !envOff("ROAD_MATCH_FALLBACK"),
   // Stored road tiles are asked for again after this many days.
   roadTileDays: Number(process.env.ROAD_TILE_DAYS) || 30,
   // Bus, tram and train lines in the timeline, from GTFS timetables. "off" turns it off.

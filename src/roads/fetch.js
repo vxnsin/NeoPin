@@ -1,22 +1,32 @@
 import zlib from "node:zlib";
 import { config } from "../config.js";
 import { getDb } from "../db.js";
-import { askOverpass } from "../overpass.js";
+import { askOverpass, userAgent } from "../overpass.js";
 import { HIGHWAYS } from "./graph.js";
+import { waysFromVectorTile } from "./vectorTiles.js";
 
-// The road network, from OpenStreetMap through Overpass, one map tile at a time (zoom 14,
-// about 1.5 km across in Germany). A tile is asked for the first time a trip touches it, kept
-// in SQLite and asked again after ROAD_TILE_DAYS. The roads of one trip are a few dozen tiles.
+// The road network of OpenStreetMap, one map tile at a time (zoom 14, about 1.5 km across in
+// Germany): by default from the vector tiles of OpenFreeMap (ROADS_SOURCE=openfreemap, the same
+// tiles the map is drawn from, a CDN that answers in a fraction of a second), or from an
+// Overpass API (ROADS_SOURCE=overpass). A tile is asked for the first time a trip touches it,
+// kept in SQLite and asked again after ROAD_TILE_DAYS. The roads of one trip are a few dozen tiles.
 
 export const TILE_ZOOM = 14;
-// Raised when what is stored per tile changes: older tiles count as missing.
-export const TILE_VERSION = 1;
-// A batch of tiles is one query; public servers often keep a query waiting for half a minute.
+// Raised when what is stored per tile changes: older tiles count as missing. 2: OpenFreeMap
+// tiles, vertices joined by position; the Overpass tiles of version 1 are asked for again.
+export const TILE_VERSION = 2;
+// A batch of tiles is one Overpass query; public servers often keep a query waiting for half a minute.
 const TILES_PER_QUERY = 12;
 const TILE_TIMEOUT_MS = 120_000;
+// Vector tiles come one request each, a few at a time, from a CDN.
+const VECTOR_PARALLEL = 4;
+const VECTOR_TIMEOUT_MS = 15_000;
+// The address of the tiles changes with every new planet build of OpenFreeMap; the TileJSON says
+// where they are and is asked again after this long, or when a tile is not found.
+const TILEJSON_MS = 6 * 3_600_000;
 // After a failure a tile waits this long, twice as long after each further one, up to MAX_RETRY_MS:
-// public Overpass servers ask for exponential backoff when they are full.
-const RETRY_MS = 10 * 60_000;
+// public Overpass servers ask for exponential backoff when they are full. A CDN is tried sooner.
+const RETRY_MS = { overpass: 10 * 60_000, openfreemap: 60_000 };
 const MAX_RETRY_MS = 6 * 3_600_000;
 // Decoded tiles kept in memory: one long trip, and a few more.
 const MEMORY_TILES = 96;
@@ -36,6 +46,9 @@ const KEEP_TAGS = new Set([
 
 let spacingMs = 1_000;
 let queue = Promise.resolve();
+let vectorRunning = 0;
+const vectorWaiting = [];
+let template = null;
 const inFlight = new Map();
 const failedAt = new Map();
 const memory = new Map();
@@ -158,26 +171,99 @@ function tilesOfWay(way, tiles) {
   });
 }
 
+function storeTile(layer, x, y, ways, now = Date.now()) {
+  getDb()
+    .prepare("INSERT OR REPLACE INTO road_tiles (layer, z, x, y, fetched_at, version, data) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(layer, TILE_ZOOM, x, y, now, TILE_VERSION, encodeTile(ways));
+  const key = tileKey(layer, x, y);
+  remember(key, ways);
+  failedAt.delete(key);
+}
+
 // Asks Overpass for a batch of tiles, one batch at a time with a pause in between, and stores
-// each tile. Resolves to the ways per tile key.
-function fetchBatch(layer, tiles) {
+// each tile.
+function overpassBatch(layer, tiles) {
   const run = queue.then(async () => {
     const elements = await askOverpass(overpassQuery(layer, tiles), { url: config.roadDataUrl, timeoutMs: TILE_TIMEOUT_MS });
     const perTile = new Map(tiles.map(([x, y]) => [tileKey(layer, x, y), []]));
     for (const way of waysFromOverpass(elements)) for (const [x, y] of tilesOfWay(way, tiles)) perTile.get(tileKey(layer, x, y)).push(way);
-    const insert = getDb().prepare(
-      "INSERT OR REPLACE INTO road_tiles (layer, z, x, y, fetched_at, version, data) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    );
     const now = Date.now();
-    for (const [x, y] of tiles) {
-      const key = tileKey(layer, x, y);
-      insert.run(layer, TILE_ZOOM, x, y, now, TILE_VERSION, encodeTile(perTile.get(key)));
-      remember(key, perTile.get(key));
-      failedAt.delete(key);
-    }
-    return perTile;
+    for (const [x, y] of tiles) storeTile(layer, x, y, perTile.get(tileKey(layer, x, y)), now);
   });
   queue = run.catch(() => {}).then(() => pause(spacingMs));
+  return run;
+}
+
+const isTemplate = (url) => /\{z\}/.test(url);
+
+// Where the vector tiles are, a URL with {z}, {x} and {y}: ROADS_URL itself when it is one,
+// else the first of the TileJSON it points at. Tiles asked for at the same time share one
+// request for it; `outdated` (an address that led to a missing tile) asks for it again, once.
+function tileTemplate(outdated = null) {
+  const url = config.roadDataUrl;
+  if (isTemplate(url)) return Promise.resolve(url);
+  const known = template?.url === url && Date.now() - template.at < TILEJSON_MS && (!outdated || template.tiles !== outdated);
+  if (known) return template.promise;
+  const entry = { url, at: Date.now(), tiles: null };
+  entry.promise = (async () => {
+    const res = await fetch(url, { headers: { "user-agent": userAgent() }, signal: AbortSignal.timeout(VECTOR_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`Road tiles: the TileJSON answered ${res.status}`);
+    const tiles = (await res.json().catch(() => null))?.tiles?.[0];
+    if (typeof tiles !== "string" || !isTemplate(tiles)) throw new Error("Road tiles: the TileJSON names no tiles");
+    entry.tiles = tiles;
+    return tiles;
+  })();
+  // A failed request is not kept: the next tile asks again.
+  entry.promise.catch(() => template === entry && (template = null));
+  template = entry;
+  return entry.promise;
+}
+
+async function vectorTile(x, y, retried = false) {
+  const tiles = await tileTemplate();
+  const url = tiles.replace("{z}", TILE_ZOOM).replace("{x}", x).replace("{y}", y);
+  const res = await fetch(url, { headers: { "user-agent": userAgent() }, signal: AbortSignal.timeout(VECTOR_TIMEOUT_MS) });
+  // A planet build that is gone: once more with the address the TileJSON names now.
+  if (res.status === 404 && !retried && !isTemplate(config.roadDataUrl)) {
+    await tileTemplate(tiles);
+    return vectorTile(x, y, true);
+  }
+  // No content: nothing mapped there, the sea.
+  if (res.status === 204) return Buffer.alloc(0);
+  if (!res.ok) throw new Error(`Road tiles answered ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// A few vector tiles at a time.
+function limited(task) {
+  return new Promise((resolve, reject) => {
+    const start = () => {
+      vectorRunning++;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          vectorRunning--;
+          vectorWaiting.shift()?.();
+        });
+    };
+    if (vectorRunning < VECTOR_PARALLEL) start();
+    else vectorWaiting.push(start);
+  });
+}
+
+// One vector tile, decoded and stored: its roads and its rails, whichever layer was asked for.
+function vectorBatch(layer, [[x, y]]) {
+  return limited(async () => {
+    const ways = waysFromVectorTile(await vectorTile(x, y), x, y, TILE_ZOOM);
+    const now = Date.now();
+    for (const [name, list] of Object.entries(ways)) storeTile(name, x, y, list, now);
+  });
+}
+
+// One request for some tiles, kept track of: whoever asks for one of them meanwhile waits for
+// the same request, a failure holds them back for a while.
+function fetchBatch(layer, tiles) {
+  const run = (config.roadsSource === "overpass" ? overpassBatch : vectorBatch)(layer, tiles);
   const settled = run
     .catch((error) => {
       for (const [x, y] of tiles) {
@@ -196,14 +282,22 @@ function fetchBatch(layer, tiles) {
 // Gets the tiles that are not being asked for already, in batches.
 function fetchTiles(layer, tiles) {
   const fresh = tiles.filter(([x, y]) => !inFlight.has(tileKey(layer, x, y)));
-  for (let i = 0; i < fresh.length; i += TILES_PER_QUERY) fetchBatch(layer, fresh.slice(i, i + TILES_PER_QUERY));
+  const size = config.roadsSource === "overpass" ? TILES_PER_QUERY : 1;
+  for (let i = 0; i < fresh.length; i += size) fetchBatch(layer, fresh.slice(i, i + size));
   return Promise.all(tiles.map(([x, y]) => inFlight.get(tileKey(layer, x, y))));
 }
 
 export const roadDataEnabled = () => Boolean(config.roadDataUrl);
 function failedRecently(layer, [x, y]) {
   const failed = failedAt.get(tileKey(layer, x, y));
-  return Boolean(failed) && Date.now() - failed.at < Math.min(MAX_RETRY_MS, RETRY_MS * 2 ** (failed.count - 1));
+  const base = RETRY_MS[config.roadsSource] ?? RETRY_MS.overpass;
+  return Boolean(failed) && Date.now() - failed.at < Math.min(MAX_RETRY_MS, base * 2 ** (failed.count - 1));
+}
+
+// Whether every one of these tiles is stored (an old one too), without reading them.
+export function haveTiles(layer, tiles) {
+  const row = getDb().prepare("SELECT version FROM road_tiles WHERE layer = ? AND z = ? AND x = ? AND y = ?");
+  return tiles.every(([x, y]) => Number(row.get(layer, TILE_ZOOM, x, y)?.version) === TILE_VERSION);
 }
 
 // The ways of all these tiles. Missing ones are asked for first; a tile that failed a moment
@@ -235,7 +329,7 @@ export async function waysOfTiles(layer, tiles) {
 // Asks for every tile of a trip that is not stored yet, all batches queued at once, and waits
 // for them. Throws like waysOfTiles.
 export async function ensureTiles(layer, tiles) {
-  const missing = tiles.filter(([x, y]) => !storedTile(layer, x, y));
+  const missing = tiles.filter((tile) => !haveTiles(layer, [tile]));
   if (!missing.length) return;
   if (!roadDataEnabled()) throw new Error("Road data is turned off (ROADS=off)");
   if (missing.some((tile) => failedRecently(layer, tile))) throw new Error("Road tiles failed recently");
@@ -245,6 +339,9 @@ export async function ensureTiles(layer, tiles) {
 export function resetRoadTiles({ spacing = 1_000 } = {}) {
   spacingMs = spacing;
   queue = Promise.resolve();
+  vectorRunning = 0;
+  vectorWaiting.length = 0;
+  template = null;
   inFlight.clear();
   failedAt.clear();
   memory.clear();

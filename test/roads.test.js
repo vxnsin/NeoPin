@@ -76,10 +76,12 @@ beforeEach(async () => {
   luis = await s.account("luis");
   overpass = await fakeOverpass();
   config.roadMatch = "own";
+  config.roadsSource = "overpass";
   config.roadDataUrl = overpass.url;
 });
 afterEach(async () => {
   config.roadMatch = "off";
+  config.roadsSource = "openfreemap";
   config.roadDataUrl = null;
   await overpass.close();
   await s.stop();
@@ -191,6 +193,9 @@ test("old tiles are used and refreshed in the background, tiles of an older vers
   assert.equal(theTrip(await timeline()).pathSource, "road", "a month-old map is still a map");
   for (let i = 0; i < 300 && overpass.calls.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
   assert.equal(overpass.calls.length, 2, "and it is asked for again");
+  // The refresh is stored before the next step, or it would overwrite the older version below.
+  const stale = () => Number(getDb().prepare("SELECT COUNT(*) AS n FROM road_tiles WHERE fetched_at < ?").get(Date.now() - 86_400_000).n);
+  for (let i = 0; i < 300 && stale() > 0; i++) await new Promise((r) => setTimeout(r, 10));
 
   getDb().prepare("UPDATE road_tiles SET version = ?").run(TILE_VERSION - 1);
   getDb().prepare("DELETE FROM trip_paths").run();
